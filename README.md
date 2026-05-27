@@ -1,5 +1,7 @@
 # Salesforce Duplicate Reviewer
 
+[![Checks](https://github.com/alexremington/salesforce-duplicate-reviewer-shareable/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/alexremington/salesforce-duplicate-reviewer-shareable/actions/workflows/checks.yml)
+
 Local-first browser UI for reviewing likely duplicate Salesforce Account and Contact records.
 
 ## Requirements
