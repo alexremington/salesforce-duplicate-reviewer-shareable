@@ -38,3 +38,20 @@ git switch main
 ```
 
 Do not merge `main` into `shareable` without reviewing the diff for private details first.
+
+## Branch Protection Decision
+
+The public mirror `main` branch is protected with required checks. The private repo cannot currently enforce private branch protection on the available GitHub plan, so private `main` and `shareable` rely on local checks plus GitHub Actions after push.
+
+If private branch protection becomes available, require `Repository checks` and `UI smoke test` on both private branches. Until then, run the checks before pushing and keep public mirror pushes deliberate.
+
+## Releases
+
+Create releases from known-good tags:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Push the same tag to the public mirror only when the tagged commit is public-safe.

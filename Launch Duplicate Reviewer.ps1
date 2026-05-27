@@ -1,0 +1,68 @@
+param()
+
+$ErrorActionPreference = 'Stop'
+$ProjectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+function Import-DotEnv {
+  param([string]$Path)
+  if (-not (Test-Path $Path)) { return }
+
+  foreach ($line in Get-Content $Path) {
+    $trimmed = $line.Trim()
+    if (-not $trimmed -or $trimmed.StartsWith('#') -or -not $trimmed.Contains('=')) { continue }
+
+    $parts = $trimmed.Split('=', 2)
+    $key = $parts[0].Trim()
+    if ($key -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') { continue }
+    if ([Environment]::GetEnvironmentVariable($key, 'Process')) { continue }
+
+    $value = $parts[1].Trim()
+    if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) {
+      $value = $value.Substring(1, $value.Length - 2)
+    }
+    [Environment]::SetEnvironmentVariable($key, $value, 'Process')
+  }
+}
+
+Import-DotEnv (Join-Path $ProjectDir '.env')
+
+$Port = if ($env:DUPLICATE_REVIEWER_PORT) { $env:DUPLICATE_REVIEWER_PORT } elseif ($env:PORT) { $env:PORT } else { '5180' }
+$Url = "http://127.0.0.1:$Port"
+$LogDir = Join-Path $ProjectDir 'logs'
+$OutLog = Join-Path $LogDir 'duplicate-reviewer.out.log'
+$ErrLog = Join-Path $LogDir 'duplicate-reviewer.err.log'
+
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+
+function Test-DuplicateReviewer {
+  try {
+    Invoke-WebRequest -Uri "$Url/api/health" -UseBasicParsing -TimeoutSec 2 | Out-Null
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+if (-not (Test-DuplicateReviewer)) {
+  Write-Host 'Starting Salesforce Duplicate Reviewer...'
+  Start-Process `
+    -FilePath 'cmd.exe' `
+    -ArgumentList "/c set PORT=$Port&& npm start >> `"$OutLog`" 2>> `"$ErrLog`"" `
+    -WorkingDirectory $ProjectDir `
+    -WindowStyle Hidden
+} else {
+  Write-Host 'Salesforce Duplicate Reviewer is already running.'
+}
+
+Write-Host "Waiting for $Url..."
+for ($attempt = 1; $attempt -le 40; $attempt += 1) {
+  if (Test-DuplicateReviewer) {
+    Write-Host "Opening $Url"
+    Start-Process $Url
+    exit 0
+  }
+
+  Start-Sleep -Milliseconds 250
+}
+
+Write-Error "The duplicate reviewer did not become ready in time. Stdout: $OutLog Stderr: $ErrLog"

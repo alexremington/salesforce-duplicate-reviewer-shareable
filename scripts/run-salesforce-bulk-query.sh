@@ -6,6 +6,10 @@ export SF_USE_GENERIC_UNIX_KEYCHAIN="${SF_USE_GENERIC_UNIX_KEYCHAIN:-true}"
 
 SCRIPT_DIR="$(cd "$(dirname "${0}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+source "${SCRIPT_DIR}/load-env.sh"
+load_project_env "${PROJECT_DIR}/.env"
+
 ORG_ALIAS="${SF_ORG_ALIAS:-politico}"
 INSTANCE_URL="${SF_INSTANCE_URL:-https://politico.my.salesforce.com}"
 API_VERSION="${SF_API_VERSION:-v64.0}"

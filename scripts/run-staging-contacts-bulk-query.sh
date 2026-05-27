@@ -5,6 +5,9 @@ unsetopt BG_NICE 2>/dev/null || true
 SCRIPT_DIR="$(cd "$(dirname "${0}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+source "${SCRIPT_DIR}/load-env.sh"
+load_project_env "${PROJECT_DIR}/.env"
+
 export SF_USE_GENERIC_UNIX_KEYCHAIN="${SF_USE_GENERIC_UNIX_KEYCHAIN:-true}"
 export SF_ORG_ALIAS="${SF_ORG_ALIAS:-politico-staging}"
 export SF_INSTANCE_URL="${SF_INSTANCE_URL:-https://politico--staging.sandbox.my.salesforce.com}"

@@ -4,11 +4,31 @@
 
 A static browser UI for reviewing possible duplicate Salesforce Contact and Account records from CSV exports.
 
-For local setup, see [SETUP.md](SETUP.md).
+For local setup, see [SETUP.md](SETUP.md). For teammate handoff, see [TEAM-HANDOFF.md](TEAM-HANDOFF.md).
 
 ## Open The App
 
-Open `index.html` in a browser. No server or package install is required.
+Open `index.html` in a browser. No server or package install is required for CSV review.
+
+To use server-backed features such as Salesforce merge actions or staging auto-load URLs, start the local server:
+
+macOS:
+
+```text
+Double-click: Launch Duplicate Reviewer.command
+```
+
+Windows PowerShell:
+
+```powershell
+.\Launch Duplicate Reviewer.ps1
+```
+
+Manual start:
+
+```bash
+npm start
+```
 
 Click `Choose CSV`, then choose whether the import is a `Contacts` or `Accounts` file. Recent files remember which object type was used when they were loaded, so the same file can be reopened with the correct object type.
 

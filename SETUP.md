@@ -8,6 +8,28 @@
 
 ## Run Locally
 
+Copy the example config if you need Salesforce CLI-backed features such as merge actions or helper scripts:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` for your own Salesforce org alias and instance URL. Do not commit `.env`.
+
+macOS:
+
+```text
+Double-click: Launch Duplicate Reviewer.command
+```
+
+Windows PowerShell:
+
+```powershell
+.\Launch Duplicate Reviewer.ps1
+```
+
+Manual start:
+
 ```bash
 npm start
 ```
@@ -23,6 +45,7 @@ The browser UI can also load CSV files directly through the file picker.
 ## Team Notes
 
 - Keep generated exports in `Output/`; Git ignores that folder.
-- Keep personal org aliases, report IDs, access tokens, and machine paths out of committed files.
+- Keep personal org aliases, report IDs, access tokens, and machine paths in `.env` or another local-only file.
 - Run `npm run check` before committing changes.
 - Run `npm run smoke:ui` after UI changes.
+- Publish team-ready versions from GitHub Releases instead of asking teammates to pull an arbitrary branch.

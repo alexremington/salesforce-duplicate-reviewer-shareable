@@ -15,6 +15,14 @@ const outDir = process.env.PLAYWRIGHT_SMOKE_OUT_DIR || path.join(os.tmpdir(), "d
 
 async function run() {
   await fs.mkdir(outDir, { recursive: true });
+  const csvPath = path.join(outDir, "contacts-smoke.csv");
+  await fs.writeFile(csvPath, [
+    "Id,First Name,Last Name,Company,Email",
+    "003T00000000001,Maya,Rodriguez,Northstar Analytics,maya.rodriguez@example.com",
+    "003T00000000002,Maya,Rodriquez,Northstar Analytics Inc.,maya.rodriguez@example.com",
+    "003T00000000003,John,Pierce,CivicWire,jpierce@example.com",
+    "003T00000000004,John,Pierce,Civic Wire,john.pierce@example.com"
+  ].join("\n"));
 
   const browser = await chromium.launch();
   const messages = [];
@@ -31,7 +39,12 @@ async function run() {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.screenshot({ path: path.join(outDir, "desktop-empty.png"), fullPage: false });
 
-    await page.getByRole("button", { name: "Demo Data" }).click();
+    const emptyChooseVisible = await page.locator('[data-empty-action="choose-csv"]').isVisible();
+    const emptyDemoVisible = await page.locator('[data-empty-action="demo-data"]').isVisible();
+    await page.locator('[data-empty-action="demo-data"]').click();
+    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+
+    await page.locator("#csvInput").setInputFiles(csvPath);
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
     await page.locator(".group-item-main").first().click();
     await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
@@ -39,6 +52,11 @@ async function run() {
 
     const duplicateBadges = await page.locator(".record-decision-badge.duplicate").count();
     await page.screenshot({ path: path.join(outDir, "desktop-duplicate.png"), fullPage: false });
+
+    await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Not Duplicate", exact: true }).click();
+    await page.locator(".record-decision-badge.not-duplicate").first().waitFor({ state: "visible", timeout: 5000 });
+    const notDuplicateBadges = await page.locator(".record-decision-badge.not-duplicate").count();
+    await page.screenshot({ path: path.join(outDir, "desktop-not-duplicate.png"), fullPage: false });
 
     await page.getByRole("button", { name: "Shortcuts" }).click();
     await page.getByRole("dialog", { name: "Keyboard shortcuts" }).waitFor({ state: "visible", timeout: 5000 });
@@ -56,14 +74,27 @@ async function run() {
       bodyScrollWidth: document.body.scrollWidth
     }));
 
+    if (!emptyChooseVisible) throw new Error("Expected empty-state Choose CSV action to be visible.");
+    if (!emptyDemoVisible) throw new Error("Expected empty-state Load Demo action to be visible.");
     if (!duplicateBadges) throw new Error("Expected at least one Duplicate decision badge.");
+    if (!notDuplicateBadges) throw new Error("Expected at least one Not Duplicate decision badge.");
     if (!shortcutsVisible) throw new Error("Expected shortcuts modal to be visible.");
     if (layout.pageScrollWidth > layout.viewportWidth || layout.bodyScrollWidth > layout.viewportWidth) {
       throw new Error(`Unexpected horizontal overflow: ${JSON.stringify(layout)}`);
     }
     if (messages.length) throw new Error(`Browser console warnings/errors: ${messages.join(" | ")}`);
 
-    console.log(JSON.stringify({ ok: true, baseUrl, duplicateBadges, shortcutsVisible, layout, screenshotsDir: outDir }, null, 2));
+    console.log(JSON.stringify({
+      ok: true,
+      baseUrl,
+      emptyChooseVisible,
+      emptyDemoVisible,
+      duplicateBadges,
+      notDuplicateBadges,
+      shortcutsVisible,
+      layout,
+      screenshotsDir: outDir
+    }, null, 2));
   } finally {
     await browser.close();
   }

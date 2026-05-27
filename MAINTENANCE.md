@@ -9,7 +9,7 @@ This repo uses a private working branch and a public-safe branch.
 - `origin`: private GitHub repo.
 - `public`: public mirror repo.
 
-GitHub branch protection is available on the public mirror. The private repo currently cannot use branch protection or rulesets without a GitHub plan upgrade, so local checks and deliberate push commands matter.
+GitHub branch protection is available on the public mirror. The private repo currently cannot use branch protection or rulesets without a GitHub plan upgrade, so local checks and deliberate push commands matter. If private protection becomes available, require `Repository checks` and `UI smoke test`.
 
 ## Private Changes
 
@@ -54,4 +54,13 @@ Review `git diff origin/shareable..shareable` before pushing the public mirror.
 
 - `npm run check`: syntax checks and shareable-branch safety scan.
 - `npm run check:shareable`: public-safety scan for the selected ref.
-- `npm run smoke:ui`: Playwright smoke test for duplicate badges, shortcuts, and mobile layout.
+- `npm run smoke:ui`: Playwright smoke test for CSV loading, duplicate/not-duplicate badges, shortcuts, empty states, and mobile layout.
+
+## Releases
+
+Tags that start with `v` run the release workflow and publish a source archive:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
