@@ -19,7 +19,8 @@ Replace the app folder with the latest release archive, or pull the latest appro
 ## Troubleshooting
 
 - If the app does not start, run `node --version` and confirm it is 18 or newer.
-- If merge actions fail, run `sf org display --target-org <alias> --json` to confirm Salesforce CLI authentication.
+- If Contact merge actions fail, run `sf org display --target-org <alias> --json` to confirm Salesforce CLI authentication.
+- Account merge is intentionally disabled; use Account review decisions for evaluation/export only.
 - If a CSV does not load, try the demo data. If demo data works, inspect the CSV headers and encoding.
 
 ## Maintainer Checklist

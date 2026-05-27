@@ -618,6 +618,7 @@ const state = {
   highRecallMode: false,
   sortDirection: "desc",
   hideLabeledGroups: false,
+  reviewMode: "evaluate",
   trainingConfidence: "high",
   search: "",
   recentFiles: []
@@ -667,6 +668,7 @@ const els = {
   objectLabel: document.getElementById("objectLabel"),
   detailTitle: document.getElementById("detailTitle"),
   decisionStatus: document.getElementById("decisionStatus"),
+  reviewModeButtons: [...document.querySelectorAll("[data-review-mode]")],
   detailSurface: document.getElementById("detailSurface"),
   previousGroupButton: document.getElementById("previousGroupButton"),
   nextGroupButton: document.getElementById("nextGroupButton"),
@@ -688,6 +690,10 @@ const els = {
 
 els.chooseCsvButton.addEventListener("click", () => {
   setCsvObjectMenuOpen(els.csvObjectMenu.hidden);
+});
+
+els.reviewModeButtons.forEach((button) => {
+  button.addEventListener("click", () => setReviewMode(button.dataset.reviewMode));
 });
 
 els.csvInput.addEventListener("change", (event) => {
@@ -794,6 +800,14 @@ els.groupList.addEventListener("change", (event) => {
 els.detailSurface.addEventListener("change", (event) => {
   if (event.target.classList?.contains("field-resolution-select")) {
     setFieldResolution(event.target.dataset.groupKey, event.target.dataset.field, event.target.value);
+    return;
+  }
+  if (event.target.classList?.contains("merge-master-radio")) {
+    setMergeMasterSelection(event.target.dataset.groupKey, event.target.value);
+    return;
+  }
+  if (event.target.classList?.contains("merge-field-radio")) {
+    setMergeFieldResolution(event.target.dataset.groupKey, event.target.dataset.field, event.target.value);
     return;
   }
   if (event.target.classList?.contains("merge-master-select")) {
@@ -1493,6 +1507,7 @@ function serializeCurrentReviewState() {
     trainingLabels: [...state.trainingLabels.entries()],
     decisions: [...state.decisions.entries()],
     mergeResults: [...state.mergeResults.entries()],
+    mergeMasterSelections: [...mergeMasterSelections.entries()],
     fieldResolutions: [...state.fieldResolutions.entries()],
     separatedRecords: [...state.separatedRecords.entries()].map(([groupKey, recordKeys]) => [
       groupKey,
@@ -1571,6 +1586,7 @@ function applySavedReviewState(record) {
     labels: restoreTrainingLabels(record.trainingLabels),
     decisions: restoreDecisions(record.decisions),
     mergeResults: restoreMergeResults(record.mergeResults),
+    mergeMasterSelections: restoreMergeMasterSelections(record.mergeMasterSelections),
     fieldResolutions: restoreFieldResolutions(record.fieldResolutions),
     separatedRecords: restoreSeparatedRecords(record.separatedRecords)
   };
@@ -1647,6 +1663,28 @@ function restoreMergeResults(entries = []) {
   return count;
 }
 
+function restoreMergeMasterSelections(entries = []) {
+  if (!entries.length) return 0;
+  const groupsByKey = new Map(state.groups.map((group) => [group.key, group]));
+  let count = 0;
+
+  entries.forEach((entry) => {
+    if (!Array.isArray(entry)) return;
+    const [groupKey, value] = entry;
+    const group = groupsByKey.get(groupKey);
+    const id = normalizeSalesforceIdForMerge(value);
+    if (!group || !id) return;
+
+    const validIds = new Set(group.records.map((record) => normalizeSalesforceIdForMerge(salesforceId(record))).filter(Boolean));
+    if (!validIds.has(id)) return;
+
+    mergeMasterSelections.set(groupKey, id);
+    count += 1;
+  });
+
+  return count;
+}
+
 function sanitizeMergeResult(result) {
   return {
     status: result.status,
@@ -1716,6 +1754,9 @@ function restoredReviewStateStatus(counts) {
   }
   if (counts.mergeResults) {
     parts.push(`${formatNumber(counts.mergeResults)} merge ${counts.mergeResults === 1 ? "result" : "results"}`);
+  }
+  if (counts.mergeMasterSelections) {
+    parts.push(`${formatNumber(counts.mergeMasterSelections)} merge ${counts.mergeMasterSelections === 1 ? "master" : "masters"}`);
   }
   if (counts.fieldResolutions) {
     parts.push(`${formatNumber(counts.fieldResolutions)} field ${counts.fieldResolutions === 1 ? "choice" : "choices"}`);
@@ -4237,6 +4278,11 @@ function findGroupByKey(groupKey) {
 }
 
 function renderDetail() {
+  if (state.objectType === "account" && state.reviewMode === "merge") {
+    state.reviewMode = "evaluate";
+  }
+  updateReviewModeControls();
+
   const group = findGroupByKey(state.selectedGroupKey);
   const hasGroup = Boolean(group);
   const activeRecords = group ? getActiveGroupRecords(group) : [];
@@ -4300,29 +4346,73 @@ function renderDetail() {
   els.detailTitle.textContent = `${OBJECT_CONFIG[state.objectType].singular} group ${group.id}`;
   els.detailSurface.innerHTML = `
     <div class="detail-layout">
-      <div class="pair-summary">
-        <div>
-          <strong>${group.score} match score</strong>
-          <div class="match-meta">${group.matchedFieldPercent}% fields matched · min pair ${group.minPairScore}</div>
-          <div class="reason-list">
-            ${group.reasons.map((reason) => `<span>${escapeHtml(reason)}</span>`).join("")}
-          </div>
-        </div>
-        <div class="pair-summary-pills">
-          ${renderDecisionBadge(currentDecision, "detail-decision-pill")}
-          <span class="match-pill ${group.type}">${group.type}</span>
+      ${renderPairSummary(group, currentDecision)}
+      ${state.reviewMode === "merge"
+        ? renderMergeWorkspace(group, activeRecords, separatedRecords, currentDecision)
+        : renderEvaluateWorkspace(group, bestPair, activeRecords, separatedRecords)}
+    </div>
+  `;
+}
+
+function setReviewMode(mode) {
+  const nextMode = mode === "merge" ? "merge" : "evaluate";
+  if (nextMode === "merge" && state.objectType === "account") return;
+  if (state.reviewMode === nextMode) return;
+  state.reviewMode = nextMode;
+  renderDetail();
+}
+
+function updateReviewModeControls() {
+  els.reviewModeButtons.forEach((button) => {
+    const mode = button.dataset.reviewMode === "merge" ? "merge" : "evaluate";
+    const active = state.reviewMode === mode;
+    const disabled = mode === "merge" && state.objectType === "account";
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+    button.disabled = disabled;
+    button.title = disabled
+      ? "Account merge is disabled. Accounts can still be evaluated."
+      : mode === "merge"
+        ? "Prepare and run Contact merges."
+        : "Evaluate model output and label pairs.";
+  });
+}
+
+function renderPairSummary(group, currentDecision) {
+  return `
+    <div class="pair-summary">
+      <div>
+        <strong>${group.score} match score</strong>
+        <div class="match-meta">${group.matchedFieldPercent}% fields matched · min pair ${group.minPairScore}</div>
+        <div class="reason-list">
+          ${group.reasons.map((reason) => `<span>${escapeHtml(reason)}</span>`).join("")}
         </div>
       </div>
-      ${renderTrainingLabeler(group)}
-      ${renderSalesforceMergePanel(group, activeRecords, currentDecision)}
-      <div class="record-strip">
-        ${activeRecords.map((record) => renderRecordCard(record, group, false, activeRecords.length)).join("")}
-      </div>
-      ${separatedRecords.length ? renderSeparatedRecords(group, separatedRecords) : ""}
-      <div class="comparison-table-wrap">
-        ${renderComparisonTable(group, bestPair)}
+      <div class="pair-summary-pills">
+        ${renderDecisionBadge(currentDecision, "detail-decision-pill")}
+        <span class="match-pill ${group.type}">${group.type}</span>
       </div>
     </div>
+  `;
+}
+
+function renderEvaluateWorkspace(group, bestPair, activeRecords, separatedRecords) {
+  return `
+    ${renderTrainingLabeler(group)}
+    <div class="record-strip">
+      ${activeRecords.map((record) => renderRecordCard(record, group, false, activeRecords.length)).join("")}
+    </div>
+    ${separatedRecords.length ? renderSeparatedRecords(group, separatedRecords) : ""}
+    <div class="comparison-table-wrap">
+      ${renderComparisonTable(group, bestPair)}
+    </div>
+  `;
+}
+
+function renderMergeWorkspace(group, activeRecords, separatedRecords, currentDecision) {
+  return `
+    ${renderSalesforceMergePanel(group, activeRecords, currentDecision)}
+    ${separatedRecords.length ? renderSeparatedRecords(group, separatedRecords) : ""}
   `;
 }
 
@@ -4420,27 +4510,51 @@ function renderTrainingPairCard(record, title) {
 }
 
 function renderSalesforceMergePanel(group, activeRecords, currentDecision) {
+  if (state.objectType !== "contact") return renderAccountMergeDisabledPanel();
+
   const mergeState = getMergeState(group, activeRecords, currentDecision);
   const result = state.mergeResults.get(group.key);
   const confirmation = mergeConfirmations.get(group.key) || "";
+  const resolutionContext = createFieldResolutionContext(group, activeRecords);
+  const overrideCount = countMergeFieldOverrides(group, activeRecords, mergeState, resolutionContext);
 
   return `
     <section class="salesforce-merge-panel ${escapeHtml(mergeState.statusClass)}" aria-label="Salesforce merge">
       <div class="salesforce-merge-header">
         <div>
-          <span>Salesforce merge</span>
+          <span>Contact merge</span>
           <strong>${escapeHtml(mergeState.title)}</strong>
           <em>${escapeHtml(mergeState.description)}</em>
         </div>
         <span class="merge-status-pill ${escapeHtml(mergeState.statusClass)}">${escapeHtml(mergeState.statusLabel)}</span>
       </div>
+      <div class="merge-readiness-grid">
+        <div class="merge-readiness-card">
+          <span>Master baseline</span>
+          <strong>${escapeHtml(mergeState.selectedRecord ? displayName(mergeState.selectedRecord) : "No master selected")}</strong>
+          <em>${escapeHtml(mergeState.selectedId || "Choose a Contact master")}</em>
+        </div>
+        <div class="merge-readiness-card">
+          <span>Field overrides</span>
+          <strong>${formatNumber(overrideCount)}</strong>
+          <em>${overrideCount === 1 ? "field differs from the master" : "fields differ from the master"}</em>
+        </div>
+        <div class="merge-readiness-card">
+          <span>Duplicates</span>
+          <strong>${formatNumber(mergeState.mergeRecords.length)}</strong>
+          <em>will merge into the master</em>
+        </div>
+      </div>
+      ${renderMergeMatrix(group, activeRecords, mergeState, resolutionContext)}
+      <div class="merge-preview">
+        <span>Duplicate Contacts to merge into master</span>
+        <div class="merge-id-list">
+          ${mergeState.mergeRecords.length
+            ? mergeState.mergeRecords.map(renderMergeRecordChip).join("")
+            : '<em class="merge-empty">No duplicate Contacts selected</em>'}
+        </div>
+      </div>
       <div class="merge-control-grid">
-        <label class="merge-control">
-          <span>Master record</span>
-          <select class="merge-master-select" data-group-key="${escapeHtml(group.key)}" ${mergeState.locked ? "disabled" : ""}>
-            ${activeRecords.map((record) => renderMergeMasterOption(record, mergeState)).join("")}
-          </select>
-        </label>
         <label class="merge-control">
           <span>Confirm</span>
           <input
@@ -4456,17 +4570,9 @@ function renderSalesforceMergePanel(group, activeRecords, currentDecision) {
           />
         </label>
       </div>
-      <div class="merge-preview">
-        <span>Duplicate records to merge into master</span>
-        <div class="merge-id-list">
-          ${mergeState.mergeRecords.length
-            ? mergeState.mergeRecords.map(renderMergeRecordChip).join("")
-            : '<em class="merge-empty">No duplicate records selected</em>'}
-        </div>
-      </div>
       <p class="merge-warning">
-        This keeps the selected master record's field values and asks Salesforce to move related records from duplicates to the master.
-        Accepted values in this reviewer remain review/export guidance and are not written as field updates.
+        Salesforce merge keeps the selected master Contact and reparents related records from duplicate Contacts.
+        Field choices here document controlling values for review/export; this merge action does not write field updates before merging.
       </p>
       ${result ? renderMergeResult(result) : ""}
       <div class="merge-actions">
@@ -4478,6 +4584,24 @@ function renderSalesforceMergePanel(group, activeRecords, currentDecision) {
           ${mergeState.canSubmit ? "" : "disabled"}
         >${escapeHtml(mergeState.buttonLabel)}</button>
       </div>
+    </section>
+  `;
+}
+
+function renderAccountMergeDisabledPanel() {
+  return `
+    <section class="salesforce-merge-panel blocked" aria-label="Account merge disabled">
+      <div class="salesforce-merge-header">
+        <div>
+          <span>Account merge disabled</span>
+          <strong>Accounts stay in Evaluate mode</strong>
+          <em>Account merges are intentionally blocked because downstream Finance dependencies require separate business logic.</em>
+        </div>
+        <span class="merge-status-pill blocked">Disabled</span>
+      </div>
+      <p class="merge-warning">
+        You can still score Account matches, mark groups Duplicate or Not Duplicate, label pairs, and export review decisions.
+      </p>
     </section>
   `;
 }
@@ -4494,7 +4618,8 @@ function getMergeState(group, activeRecords, currentDecision) {
   const selectedId = validIds.has(mergeMasterSelections.get(group.key))
     ? mergeMasterSelections.get(group.key)
     : recommendedId || activeRecordsWithIds.find(({ id }) => id)?.id || "";
-  const expectedPrefix = state.objectType === "account" ? "001" : "003";
+  const selectedRecord = activeRecordsWithIds.find(({ id }) => id === selectedId)?.record || null;
+  const expectedPrefix = "003";
   const invalidRecords = activeRecordsWithIds.filter(({ id }) => !id || !id.startsWith(expectedPrefix));
   const mergeRecords = activeRecordsWithIds.filter(({ id }) => id && id !== selectedId);
   const result = state.mergeResults.get(group.key);
@@ -4513,6 +4638,7 @@ function getMergeState(group, activeRecords, currentDecision) {
     acceptedValues,
     recommendedId,
     selectedId,
+    selectedRecord,
     mergeRecords,
     invalidRecords,
     inFlight,
@@ -4521,8 +4647,8 @@ function getMergeState(group, activeRecords, currentDecision) {
     buttonLabel: inFlight ? "Merging..." : alreadyMerged ? "Merged" : "Merge in Salesforce",
     title: alreadyMerged
       ? `Merged into ${result.masterId || selectedId}`
-      : `Merge ${formatNumber(Math.max(0, activeRecords.length - 1))} ${activeRecords.length === 2 ? "record" : "records"}`,
-    description: blockedReason || "Marking this group as Duplicate plus typing MERGE enables the server-side Salesforce merge.",
+      : `Merge ${formatNumber(Math.max(0, activeRecords.length - 1))} duplicate ${activeRecords.length === 2 ? "Contact" : "Contacts"}`,
+    description: blockedReason || "Mark this group Duplicate, choose a master Contact, review field overrides, then type MERGE.",
     statusClass: mergeStatusClass(result, blockedReason, inFlight),
     statusLabel: mergeStatusLabel(result, blockedReason, inFlight)
   };
@@ -4530,11 +4656,12 @@ function getMergeState(group, activeRecords, currentDecision) {
 
 function mergeBlockedReason({ activeRecords, currentDecision, selectedId, invalidRecords, mergeRecords, alreadyMerged }) {
   if (alreadyMerged) return "";
+  if (state.objectType !== "contact") return "Only Contact merge is available in this app.";
   if (activeRecords.length < 2) return "At least two active records are required.";
   if (currentDecision !== "duplicate") return "Mark this group Duplicate before merging.";
-  if (!selectedId) return "Choose a master record with a valid Salesforce ID.";
-  if (invalidRecords.length) return "Every active record must have a valid Account or Contact Salesforce ID.";
-  if (!mergeRecords.length) return "There are no duplicate records to merge into the master.";
+  if (!selectedId) return "Choose a master Contact with a valid Salesforce ID.";
+  if (invalidRecords.length) return "Every active Contact must have a valid 003 Salesforce ID.";
+  if (!mergeRecords.length) return "There are no duplicate Contacts to merge into the master.";
   if (mergeRecords.length > 20) return "Split this group first; one merge action supports up to 20 duplicate records.";
   return "";
 }
@@ -4553,18 +4680,6 @@ function mergeStatusLabel(result, blockedReason, inFlight) {
   return blockedReason ? "Blocked" : "Ready";
 }
 
-function renderMergeMasterOption(record, mergeState) {
-  const id = normalizeSalesforceIdForMerge(salesforceId(record));
-  const selected = id && id === mergeState.selectedId ? "selected" : "";
-  const recommended = id && id === mergeState.recommendedId ? " recommended" : "";
-  const disabled = id ? "" : "disabled";
-  return `
-    <option value="${escapeHtml(id)}" ${selected} ${disabled}>
-      ${escapeHtml(displayName(record) || "Unnamed record")} · ${escapeHtml(id || "missing Salesforce ID")}${recommended ? " · recommended" : ""}
-    </option>
-  `;
-}
-
 function renderMergeRecordChip({ record, id }) {
   return `
     <span class="merge-id-chip">
@@ -4572,6 +4687,121 @@ function renderMergeRecordChip({ record, id }) {
       <em>${escapeHtml(id)}</em>
     </span>
   `;
+}
+
+function renderMergeMatrix(group, records, mergeState, resolutionContext) {
+  const fields = OBJECT_CONFIG[state.objectType].displayFields;
+  return `
+    <div class="merge-matrix-wrap">
+      <table class="merge-matrix">
+        <thead>
+          <tr>
+            <th>Field</th>
+            ${records.map((record) => renderMergeRecordHeader(group, record, mergeState)).join("")}
+          </tr>
+        </thead>
+        <tbody>
+          ${fields.map((field) => renderMergeMatrixRow(group, field, records, mergeState, resolutionContext)).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderMergeRecordHeader(group, record, mergeState) {
+  const id = normalizeSalesforceIdForMerge(salesforceId(record));
+  const checked = id && id === mergeState.selectedId ? "checked" : "";
+  const disabled = mergeState.locked || !id || !id.startsWith("003") ? "disabled" : "";
+  const recommended = id && id === mergeState.recommendedId ? " · recommended" : "";
+  return `
+    <th>
+      <label class="merge-master-choice">
+        <input
+          class="merge-master-radio"
+          type="radio"
+          name="merge-master-${escapeHtml(group.key)}"
+          value="${escapeHtml(id)}"
+          data-group-key="${escapeHtml(group.key)}"
+          ${checked}
+          ${disabled}
+        />
+        <span>Master</span>
+      </label>
+      <strong>${escapeHtml(displayName(record) || "Unnamed Contact")}</strong>
+      <em>${escapeHtml(id || "missing Contact ID")}${escapeHtml(recommended)}</em>
+    </th>
+  `;
+}
+
+function renderMergeMatrixRow(group, field, records, mergeState, resolutionContext) {
+  const resolution = getFieldResolution(group, field, resolutionContext);
+  const masterValue = mergeState.selectedRecord ? getDisplayFieldValue(mergeState.selectedRecord, field) : "";
+  const selectedIndex = selectedMergeFieldRecordIndex(records, field, resolution.acceptedValue);
+  const explicit = hasExplicitFieldResolution(group.key, field);
+  const overridden = explicit && normalizeResolutionValue(resolution.acceptedValue) !== normalizeResolutionValue(masterValue);
+  const rowClass = [
+    resolution.hasDiscrepancy ? "has-discrepancy" : "",
+    overridden ? "has-override" : ""
+  ].filter(Boolean).join(" ");
+
+  return `
+    <tr class="${rowClass}">
+      <td class="merge-field-name">
+        <strong>${escapeHtml(FIELD_LABELS[field] || field)}</strong>
+        <span>${escapeHtml(mergeFieldStatusLabel({ resolution, explicit, overridden, masterValue }))}</span>
+      </td>
+      ${records.map((record, index) => renderMergeFieldCell(group, field, record, index, selectedIndex, mergeState, resolution)).join("")}
+    </tr>
+  `;
+}
+
+function renderMergeFieldCell(group, field, record, index, selectedIndex, mergeState, resolution) {
+  const value = String(getDisplayFieldValue(record, field) || "").trim();
+  const checked = selectedIndex === index ? "checked" : "";
+  const disabled = mergeState.locked || !resolution.hasValues ? "disabled" : "";
+  const isBlank = value ? "" : "is-blank";
+  const isSelected = checked ? "is-selected" : "";
+  return `
+    <td>
+      <label class="merge-field-choice ${isSelected} ${isBlank}">
+        <input
+          class="merge-field-radio"
+          type="radio"
+          name="merge-field-${escapeHtml(group.key)}-${escapeHtml(field)}"
+          value="${escapeHtml(value)}"
+          data-group-key="${escapeHtml(group.key)}"
+          data-field="${escapeHtml(field)}"
+          ${checked}
+          ${disabled}
+        />
+        <span>${escapeHtml(value || "—")}</span>
+      </label>
+    </td>
+  `;
+}
+
+function selectedMergeFieldRecordIndex(records, field, acceptedValue) {
+  const accepted = normalizeResolutionValue(acceptedValue);
+  return Math.max(0, records.findIndex((record) => normalizeResolutionValue(getDisplayFieldValue(record, field)) === accepted));
+}
+
+function mergeFieldStatusLabel({ resolution, explicit, overridden, masterValue }) {
+  if (!resolution.hasValues) return "No value";
+  if (!resolution.hasDiscrepancy) return "Same value";
+  if (overridden) return "Override";
+  if (explicit) return "Master value";
+  if (masterValue) return "From master";
+  return "Suggested";
+}
+
+function countMergeFieldOverrides(group, records, mergeState, resolutionContext) {
+  if (!mergeState.selectedRecord) return 0;
+  return OBJECT_CONFIG[state.objectType].displayFields.filter((field) => {
+    if (!hasExplicitFieldResolution(group.key, field)) return false;
+    const resolution = getFieldResolution(group, field, resolutionContext);
+    const masterValue = getDisplayFieldValue(mergeState.selectedRecord, field);
+    return normalizeResolutionValue(resolution.acceptedValue) !== normalizeResolutionValue(masterValue);
+  }).length;
 }
 
 function renderMergeResult(result) {
@@ -4650,6 +4880,7 @@ function handleTrainingLabelAction(action) {
 
 function handleTrainingKeyboardShortcut(event) {
   if (event.defaultPrevented || isTypingTarget(event.target)) return;
+  if (state.reviewMode !== "evaluate") return;
 
   const key = event.key.toLowerCase();
   const actions = {
@@ -4953,6 +5184,7 @@ function setMergeMasterSelection(groupKey, value) {
     mergeMasterSelections.delete(groupKey);
   }
   renderDetail();
+  scheduleReviewStateSave();
 }
 
 async function handleMergeAction(button) {
@@ -5039,16 +5271,26 @@ function getFieldResolution(group, field, resolutionContext = null) {
   const hasDiscrepancy = nonBlankOptions.length > 1 || (nonBlankOptions.length === 1 && options.length > 1);
   const recordScores = hasValues ? context.recordScoresByField.get(field) : null;
   const suggestedValue = hasValues ? suggestAcceptedValue(options, field, recordScores) : "";
-  const selectedValue = state.fieldResolutions.get(group.key)?.[field];
+  const selectedValues = state.fieldResolutions.get(group.key) || {};
+  const hasSelectedValue = Object.prototype.hasOwnProperty.call(selectedValues, field);
+  const selectedValue = selectedValues[field];
   const optionValues = new Set(options.map((option) => option.value));
-  const acceptedValue = selectedValue != null && optionValues.has(selectedValue) ? selectedValue : suggestedValue;
+  const masterDefaultValue = getExplicitMergeMasterFieldValue(group, field, context.activeRecords, optionValues);
+  const acceptedValue =
+    hasSelectedValue && optionValues.has(selectedValue)
+      ? selectedValue
+      : masterDefaultValue != null
+        ? masterDefaultValue
+        : suggestedValue;
 
   return {
     options,
     hasValues,
     hasDiscrepancy,
     suggestedValue,
-    acceptedValue
+    acceptedValue,
+    hasExplicitResolution: hasSelectedValue && optionValues.has(selectedValue),
+    masterDefaultValue
   };
 }
 
@@ -5061,10 +5303,22 @@ function createFieldResolutionContext(group, activeRecords = getActiveGroupRecor
   );
 
   return {
+    activeRecords,
     optionsByField,
     baselineValues,
     recordScoresByField
   };
+}
+
+function getExplicitMergeMasterFieldValue(group, field, activeRecords, optionValues) {
+  const selectedMasterId = mergeMasterSelections.get(group.key);
+  if (!selectedMasterId) return null;
+
+  const masterRecord = activeRecords.find((record) => normalizeSalesforceIdForMerge(salesforceId(record)) === selectedMasterId);
+  if (!masterRecord) return null;
+
+  const value = String(getDisplayFieldValue(masterRecord, field) || "").trim();
+  return optionValues.has(value) ? value : null;
 }
 
 function uniqueFieldOptions(records, field) {
@@ -5170,6 +5424,47 @@ function setFieldResolution(groupKey, field, value) {
   state.fieldResolutions.set(groupKey, current);
   renderDetail();
   scheduleReviewStateSave();
+}
+
+function setMergeFieldResolution(groupKey, field, value) {
+  if (!groupKey || !field) return;
+
+  const group = findGroupByKey(groupKey);
+  const masterRecord = group ? getExplicitMergeMasterRecord(group) : null;
+  const masterValue = masterRecord ? String(getDisplayFieldValue(masterRecord, field) || "").trim() : null;
+
+  if (masterValue != null && normalizeResolutionValue(value) === normalizeResolutionValue(masterValue)) {
+    clearFieldResolution(groupKey, field);
+  } else {
+    setFieldResolution(groupKey, field, value);
+  }
+}
+
+function clearFieldResolution(groupKey, field) {
+  const current = state.fieldResolutions.get(groupKey);
+  if (!current || !Object.prototype.hasOwnProperty.call(current, field)) {
+    renderDetail();
+    return;
+  }
+
+  delete current[field];
+  if (Object.keys(current).length) {
+    state.fieldResolutions.set(groupKey, current);
+  } else {
+    state.fieldResolutions.delete(groupKey);
+  }
+  renderDetail();
+  scheduleReviewStateSave();
+}
+
+function hasExplicitFieldResolution(groupKey, field) {
+  return Object.prototype.hasOwnProperty.call(state.fieldResolutions.get(groupKey) || {}, field);
+}
+
+function getExplicitMergeMasterRecord(group) {
+  const selectedMasterId = mergeMasterSelections.get(group.key);
+  if (!selectedMasterId) return null;
+  return getActiveGroupRecords(group).find((record) => normalizeSalesforceIdForMerge(salesforceId(record)) === selectedMasterId) || null;
 }
 
 function getAcceptedFieldValues(group) {

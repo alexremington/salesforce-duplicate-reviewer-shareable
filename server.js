@@ -96,7 +96,13 @@ async function handleRequest(request, response) {
   const url = new URL(request.url, `http://${request.headers.host || `${HOST}:${PORT}`}`);
 
   if (request.method === "GET" && url.pathname === "/api/health") {
-    sendJson(response, { ok: true, stickyNotifications: true, stagingAccounts: true, salesforceMerge: true });
+    sendJson(response, {
+      ok: true,
+      stickyNotifications: true,
+      stagingAccounts: true,
+      salesforceMerge: true,
+      salesforceMergeObjectTypes: ["Contact"]
+    });
     return;
   }
 
@@ -359,7 +365,7 @@ function validateMergeRequest(body) {
   const objectType = normalizeMergeObjectType(body.objectType);
   const masterId = normalizeSalesforceId(body.masterId);
   const mergeIds = uniqueIds(Array.isArray(body.mergeIds) ? body.mergeIds : []).filter((id) => id !== masterId);
-  const expectedPrefix = objectType === "Account" ? "001" : "003";
+  const expectedPrefix = "003";
 
   if (body.confirmation !== "MERGE") throw httpError(400, "Type MERGE to confirm this Salesforce merge.");
   if (!masterId) throw httpError(400, "A master Salesforce ID is required.");
@@ -382,9 +388,8 @@ function validateMergeRequest(body) {
 
 function normalizeMergeObjectType(value) {
   const normalized = String(value || "").trim().toLowerCase();
-  if (normalized === "account") return "Account";
   if (normalized === "contact") return "Contact";
-  throw httpError(400, "Only Account and Contact merges are supported.");
+  throw httpError(400, "Only Contact merges are supported. Account merge is disabled in this app.");
 }
 
 function normalizeSalesforceId(value) {

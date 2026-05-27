@@ -81,7 +81,7 @@ Exported duplicate decisions use one row per duplicate group. The first column i
 
 ## Salesforce Merge
 
-When the local reviewer server is running, each selected duplicate group includes a guarded Salesforce merge panel. Mark the group as `Duplicate`, choose the master record, type `MERGE`, and confirm the browser prompt to send the merge to Salesforce.
+When the local reviewer server is running, Contact duplicate groups can be handled in the `Merge` workflow. Mark the group as `Duplicate`, choose the master Contact, review field-level retained-value overrides, type `MERGE`, and confirm the browser prompt to send the merge to Salesforce.
 
 Merges run server-side through the Salesforce SOAP API so access tokens are not exposed in the browser. The server uses `SF_ACCESS_TOKEN` when present; otherwise it gets a token from Salesforce CLI with `sf org display --target-org "$SF_ORG_ALIAS" --json`. The default merge target is the staging sandbox:
 
@@ -91,7 +91,7 @@ SF_INSTANCE_URL=https://politico--staging.sandbox.my.salesforce.com
 SF_API_VERSION=v67.0
 ```
 
-The merge action supports `Account` and `Contact` records only. It keeps the selected master record's field values and asks Salesforce to move related records from the duplicate records to the master. Accepted values in the reviewer remain review/export guidance and are not written as field updates during merge. Groups with more than three active records are merged through successive SOAP merge requests, two duplicate records at a time.
+The merge action supports `Contact` records only. Account matching remains available in the `Evaluate` workflow, but Account merge is disabled because downstream Finance dependencies need business logic outside this app. The Contact merge keeps the selected master record's field values and asks Salesforce to move related records from the duplicate records to the master. Accepted values in the reviewer remain review/export guidance and are not written as field updates during merge. Groups with more than three active records are merged through successive SOAP merge requests, two duplicate records at a time.
 
 Merge results are saved with the browser review state and server-side audit entries are appended to:
 
