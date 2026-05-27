@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Salesforce Duplicate Review</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">SF</span>
+          <div>
+            <h1>Duplicate Review</h1>
+            <p>Salesforce Account and Contact matching</p>
+          </div>
+        </div>
+
+        <div class="topbar-actions">
+          <div class="csv-picker">
+            <button
+              class="button button-primary"
+              type="button"
+              id="chooseCsvButton"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              aria-controls="csvObjectMenu"
+            >
+              Choose CSV
+            </button>
+            <div class="csv-object-menu" id="csvObjectMenu" role="menu" hidden>
+              <button type="button" role="menuitem" data-csv-object="contact">Contacts</button>
+              <button type="button" role="menuitem" data-csv-object="account">Accounts</button>
+            </div>
+            <input id="csvInput" type="file" accept=".csv,text/csv" />
+          </div>
+          <button class="button button-secondary" type="button" id="exportButton" disabled>Export Decisions</button>
+          <button class="button button-secondary" type="button" id="trainingExportButton" disabled>Export Labels</button>
+          <button class="button button-secondary" type="button" id="codexTrainingButton" disabled>Send Labels to Codex</button>
+          <button class="button button-secondary" type="button" id="trainingImportButton" disabled>Import Labels</button>
+          <input id="trainingImportInput" type="file" accept=".csv,text/csv" />
+          <button class="button button-secondary" type="button" id="demoButton">Demo Data</button>
+        </div>
+      </header>
+
+      <main class="main-grid">
+        <aside class="control-pane" aria-label="Duplicate controls">
+          <section class="panel import-panel collapsible-panel" data-collapsible-panel data-default-expanded="true">
+            <div class="panel-title">
+              <button
+                class="panel-toggle"
+                type="button"
+                aria-expanded="true"
+                aria-controls="sourcePanelBody"
+                data-collapse-toggle
+              >
+                <span class="collapse-icon" aria-hidden="true"></span>
+                <span>Source</span>
+              </button>
+              <span class="pill" id="sourcePill">No file</span>
+            </div>
+            <div class="panel-body" id="sourcePanelBody">
+              <div class="file-drop" id="dropZone">
+                <strong id="fileName">CSV import</strong>
+                <span id="fileMeta">No records loaded</span>
+              </div>
+              <div class="recent-files">
+                <div class="recent-files-title">Recent files</div>
+                <div class="recent-file-list" id="recentFileList">
+                  <div class="recent-empty">No recent files</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel collapsible-panel is-collapsed" data-collapsible-panel data-default-expanded="false">
+            <div class="panel-title">
+              <button
+                class="panel-toggle"
+                type="button"
+                aria-expanded="false"
+                aria-controls="matchControlsPanelBody"
+                data-collapse-toggle
+              >
+                <span class="collapse-icon" aria-hidden="true"></span>
+                <span>Match Controls</span>
+              </button>
+              <span class="score-readout" id="thresholdValue">86</span>
+            </div>
+            <div class="panel-body" id="matchControlsPanelBody" hidden>
+              <label class="range-label" for="threshold">
+                Review threshold
+                <input id="threshold" type="range" min="70" max="100" value="86" />
+              </label>
+              <div class="check-row">
+                <label><input id="highRecallMode" type="checkbox" /> High recall</label>
+              </div>
+              <label class="search-label" for="groupSearch">
+                Search groups
+                <input id="groupSearch" type="search" placeholder="Name, email, website, address" />
+              </label>
+              <div class="match-control-actions">
+                <button class="button button-primary" type="button" id="applyControlsButton">Apply</button>
+              </div>
+            </div>
+          </section>
+
+          <section
+            class="panel mapping-panel collapsible-panel is-collapsed"
+            id="mappingPanel"
+            hidden
+            data-collapsible-panel
+            data-default-expanded="false"
+          >
+            <div class="panel-title">
+              <button
+                class="panel-toggle"
+                type="button"
+                aria-expanded="false"
+                aria-controls="fieldMappingPanelBody"
+                data-collapse-toggle
+              >
+                <span class="collapse-icon" aria-hidden="true"></span>
+                <span>Field Mapping</span>
+              </button>
+              <button class="mini-button" type="button" id="rerunButton">Re-run</button>
+            </div>
+            <div class="panel-body" id="fieldMappingPanelBody" hidden>
+              <div class="mapping-grid" id="mappingGrid"></div>
+            </div>
+          </section>
+
+          <section class="panel group-panel collapsible-panel" data-collapsible-panel data-default-expanded="true">
+            <div class="panel-title">
+              <button
+                class="panel-toggle"
+                type="button"
+                aria-expanded="true"
+                aria-controls="matchGroupsPanelBody"
+                data-collapse-toggle
+              >
+                <span class="collapse-icon" aria-hidden="true"></span>
+                <span>Match Groups</span>
+              </button>
+              <div class="group-title-actions">
+                <span id="groupCount">0</span>
+                <button
+                  class="icon-button sort-toggle"
+                  type="button"
+                  id="groupSortToggle"
+                  aria-label="Sorted descending. Click to sort ascending."
+                  title="Sorted descending. Click to sort ascending."
+                >
+                  <svg class="sort-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path class="sort-direction-arrow" d="M7 4v14m0 0 4-4m-4 4-4-4" />
+                    <path d="M13 6h8M13 12h6M13 18h3" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div class="panel-body group-panel-body" id="matchGroupsPanelBody">
+              <div class="batch-toolbar" id="batchToolbar">
+                <label class="select-visible">
+                  <input id="selectVisibleGroups" type="checkbox" />
+                  Select visible
+                </label>
+                <label class="hide-labeled-control">
+                  <input id="hideLabeledGroups" type="checkbox" />
+                  Hide labeled
+                </label>
+                <span class="selected-count" id="selectedCount">0 selected</span>
+                <div class="batch-actions">
+                  <button class="mini-button" type="button" id="batchDuplicateButton" disabled>Duplicate</button>
+                  <button class="mini-button" type="button" id="batchNotDuplicateButton" disabled>Not Duplicate</button>
+                  <button class="mini-button" type="button" id="clearSelectionButton" disabled>Clear</button>
+                </div>
+              </div>
+              <div class="group-list" id="groupList"></div>
+            </div>
+          </section>
+        </aside>
+
+        <section class="review-pane" aria-label="Duplicate review workspace">
+          <div class="metric-strip" id="metrics">
+            <div class="metric">
+              <span>Records</span>
+              <strong>0</strong>
+            </div>
+            <div class="metric">
+              <span>Groups</span>
+              <strong>0</strong>
+            </div>
+            <div class="metric">
+              <span>Exact</span>
+              <strong>0</strong>
+            </div>
+            <div class="metric">
+              <span>Near</span>
+              <strong>0</strong>
+            </div>
+          </div>
+
+          <div class="review-header">
+            <div>
+              <p class="eyebrow" id="objectLabel">Contacts</p>
+              <h2 id="detailTitle">Load a Salesforce export</h2>
+              <p class="decision-status" id="decisionStatus">No judgment selected</p>
+            </div>
+            <div class="review-actions">
+              <button class="shortcut-link" type="button" id="shortcutsButton">Shortcuts</button>
+              <button class="button button-secondary" type="button" id="duplicateButton" disabled>Duplicate</button>
+              <button class="button button-secondary" type="button" id="notDuplicateButton" disabled>Not Duplicate</button>
+            </div>
+          </div>
+
+          <div class="detail-surface" id="detailSurface">
+            <div class="empty-state">
+              <div class="empty-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M8 7h8M8 12h8M8 17h5" />
+                  <path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+                </svg>
+              </div>
+              <strong>No duplicate groups yet</strong>
+              <span>Choose a CSV or load demo data.</span>
+            </div>
+          </div>
+
+          <div class="record-navigation" aria-label="Record navigation">
+            <button class="button button-secondary" type="button" id="previousGroupButton" disabled>Previous</button>
+            <span class="record-navigation-status" id="groupNavigationStatus">0 of 0</span>
+            <button class="button button-secondary" type="button" id="nextGroupButton" disabled>Next</button>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="shortcuts-modal" id="shortcutsModal" role="dialog" aria-modal="true" aria-labelledby="shortcutsModalTitle" hidden>
+      <button class="shortcuts-backdrop" type="button" data-shortcuts-close aria-label="Close shortcuts"></button>
+      <section class="shortcuts-card" role="document">
+        <div class="shortcuts-header">
+          <div>
+            <p class="eyebrow">review tools</p>
+            <h2 id="shortcutsModalTitle">Keyboard shortcuts</h2>
+          </div>
+          <button class="mini-button" type="button" id="shortcutsCloseButton">Close</button>
+        </div>
+        <dl class="shortcut-list">
+          <div><dt>Enter</dt><dd>Next group</dd></div>
+          <div><dt>Shift + Enter</dt><dd>Previous group</dd></div>
+          <div><dt>M</dt><dd>Mark calibration pair as match</dd></div>
+          <div><dt>N</dt><dd>Mark calibration pair as not match</dd></div>
+          <div><dt>U</dt><dd>Mark calibration pair as unsure</dd></div>
+          <div><dt>Left Arrow</dt><dd>Previous calibration pair</dd></div>
+          <div><dt>Right Arrow</dt><dd>Next calibration pair</dd></div>
+          <div><dt>Esc</dt><dd>Close dialogs and menus</dd></div>
+        </dl>
+      </section>
+    </div>
+
+    <div class="loading-modal" id="loadingModal" role="alertdialog" aria-modal="true" aria-labelledby="loadingModalTitle" aria-describedby="loadingModalMessage" hidden>
+      <div class="loading-modal-card">
+        <div class="loading-spinner loading-modal-spinner" aria-hidden="true"></div>
+        <div>
+          <strong id="loadingModalTitle">Loading</strong>
+          <span id="loadingModalMessage">Preparing records.</span>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

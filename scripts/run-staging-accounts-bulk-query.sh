@@ -1,0 +1,49 @@
+#!/bin/zsh
+set -euo pipefail
+unsetopt BG_NICE 2>/dev/null || true
+
+SCRIPT_DIR="$(cd "$(dirname "${0}")" && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+export SF_USE_GENERIC_UNIX_KEYCHAIN="${SF_USE_GENERIC_UNIX_KEYCHAIN:-true}"
+export SF_ORG_ALIAS="${SF_ORG_ALIAS:-politico-staging}"
+export SF_INSTANCE_URL="${SF_INSTANCE_URL:-https://politico--staging.sandbox.my.salesforce.com}"
+export SF_API_VERSION="${SF_API_VERSION:-v67.0}"
+export SF_REPORT_ID="${SF_REPORT_ID:-00OVZ000003Dm572AC}"
+export SF_SOQL_FILE="${SF_SOQL_FILE:-${PROJECT_DIR}/queries/report-${SF_REPORT_ID}.soql}"
+export OUT_DIR="${OUT_DIR:-${PROJECT_DIR}/Output/staging-accounts}"
+export LATEST_CSV_NAME="${LATEST_CSV_NAME:-salesforce-report-latest.csv}"
+export LATEST_JSON_NAME="${LATEST_JSON_NAME:-salesforce-report-latest.json}"
+export BULK_POLL_MS="${BULK_POLL_MS:-60000}"
+
+if [[ "${1:-}" == "--background" ]]; then
+  shift
+  mkdir -p "${PROJECT_DIR}/logs"
+  /usr/bin/nohup "${PROJECT_DIR}/scripts/run-staging-accounts-bulk-query.sh" "$@" \
+    >>"${PROJECT_DIR}/logs/download-staging-accounts.out.log" \
+    2>>"${PROJECT_DIR}/logs/download-staging-accounts.err.log" &
+  echo "Started staging Accounts duplicate review flow in the background with PID $!."
+  echo "Stdout log: ${PROJECT_DIR}/logs/download-staging-accounts.out.log"
+  echo "Stderr log: ${PROJECT_DIR}/logs/download-staging-accounts.err.log"
+  exit 0
+fi
+
+if [[ "${1:-}" == "--dry-run" ]]; then
+  exec "${PROJECT_DIR}/scripts/run-salesforce-bulk-query.sh" "$@"
+fi
+
+notify_failure() {
+  /usr/bin/osascript -e 'display notification "The staging Accounts export failed. Check the job logs." with title "Duplicate Reviewer"' >/dev/null 2>&1 || true
+}
+
+if ! "${PROJECT_DIR}/scripts/run-salesforce-bulk-query.sh" "$@"; then
+  notify_failure
+  exit 1
+fi
+
+reviewer_url="$("${PROJECT_DIR}/scripts/start-reviewer-server.sh" | tail -n 1)"
+autoload_url="${reviewer_url}/?autoload=staging-accounts&object=account&notify=1&sticky=1&name=${LATEST_CSV_NAME}"
+
+/usr/bin/open "${autoload_url}"
+echo "Opened Salesforce Duplicate Reviewer at ${autoload_url}"
+echo "The app will show a Notification Center alert after the compatibility CSV is loaded and ready to review."

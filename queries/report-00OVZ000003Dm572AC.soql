@@ -1,0 +1,12 @@
+SELECT
+  Id,
+  Name,
+  Website,
+  BillingStreet,
+  BillingCity,
+  BillingState,
+  BillingPostalCode,
+  BillingCountry,
+  CurrencyIsoCode,
+  Ultimate_Parent_Account__c
+FROM Account
