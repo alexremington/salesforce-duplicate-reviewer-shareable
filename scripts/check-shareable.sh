@@ -1,0 +1,28 @@
+#!/bin/zsh
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${0}")" && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+BRANCH="${1:-shareable}"
+
+cd "${PROJECT_DIR}"
+
+if ! git rev-parse --verify "${BRANCH}" >/dev/null 2>&1; then
+  echo "Missing branch or ref: ${BRANCH}" >&2
+  exit 2
+fi
+
+PRIVATE_PATTERN='00OV|00OS|politico|aremington|OneDrive-POLITICO|/Users|politico--staging|politico-staging|politico\.my\.salesforce|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+GENERATED_PATTERN='(^|/)(Output|logs|incoming|backups|data|dist|node_modules)(/|$)|(^|/)\.DS_Store$'
+
+if git grep -n -E "${PRIVATE_PATTERN}" "${BRANCH}" -- .; then
+  echo "Potential private detail found in ${BRANCH}." >&2
+  exit 1
+fi
+
+if git ls-tree -r --name-only "${BRANCH}" | /usr/bin/grep -E "${GENERATED_PATTERN}"; then
+  echo "Generated/runtime files found in ${BRANCH}." >&2
+  exit 1
+fi
+
+echo "Shareable branch scan passed: ${BRANCH}"

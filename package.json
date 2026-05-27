@@ -4,6 +4,9 @@
   "private": true,
   "description": "Local-first UI for reviewing Salesforce account and contact duplicate candidates.",
   "scripts": {
+    "check": "scripts/check.sh",
+    "check:shareable": "scripts/check-shareable.sh",
+    "smoke:ui": "node tests/playwright-smoke.js",
     "start": "node server.js"
   },
   "engines": {
