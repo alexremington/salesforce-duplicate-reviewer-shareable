@@ -428,6 +428,11 @@ h1 {
   color: var(--blue);
 }
 
+.pill.is-error {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
 .file-drop {
   display: grid;
   gap: 4px;
@@ -1126,6 +1131,24 @@ select:focus {
 .empty-state strong {
   color: var(--ink);
   font-size: 18px;
+}
+
+.empty-state span {
+  max-width: 52ch;
+}
+
+.empty-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.error-state .empty-icon {
+  background: var(--red-soft);
+  color: var(--red);
 }
 
 .empty-icon {

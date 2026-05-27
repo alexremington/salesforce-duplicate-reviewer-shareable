@@ -4,6 +4,8 @@
 
 Local-first browser UI for reviewing likely duplicate Salesforce Account and Contact records.
 
+For local setup, see [SETUP.md](SETUP.md).
+
 ## Requirements
 
 - Node.js 18 or newer.
