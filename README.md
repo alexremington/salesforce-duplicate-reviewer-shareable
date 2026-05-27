@@ -1,5 +1,7 @@
 # Salesforce Duplicate Review
 
+[![Checks](https://github.com/alexremington/salesforce-duplicate-reviewer/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/alexremington/salesforce-duplicate-reviewer/actions/workflows/checks.yml)
+
 A static browser UI for reviewing possible duplicate Salesforce Contact and Account records from CSV exports.
 
 ## Open The App
