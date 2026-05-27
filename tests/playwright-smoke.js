@@ -16,12 +16,18 @@ const outDir = process.env.PLAYWRIGHT_SMOKE_OUT_DIR || path.join(os.tmpdir(), "d
 async function run() {
   await fs.mkdir(outDir, { recursive: true });
   const csvPath = path.join(outDir, "contacts-smoke.csv");
+  const accountCsvPath = path.join(outDir, "accounts-smoke.csv");
   await fs.writeFile(csvPath, [
     "Id,First Name,Last Name,Company,Email",
     "003T00000000001,Maya,Rodriguez,Northstar Analytics,maya.rodriguez@example.com",
     "003T00000000002,Maya,Rodriquez,Northstar Analytics Inc.,maya.rodriguez@example.com",
     "003T00000000003,John,Pierce,CivicWire,jpierce@example.com",
     "003T00000000004,John,Pierce,Civic Wire,john.pierce@example.com"
+  ].join("\n"));
+  await fs.writeFile(accountCsvPath, [
+    "Id,Name,Website,Billing Street,Billing City,Billing State,Billing Postal Code,Billing Country",
+    "001T00000000001,Northstar Analytics Inc.,northstar.example,125 Market St,San Francisco,CA,94105,United States",
+    "001T00000000002,Northstar Analytics,https://northstar.example,125 Market Street,San Francisco,California,94105,US"
   ].join("\n"));
 
   const browser = await chromium.launch();
@@ -45,6 +51,7 @@ async function run() {
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
 
     await page.locator("#csvInput").setInputFiles(csvPath);
+    await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
     await page.locator(".group-item-main").first().click();
     await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
@@ -57,6 +64,21 @@ async function run() {
     await page.locator(".record-decision-badge.not-duplicate").first().waitFor({ state: "visible", timeout: 5000 });
     const notDuplicateBadges = await page.locator(".record-decision-badge.not-duplicate").count();
     await page.screenshot({ path: path.join(outDir, "desktop-not-duplicate.png"), fullPage: false });
+
+    await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
+    await page.getByRole("button", { name: "Merge" }).click();
+    await page.locator(".merge-master-radio").first().waitFor({ state: "visible", timeout: 5000 });
+    const mergeMasterRadios = await page.locator(".merge-master-radio").count();
+    const mergeFieldRadios = await page.locator(".merge-field-radio").count();
+    await page.screenshot({ path: path.join(outDir, "desktop-merge.png"), fullPage: false });
+
+    await page.getByRole("button", { name: "Choose CSV" }).click();
+    await page.getByRole("menuitem", { name: "Accounts" }).click();
+    await page.locator("#csvInput").setInputFiles(accountCsvPath);
+    await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
+    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    const accountMergeDisabled = await page.getByRole("button", { name: "Merge" }).isDisabled();
+    await page.screenshot({ path: path.join(outDir, "desktop-account-evaluate.png"), fullPage: false });
 
     await page.getByRole("button", { name: "Shortcuts" }).click();
     await page.getByRole("dialog", { name: "Keyboard shortcuts" }).waitFor({ state: "visible", timeout: 5000 });
@@ -78,6 +100,9 @@ async function run() {
     if (!emptyDemoVisible) throw new Error("Expected empty-state Load Demo action to be visible.");
     if (!duplicateBadges) throw new Error("Expected at least one Duplicate decision badge.");
     if (!notDuplicateBadges) throw new Error("Expected at least one Not Duplicate decision badge.");
+    if (!mergeMasterRadios) throw new Error("Expected Contact merge master radios.");
+    if (!mergeFieldRadios) throw new Error("Expected Contact merge field radios.");
+    if (!accountMergeDisabled) throw new Error("Expected Account merge mode to be disabled.");
     if (!shortcutsVisible) throw new Error("Expected shortcuts modal to be visible.");
     if (layout.pageScrollWidth > layout.viewportWidth || layout.bodyScrollWidth > layout.viewportWidth) {
       throw new Error(`Unexpected horizontal overflow: ${JSON.stringify(layout)}`);
@@ -91,6 +116,9 @@ async function run() {
       emptyDemoVisible,
       duplicateBadges,
       notDuplicateBadges,
+      mergeMasterRadios,
+      mergeFieldRadios,
+      accountMergeDisabled,
       shortcutsVisible,
       layout,
       screenshotsDir: outDir

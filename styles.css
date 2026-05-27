@@ -924,6 +924,39 @@ select:focus {
   color: var(--red);
 }
 
+.workflow-mode {
+  display: inline-flex;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 4px;
+  border: 1px solid rgba(95, 70, 39, 0.14);
+  border-radius: 999px;
+  background: rgba(247, 240, 228, 0.72);
+}
+
+.workflow-mode-button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 14px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.workflow-mode-button.is-active {
+  background: var(--ink);
+  color: #fffdf7;
+}
+
+.workflow-mode-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .eyebrow {
   color: var(--accent);
   font-size: 12px;
@@ -1584,6 +1617,12 @@ select:focus {
     rgba(255, 253, 247, 0.92);
 }
 
+.salesforce-merge-panel.blocked {
+  background:
+    linear-gradient(135deg, rgba(169, 116, 36, 0.1), transparent 52%),
+    rgba(255, 253, 247, 0.92);
+}
+
 .salesforce-merge-header,
 .merge-actions {
   display: flex;
@@ -1649,9 +1688,50 @@ select:focus {
   color: var(--amber);
 }
 
+.merge-readiness-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.merge-readiness-card {
+  display: grid;
+  gap: 3px;
+  border: 1px solid rgba(95, 70, 39, 0.14);
+  border-radius: 16px;
+  padding: 10px 12px;
+  background: rgba(247, 240, 228, 0.72);
+  min-width: 0;
+}
+
+.merge-readiness-card span,
+.merge-field-name span,
+.merge-master-choice span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.merge-readiness-card strong,
+.merge-readiness-card em {
+  overflow-wrap: anywhere;
+}
+
+.merge-readiness-card strong {
+  font-size: 15px;
+}
+
+.merge-readiness-card em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
 .merge-control-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(160px, 0.6fr);
+  grid-template-columns: minmax(180px, 0.45fr);
   gap: 10px;
 }
 
@@ -1736,6 +1816,133 @@ select:focus {
   background: var(--red-soft);
 }
 
+.merge-matrix-wrap {
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  border: 1px solid rgba(95, 70, 39, 0.14);
+  border-radius: 18px;
+  background: rgba(255, 253, 247, 0.82);
+}
+
+.merge-matrix {
+  width: 100%;
+  min-width: 940px;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.merge-matrix th,
+.merge-matrix td {
+  border-bottom: 1px solid rgba(95, 70, 39, 0.12);
+  border-right: 1px solid rgba(95, 70, 39, 0.1);
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.merge-matrix th:last-child,
+.merge-matrix td:last-child {
+  border-right: 0;
+}
+
+.merge-matrix th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(247, 240, 228, 0.96);
+}
+
+.merge-matrix th:first-child,
+.merge-matrix .merge-field-name {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  width: 170px;
+  background: rgba(255, 253, 247, 0.98);
+}
+
+.merge-matrix th:first-child {
+  background: rgba(247, 240, 228, 0.98);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.merge-matrix tbody tr.has-discrepancy td {
+  background: rgba(220, 239, 232, 0.28);
+}
+
+.merge-matrix tbody tr.has-override td {
+  background: rgba(245, 224, 185, 0.36);
+}
+
+.merge-master-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  margin-bottom: 8px;
+}
+
+.merge-matrix th strong,
+.merge-matrix th em {
+  display: block;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.merge-matrix th strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.merge-matrix th em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.merge-field-name {
+  min-width: 170px;
+}
+
+.merge-field-name strong,
+.merge-field-name span {
+  display: block;
+}
+
+.merge-field-name strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.merge-field-choice {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  min-height: 30px;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.merge-field-choice span {
+  overflow-wrap: anywhere;
+}
+
+.merge-field-choice.is-selected span {
+  font-weight: 800;
+}
+
+.merge-field-choice.is-blank span {
+  color: var(--muted);
+}
+
 @media (max-width: 980px) {
   body {
     height: auto;
@@ -1777,6 +1984,10 @@ select:focus {
   .topbar-actions,
   .review-actions {
     justify-content: flex-start;
+  }
+
+  .merge-readiness-grid {
+    grid-template-columns: 1fr;
   }
 
   .main-grid {
@@ -1900,6 +2111,7 @@ select:focus {
   .csv-picker,
   .topbar-actions,
   .review-actions,
+  .workflow-mode,
   .match-control-actions,
   .match-control-actions .button,
   .record-card-actions,
@@ -2040,6 +2252,10 @@ select:focus {
   .comparison-table {
     min-width: 720px;
   }
+
+  .merge-matrix {
+    min-width: 760px;
+  }
 }
 
 @media (max-width: 420px) {
@@ -2084,5 +2300,9 @@ select:focus {
 
   .comparison-table {
     min-width: 600px;
+  }
+
+  .merge-matrix {
+    min-width: 680px;
   }
 }

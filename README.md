@@ -9,7 +9,7 @@ For local setup, see [SETUP.md](SETUP.md). For teammate handoff, see [TEAM-HANDO
 ## Requirements
 
 - Node.js 18 or newer.
-- Salesforce CLI, if you want the helper scripts to fetch data or merge records.
+- Salesforce CLI, if you want the helper scripts to fetch data or merge Contact records.
 - A locally authenticated Salesforce org alias.
 
 ## Run The App
@@ -41,6 +41,13 @@ http://127.0.0.1:5180
 ```
 
 The browser-only UI can also load CSV files directly through the file picker.
+
+## Workflows
+
+- `Evaluate`: review match scores, mark groups Duplicate or Not Duplicate, label pairs, and export model-feedback labels.
+- `Merge`: prepare Contact merges with a master Contact radio choice plus field-level retained-value overrides.
+
+Account matching remains available in `Evaluate`. Account merge is intentionally disabled because downstream Finance dependencies require business logic outside this app.
 
 ## Fetch Salesforce Data
 
