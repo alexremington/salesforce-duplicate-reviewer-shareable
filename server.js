@@ -8,6 +8,7 @@ const path = require("node:path");
 const { URL } = require("node:url");
 
 const ROOT_DIR = __dirname;
+loadDotEnv(path.join(ROOT_DIR, ".env"));
 const STATIC_ROOT_DIR = path.resolve(process.env.DUPLICATE_REVIEWER_STATIC_DIR || ROOT_DIR);
 const HOST = process.env.HOST || "127.0.0.1";
 const PORT = Number(process.env.PORT || 5180);
@@ -56,6 +57,28 @@ main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
+
+function loadDotEnv(filePath) {
+  if (!fsSync.existsSync(filePath)) return;
+
+  const text = fsSync.readFileSync(filePath, "utf8");
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+
+    const equalsIndex = line.indexOf("=");
+    if (equalsIndex < 1) continue;
+
+    const key = line.slice(0, equalsIndex).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || Object.prototype.hasOwnProperty.call(process.env, key)) continue;
+
+    let value = line.slice(equalsIndex + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] = value;
+  }
+}
 
 async function main() {
   const server = http.createServer((request, response) => {

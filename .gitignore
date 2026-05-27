@@ -1,4 +1,5 @@
 .DS_Store
+.env
 Output/
 logs/
 incoming/

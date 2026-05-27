@@ -4,7 +4,7 @@
 
 Local-first browser UI for reviewing likely duplicate Salesforce Account and Contact records.
 
-For local setup, see [SETUP.md](SETUP.md).
+For local setup, see [SETUP.md](SETUP.md). For teammate handoff, see [TEAM-HANDOFF.md](TEAM-HANDOFF.md).
 
 ## Requirements
 
@@ -13,6 +13,22 @@ For local setup, see [SETUP.md](SETUP.md).
 - A locally authenticated Salesforce org alias.
 
 ## Run The App
+
+Open `index.html` in a browser for CSV-only review.
+
+macOS:
+
+```text
+Double-click: Launch Duplicate Reviewer.command
+```
+
+Windows PowerShell:
+
+```powershell
+.\Launch Duplicate Reviewer.ps1
+```
+
+Manual start:
 
 ```bash
 npm start

@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Package release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Install zsh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh
+
+      - name: Run checks
+        run: npm run check
+
+      - name: Build source archive
+        run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          git archive \
+            --format=zip \
+            --output "$RUNNER_TEMP/release/salesforce-duplicate-reviewer-${GITHUB_REF_NAME}.zip" \
+            HEAD
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "$RUNNER_TEMP/release/salesforce-duplicate-reviewer-${GITHUB_REF_NAME}.zip" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes

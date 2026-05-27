@@ -42,3 +42,18 @@ git diff origin/shareable..shareable
 - Personal machine paths.
 - OneDrive sync-state files.
 - `Output/`, `incoming/`, `logs/`, `node_modules/`, or browser/test artifacts.
+
+## Health Checks
+
+- `npm run check`: syntax checks and shareable-branch safety scan.
+- `npm run check:shareable`: public-safety scan for the selected ref.
+- `npm run smoke:ui`: Playwright smoke test for CSV loading, duplicate/not-duplicate badges, shortcuts, empty states, and mobile layout.
+
+## Releases
+
+Tags that start with `v` run the release workflow and publish a source archive:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
