@@ -176,9 +176,7 @@ async function handleRequest(request, response) {
 }
 
 async function serveStatic(response, requestPath, headOnly) {
-  const safePath = requestPath === "/" ? "/index.html" : requestPath;
-  const resolved = path.resolve(STATIC_ROOT_DIR, `.${decodeURIComponent(safePath)}`);
-  if (!resolved.startsWith(STATIC_ROOT_DIR)) throw httpError(403, "Forbidden");
+  const resolved = resolveStaticPath(STATIC_ROOT_DIR, requestPath === "/" ? "/index.html" : requestPath);
 
   try {
     const data = await readFileWithRetry(resolved);
@@ -192,6 +190,24 @@ async function serveStatic(response, requestPath, headOnly) {
     if (error.code === "ENOENT") throw httpError(404, "Not found");
     throw error;
   }
+}
+
+function resolveStaticPath(rootDir, requestPath) {
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(requestPath);
+  } catch {
+    throw httpError(400, "Request path is not valid URL encoding.");
+  }
+
+  const resolved = path.resolve(rootDir, `.${decodedPath}`);
+  if (!isPathInside(rootDir, resolved)) throw httpError(403, "Forbidden");
+  return resolved;
+}
+
+function isPathInside(rootDir, candidatePath) {
+  const relative = path.relative(rootDir, candidatePath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 async function readFileWithRetry(filePath, attempts = 5) {
