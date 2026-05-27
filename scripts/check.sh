@@ -1,0 +1,35 @@
+#!/bin/zsh
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${0}")" && pwd)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+cd "${PROJECT_DIR}"
+
+echo "Checking JavaScript syntax..."
+find . \
+  -path './.git' -prune -o \
+  -path './Output' -prune -o \
+  -path './incoming' -prune -o \
+  -path './logs' -prune -o \
+  -path './node_modules' -prune -o \
+  -type f -name '*.js' -exec node --check {} \;
+
+echo "Checking shell syntax..."
+find . \
+  -path './.git' -prune -o \
+  -path './Output' -prune -o \
+  -path './incoming' -prune -o \
+  -path './logs' -prune -o \
+  -path './node_modules' -prune -o \
+  -type f -name '*.sh' -exec zsh -n {} \;
+
+echo "Checking package metadata..."
+node -e 'JSON.parse(require("node:fs").readFileSync("package.json", "utf8"))'
+
+if git rev-parse --verify shareable >/dev/null 2>&1; then
+  echo "Checking shareable branch safety..."
+  "${PROJECT_DIR}/scripts/check-shareable.sh" shareable
+fi
+
+echo "Checks passed."

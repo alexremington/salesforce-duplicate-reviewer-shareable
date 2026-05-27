@@ -1,0 +1,76 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Repository checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Fetch private shareable branch
+        if: github.ref_name == 'main' && github.event.repository.private
+        run: git fetch origin shareable:refs/heads/shareable
+
+      - name: Run checks
+        run: npm run check
+
+      - name: Scan current public-safe tree
+        if: github.ref_name == 'shareable' || !github.event.repository.private
+        run: scripts/check-shareable.sh HEAD
+
+  smoke-ui:
+    name: UI smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Playwright
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+
+      - name: Start app
+        run: |
+          npm start > /tmp/duplicate-reviewer.log 2>&1 &
+          echo "$!" > /tmp/duplicate-reviewer.pid
+
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:5180/api/health > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          cat /tmp/duplicate-reviewer.log
+          exit 1
+
+      - name: Run UI smoke test
+        run: npm run smoke:ui
+
+      - name: Stop app
+        if: always()
+        run: |
+          if [ -f /tmp/duplicate-reviewer.pid ]; then
+            kill "$(cat /tmp/duplicate-reviewer.pid)" 2>/dev/null || true
+          fi
