@@ -594,6 +594,7 @@ const state = {
   fileName: "",
   datasetKey: "",
   reviewStateStatus: "",
+  loadError: "",
   loadingModal: {
     active: false,
     title: "",
@@ -731,10 +732,12 @@ if (typeof window !== "undefined") {
   window.addEventListener("pagehide", flushPendingReviewStateSave);
 }
 
-els.demoButton.addEventListener("click", () => {
+els.demoButton.addEventListener("click", loadDemoData);
+
+function loadDemoData() {
   const rows = SAMPLE_DATA[state.objectType].map((row) => ({ ...row }));
   ingestRows(rows, `Demo ${OBJECT_CONFIG[state.objectType].label}`, true);
-});
+}
 
 els.threshold.addEventListener("input", () => {
   els.thresholdValue.textContent = els.threshold.value;
@@ -808,6 +811,17 @@ els.detailSurface.addEventListener("input", (event) => {
 });
 
 els.detailSurface.addEventListener("click", (event) => {
+  const emptyAction = event.target.closest?.("[data-empty-action]");
+  if (emptyAction) {
+    if (emptyAction.dataset.emptyAction === "choose-csv") {
+      setCsvObjectMenuOpen(true);
+      els.chooseCsvButton.focus();
+    } else if (emptyAction.dataset.emptyAction === "demo-data") {
+      loadDemoData();
+    }
+    return;
+  }
+
   const labelButton = event.target.closest?.("[data-label-action]");
   if (labelButton) {
     handleTrainingLabelAction(labelButton.dataset.labelAction);
@@ -927,7 +941,9 @@ function loadFile(file, objectType = state.objectType) {
         size: file.size,
         saveRecent: true
       });
-    } catch {
+    } catch (error) {
+      state.loadError = error.message || "CSV could not be loaded.";
+      state.reviewStateStatus = state.loadError;
       endFileLoad();
       renderSource();
       renderDetail();
@@ -936,6 +952,8 @@ function loadFile(file, objectType = state.objectType) {
     }
   };
   reader.onerror = () => {
+    state.loadError = "CSV could not be read.";
+    state.reviewStateStatus = state.loadError;
     endFileLoad();
     hideLoadingModal();
     renderSource();
@@ -998,7 +1016,9 @@ async function loadFromUrlIfRequested() {
     if (params.get("notify") === "1") {
       notifyReviewReady(fileName, { sticky: params.get("sticky") === "1" }).catch(() => {});
     }
-  } catch {
+  } catch (error) {
+    state.loadError = error.message || "CSV could not be loaded.";
+    state.reviewStateStatus = state.loadError;
     endFileLoad();
     renderSource();
     renderDetail();
@@ -1026,6 +1046,7 @@ function beginFileLoad(fileName, objectType = state.objectType) {
   state.isLoadingFile = true;
   state.loadingFileName = fileName || "";
   state.reviewStateStatus = "";
+  state.loadError = "";
   showLoadingModal("Loading CSV", `Reading ${fileName || "CSV file"}.`);
   renderSource();
   renderDetail();
@@ -3828,13 +3849,16 @@ function renderSource() {
   els.fileName.textContent = state.loadingFileName || state.fileName || "CSV import";
   els.fileMeta.textContent = sourceMetaText(config);
   els.sourcePill.textContent = state.isLoadingFile ? "Loading" : state.rows.length ? "Loaded" : "No file";
+  if (state.loadError && !state.isLoadingFile) els.sourcePill.textContent = "Error";
   els.sourcePill.classList.toggle("is-loaded", Boolean(state.rows.length) && !state.isLoadingFile);
   els.sourcePill.classList.toggle("is-loading", state.isLoadingFile);
+  els.sourcePill.classList.toggle("is-error", Boolean(state.loadError) && !state.isLoadingFile);
   els.dropZone.classList.toggle("is-loading", state.isLoadingFile);
 }
 
 function sourceMetaText(config) {
   if (state.isLoadingFile) return `Loading ${config.label.toLowerCase()}...`;
+  if (state.loadError) return state.loadError;
   const baseText = state.rows.length
     ? `${formatNumber(state.rows.length)} ${config.label.toLowerCase()} loaded`
     : "No records loaded";
@@ -4251,17 +4275,22 @@ function renderDetail() {
   }
 
   if (!hasGroup) {
-    els.detailTitle.textContent = state.rows.length ? "No group selected" : "Load a Salesforce export";
+    els.detailTitle.textContent = state.loadError ? "Import failed" : state.rows.length ? "No group selected" : "Load a Salesforce export";
     els.detailSurface.innerHTML = `
-      <div class="empty-state">
+      <div class="empty-state ${state.loadError ? "error-state" : ""}">
         <div class="empty-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" focusable="false">
-            <path d="M8 7h8M8 12h8M8 17h5" />
-            <path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+            ${state.loadError
+              ? '<path d="M12 8v5M12 17h.01" /><path d="M10.3 3.9 2.7 17.1A2 2 0 0 0 4.4 20h15.2a2 2 0 0 0 1.7-2.9L13.7 3.9a2 2 0 0 0-3.4 0Z" />'
+              : '<path d="M8 7h8M8 12h8M8 17h5" /><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />'}
           </svg>
         </div>
-        <strong>${state.rows.length ? "No duplicate groups" : "No duplicate groups yet"}</strong>
-        <span>${state.rows.length ? "Adjust the threshold or mapping." : "Choose a CSV or load demo data."}</span>
+        <strong>${state.loadError ? "CSV could not be loaded" : state.rows.length ? "No duplicate groups" : "No duplicate groups yet"}</strong>
+        <span>${state.loadError ? escapeHtml(state.loadError) : state.rows.length ? "Adjust the threshold or mapping." : "Choose a CSV or load demo data."}</span>
+        <div class="empty-actions">
+          <button class="button button-primary" type="button" data-empty-action="choose-csv">Choose CSV</button>
+          <button class="button button-secondary" type="button" data-empty-action="demo-data">Load Demo</button>
+        </div>
       </div>
     `;
     return;

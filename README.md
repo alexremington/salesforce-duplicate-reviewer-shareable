@@ -4,6 +4,8 @@
 
 A static browser UI for reviewing possible duplicate Salesforce Contact and Account records from CSV exports.
 
+For local setup, see [SETUP.md](SETUP.md).
+
 ## Open The App
 
 Open `index.html` in a browser. No server or package install is required.
