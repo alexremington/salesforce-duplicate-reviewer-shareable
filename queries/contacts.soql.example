@@ -1,0 +1,4 @@
+SELECT Id, Name, Account.Name, Email, Phone, MobilePhone
+FROM Contact
+WHERE Name != null
+LIMIT 1000

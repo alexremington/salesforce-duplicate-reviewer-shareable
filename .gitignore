@@ -1,0 +1,6 @@
+.DS_Store
+Output/
+logs/
+incoming/
+node_modules/
+scripts/__pycache__/

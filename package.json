@@ -1,0 +1,12 @@
+{
+  "name": "salesforce-duplicate-reviewer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first UI for reviewing Salesforce account and contact duplicate candidates.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
