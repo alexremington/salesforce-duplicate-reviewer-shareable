@@ -22,6 +22,11 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Install zsh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh
+
       - name: Fetch private shareable branch
         if: github.ref_name == 'main' && github.event.repository.private
         run: git fetch origin shareable:refs/heads/shareable
