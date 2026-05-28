@@ -735,6 +735,7 @@ const state = {
   filterLogicMode: "and",
   filterLogic: "",
   labelStatusFilters: new Set(),
+  pendingLabelStatusFilters: new Set(),
   recentFiles: []
 };
 
@@ -870,6 +871,7 @@ els.thresholdMaxNumber.addEventListener("blur", () => syncThresholdInputs("max-n
 
 els.groupSortToggle.addEventListener("click", toggleGroupSortDirection);
 els.applyControlsButton.addEventListener("click", applyMatchControls);
+els.labelStatusFilter.addEventListener("click", handleLabelStatusFilterClick);
 els.labelStatusFilter.addEventListener("change", handleLabelStatusFilterChange);
 els.groupFilterBuilder.addEventListener("click", handleGroupFilterClick);
 els.groupFilterBuilder.addEventListener("change", handleGroupFilterChange);
@@ -1186,6 +1188,7 @@ function clearLoadedDatasetForPendingLoad() {
   state.filterLogic = "";
   state.filterLogicMode = "and";
   state.labelStatusFilters.clear();
+  state.pendingLabelStatusFilters.clear();
   state.decisions.clear();
   state.mergeResults.clear();
   state.trainingLabels.clear();
@@ -4406,6 +4409,8 @@ function renderLabelStatusFilterHost() {
 }
 
 function renderLabelStatusFilter(disabled = false) {
+  const disabledAttribute = disabled ? "disabled" : "";
+  const applyDisabled = disabled || !labelStatusFiltersChanged() ? "disabled" : "";
   return `
     <fieldset class="label-status-filter" ${disabled ? "disabled" : ""}>
       <legend>Label status</legend>
@@ -4416,12 +4421,15 @@ function renderLabelStatusFilter(disabled = false) {
               type="checkbox"
               value="${escapeHtml(value)}"
               data-label-status-filter
-              ${state.labelStatusFilters.has(value) ? "checked" : ""}
+              ${state.pendingLabelStatusFilters.has(value) ? "checked" : ""}
             />
             <span>${escapeHtml(label)}</span>
           </label>
         `)
         .join("")}
+      <div class="label-status-filter-footer">
+        <button class="mini-button" type="button" data-label-status-apply ${disabledAttribute || applyDisabled}>Apply</button>
+      </div>
     </fieldset>
   `;
 }
@@ -4594,10 +4602,15 @@ function handleGroupFilterClick(event) {
   renderFilterBuilder();
 }
 
+function handleLabelStatusFilterClick(event) {
+  if (!event.target.closest?.("[data-label-status-apply]") || !canUseMatchFilters()) return;
+  applyLabelStatusFilters();
+}
+
 function handleLabelStatusFilterChange(event) {
   const labelStatusControl = event.target.closest?.("[data-label-status-filter]");
   if (!labelStatusControl || !canUseMatchFilters()) return;
-  updateLabelStatusFilter(labelStatusControl);
+  updatePendingLabelStatusFilter(labelStatusControl);
 }
 
 function handleGroupFilterChange(event) {
@@ -4628,15 +4641,43 @@ function handleGroupFilterInput(event) {
   updateGroupFilterFromControl(control, { rerender: false });
 }
 
-function updateLabelStatusFilter(control) {
+function updatePendingLabelStatusFilter(control) {
   const value = control.value;
   if (!GROUP_LABEL_STATUS_FILTER_VALUES.has(value)) return;
   if (control.checked) {
-    state.labelStatusFilters.add(value);
+    state.pendingLabelStatusFilters.add(value);
   } else {
-    state.labelStatusFilters.delete(value);
+    state.pendingLabelStatusFilters.delete(value);
   }
+  updateLabelStatusApplyButton();
+}
+
+function updateLabelStatusApplyButton() {
+  const applyButton = els.labelStatusFilter?.querySelector("[data-label-status-apply]");
+  if (!applyButton) return;
+  applyButton.disabled = !canUseMatchFilters() || !labelStatusFiltersChanged();
+}
+
+function applyLabelStatusFilters() {
+  if (!canUseMatchFilters()) return;
+  state.labelStatusFilters = new Set([...state.pendingLabelStatusFilters]);
   visibleGroupsCache = null;
+  ensureSelectedGroupVisible();
+  renderGroups();
+  renderDetail();
+  renderLabelStatusFilterHost();
+}
+
+function labelStatusFiltersChanged() {
+  return !setsEqual(state.labelStatusFilters, state.pendingLabelStatusFilters);
+}
+
+function setsEqual(left, right) {
+  if (left.size !== right.size) return false;
+  for (const value of left) {
+    if (!right.has(value)) return false;
+  }
+  return true;
 }
 
 function updateGroupFilterFromControl(control, { rerender = false } = {}) {

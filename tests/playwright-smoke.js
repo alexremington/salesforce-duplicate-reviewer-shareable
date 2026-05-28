@@ -278,8 +278,14 @@ async function run() {
     if (!fieldResolutionSelectable) throw new Error("Expected visible field-resolution selects to contain options.");
     if (!trainingExportEnabled) throw new Error("Expected training label action to enable label export.");
     if (!fullLabelIndicators) throw new Error("Expected fully labeled groups to show a green label indicator.");
+    if (labelStatusFilterState.countBeforeApply !== labelStatusFilterState.startingCount || !labelStatusFilterState.applyEnabledAfterChange) {
+      throw new Error(`Expected label status checkboxes to stage changes until Apply is clicked: ${JSON.stringify(labelStatusFilterState)}`);
+    }
     if (!labelStatusFilterState.filteredCount || !labelStatusFilterState.visibleFullCount) {
       throw new Error(`Expected label status checkboxes to filter fully labeled groups: ${JSON.stringify(labelStatusFilterState)}`);
+    }
+    if (!labelStatusFilterState.applyDisabledAfterApply) {
+      throw new Error(`Expected label status Apply to disable after applying staged changes: ${JSON.stringify(labelStatusFilterState)}`);
     }
     if (!duplicateBadges) throw new Error("Expected at least one Duplicate decision badge.");
     if (!notDuplicateBadges) throw new Error("Expected at least one Not Duplicate decision badge.");
@@ -583,15 +589,20 @@ async function exerciseCustomFilters(page) {
 
 async function exerciseLabelStatusFilter(page) {
   const fullCheckbox = page.locator('[data-label-status-filter][value="full"]');
+  const startingCount = await page.locator("#groupCount").evaluate((node) => Number(node.textContent?.replace(/,/g, "") || 0));
   await fullCheckbox.check();
-  await page.locator("#applyControlsButton").click();
+  const countBeforeApply = await page.locator("#groupCount").evaluate((node) => Number(node.textContent?.replace(/,/g, "") || 0));
+  const applyButton = page.locator("[data-label-status-apply]");
+  const applyEnabledAfterChange = await applyButton.isEnabled();
+  await applyButton.click();
   await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
   const filteredCount = await page.locator("#groupCount").evaluate((node) => Number(node.textContent?.replace(/,/g, "") || 0));
   const visibleFullCount = await page.locator(".group-item.is-label-full").count();
+  const applyDisabledAfterApply = await applyButton.isDisabled();
   await fullCheckbox.uncheck();
-  await page.locator("#applyControlsButton").click();
+  await applyButton.click();
   await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
-  return { filteredCount, visibleFullCount };
+  return { startingCount, countBeforeApply, applyEnabledAfterChange, filteredCount, visibleFullCount, applyDisabledAfterApply };
 }
 
 async function addFilter(page, expectedCount) {
