@@ -58,7 +58,9 @@ async function run() {
     const filterFieldDisabledBeforeLoad = await page.locator(".filter-row .filter-field-select").first().isDisabled();
     const applyDisabledBeforeLoad = await page.locator("#applyControlsButton").isDisabled();
     const labelStatusDisabledBeforeLoad = await page.locator('[data-label-status-filter][value="unlabeled"]').isDisabled();
-    const hideLabeledDisabledBeforeLoad = await page.locator("#hideLabeledGroups").isDisabled();
+    const labelStatusInMatchGroups = await page.locator('#matchGroupsPanelBody [data-label-status-filter][value="unlabeled"]').count();
+    const labelStatusInMatchControls = await page.locator("#matchControlsPanelBody [data-label-status-filter]").count();
+    const hideLabeledRemoved = await page.locator("#hideLabeledGroups").count() === 0;
     await page.locator("#chooseCsvButton").click();
     await page.getByRole("menuitem", { name: "Contacts" }).waitFor({ state: "visible", timeout: 5000 });
     await page.keyboard.press("Escape");
@@ -85,7 +87,6 @@ async function run() {
     const thresholdTypedState = await thresholdControlState(page);
     const fastestSearchDefaultUnchecked = !(await page.locator("#highRecallMode").isChecked());
     const labelStatusEnabledAfterLoad = await page.locator('[data-label-status-filter][value="unlabeled"]').isEnabled();
-    const hideLabeledEnabledAfterLoad = await page.locator("#hideLabeledGroups").isEnabled();
     await page.locator("#applyControlsButton").click();
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
     const thresholdFilteredScores = await visibleGroupScores(page);
@@ -217,8 +218,11 @@ async function run() {
     if (!lightPaneSurfaces.standardized || !darkPaneSurfaces.standardized) {
       throw new Error(`Expected layout panes to share one canvas background: ${JSON.stringify({ lightPaneSurfaces, darkPaneSurfaces })}`);
     }
-    if (!filterFieldDisabledBeforeLoad || !applyDisabledBeforeLoad || !labelStatusDisabledBeforeLoad || !hideLabeledDisabledBeforeLoad) {
+    if (!filterFieldDisabledBeforeLoad || !applyDisabledBeforeLoad || !labelStatusDisabledBeforeLoad) {
       throw new Error("Expected match filters and Apply to be disabled before a dataset is loaded.");
+    }
+    if (!labelStatusInMatchGroups || labelStatusInMatchControls || !hideLabeledRemoved) {
+      throw new Error("Expected Label status in Match Groups and Hide labeled removed.");
     }
     if (!latestRecentFiles.contacts || !latestRecentFiles.accounts) {
       throw new Error(`Expected latest Contact and Account exports in Recent files: ${JSON.stringify(latestRecentFiles)}`);
@@ -239,7 +243,6 @@ async function run() {
       throw new Error("Expected fastest search to be opt-in so broader candidate search is the default.");
     }
     if (!labelStatusEnabledAfterLoad) throw new Error("Expected label status filters to enable after loading a dataset.");
-    if (!hideLabeledEnabledAfterLoad) throw new Error("Expected Match Groups filters to enable after loading a dataset.");
     if (!thresholdFilteredScores.length || thresholdFilteredScores.some((score) => score < 80 || score > 99)) {
       throw new Error(`Expected max threshold to limit visible scores to 80-99: ${JSON.stringify(thresholdFilteredScores)}`);
     }
