@@ -62,11 +62,15 @@ async function run() {
     const labelStatusInMatchControls = await page.locator("#matchControlsPanelBody [data-label-status-filter]").count();
     const hideLabeledRemoved = await page.locator("#hideLabeledGroups").count() === 0;
     const loadingProgressbar = await loadingProgressbarState(page);
+    await page.locator(".recent-file").filter({ hasText: "Latest Contacts" }).first().click();
+    await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
+    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    const latestJsonLoad = await datasetLoadState(page);
     await page.locator("#chooseCsvButton").click();
     await page.getByRole("menuitem", { name: "Contacts" }).waitFor({ state: "visible", timeout: 5000 });
     await page.keyboard.press("Escape");
     const csvMenuClosed = await page.locator("#csvObjectMenu").isHidden();
-    await page.locator('[data-empty-action="demo-data"]').click();
+    await page.locator("#demoButton").click();
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
 
     await page.locator("#csvInput").setInputFiles(csvPath);
@@ -213,7 +217,7 @@ async function run() {
       bodyScrollWidth: document.body.scrollWidth
     }));
 
-    if (!emptyChooseVisible) throw new Error("Expected empty-state Choose CSV action to be visible.");
+    if (!emptyChooseVisible) throw new Error("Expected empty-state Choose File action to be visible.");
     if (!emptyDemoVisible) throw new Error("Expected empty-state Load Demo action to be visible.");
     if (!lightTheme.colorScheme.includes("light") || !darkTheme.colorScheme.includes("dark") || lightTheme.bodyBg === darkTheme.bodyBg) {
       throw new Error(`Expected the UI theme to follow system light/dark mode: ${JSON.stringify({ lightTheme, darkTheme })}`);
@@ -229,6 +233,9 @@ async function run() {
     }
     if (!loadingProgressbar.exists || loadingProgressbar.min !== "0" || loadingProgressbar.max !== "100") {
       throw new Error(`Expected the loading modal to include a determinate progress bar: ${JSON.stringify(loadingProgressbar)}`);
+    }
+    if (latestJsonLoad.fileName !== "salesforce-report-latest.json" || latestJsonLoad.rowCount !== 2 || latestJsonLoad.groupCount !== 1 || latestJsonLoad.processingMode !== "worker") {
+      throw new Error(`Expected latest JSON dataset to load through Recent files: ${JSON.stringify(latestJsonLoad)}`);
     }
     if (!latestRecentFiles.contacts || !latestRecentFiles.accounts) {
       throw new Error(`Expected latest Contact and Account exports in Recent files: ${JSON.stringify(latestRecentFiles)}`);
@@ -343,6 +350,7 @@ async function run() {
       lightPaneSurfaces,
       darkPaneSurfaces,
       loadingProgressbar,
+      latestJsonLoad,
       fastestSearchDefaultUnchecked,
       thresholdFilteredScores,
       customFilterState,
@@ -388,6 +396,17 @@ async function waitForFirstGroup(page, label) {
     console.error(`${label} did not render a visible group: ${JSON.stringify(debugState)}`);
     throw error;
   }
+}
+
+async function datasetLoadState(page) {
+  return page.evaluate(() => ({
+    fileName: state.fileName,
+    objectType: state.objectType,
+    rowCount: state.rows.length,
+    groupCount: state.groups.length,
+    workerAvailable: typeof Worker !== "undefined",
+    processingMode: state.lastProcessingMode
+  }));
 }
 
 async function duplicateReviewerDebugState(page) {

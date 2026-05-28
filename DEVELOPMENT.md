@@ -1,26 +1,28 @@
 # Developer Guide
 
-This app is a dependency-free browser tool. `index.html` loads `styles.css` and `app.js` directly, so there is no bundler, package manager, or build step.
+This app is a dependency-free browser tool. `index.html` loads `styles.css` and `app.js` directly, and server-backed matching uses `matching-worker.js`; there is no bundler, package manager, or build step.
 
 ## File Map
 
 - `index.html`: App shell, import controls, collapsible panels, review pane, and static button/section markup.
 - `styles.css`: Layout, panel, group-list, detail-window, batch-action, and responsive styling.
-- `app.js`: CSV parsing, field mapping, duplicate detection, review state, rendering, recent-file storage, and export.
+- `app.js`: JSON/CSV parsing, worker orchestration, field mapping, duplicate detection, review state, rendering, recent-file storage, and export.
+- `matching-worker.js`: Web Worker entry point for parsing datasets and calculating match groups off the UI thread.
 - `scripts/check-account-calibration.js`: Node regression check for exported account or contact label CSVs.
 - `README.md`: User-facing usage notes.
 
 ## Runtime Flow
 
-1. A CSV is loaded by file input, drag/drop, recent-file reload, or demo data.
-2. `ingestRows()` stores original row objects in `state.rows`, adds a stable `__rowIndex`, infers headers, and auto-maps fields from `OBJECT_CONFIG`.
-3. `recompute()` calls `buildGroups()` with the current object type, mapping, threshold, and High Recall mode.
-4. `buildGroups()` gets a cached scoring context, generates candidate pair keys, scores candidate pairs, unions threshold-passing pairs into connected components, summarizes each group from all pairwise scores, filters groups by the threshold, then sorts them.
-5. `render()` updates the source panel, field mapping, metrics, match group list, navigation state, and active detail view.
-6. User decisions, pair-level calibration labels, field-resolution choices, separated records, and selected batch groups live in `state`.
-7. `exportDecisions()` writes duplicate decisions to a canonical-record CSV download.
-8. Review state for real CSV loads is persisted in IndexedDB and restored by dataset key when the same dataset is loaded again.
-9. Pair-level calibration labels live in `state.trainingLabels` and export/import separately through `exportTrainingLabels()` and `importTrainingLabels()`.
+1. A JSON or CSV dataset is loaded by file input, drag/drop, recent-file reload, staging auto-load, or demo data.
+2. Server-backed loads route parsing and matching through `matching-worker.js`; file-only loads fall back to the same logic on the main thread.
+3. `stageRowsForReview()` stores original row objects in `state.rows`, adds a stable `__rowIndex`, infers headers, and auto-maps fields from `OBJECT_CONFIG`.
+4. `recompute()` calls `buildGroupsAsync()` with the current object type, mapping, threshold, and High Recall mode.
+5. `buildGroupsAsync()` gets a cached scoring context, generates candidate pair keys, scores candidate pairs, unions threshold-passing pairs into connected components, summarizes each group from all pairwise scores, filters groups by the threshold, then sorts them.
+6. `render()` updates the source panel, field mapping, metrics, match group list, navigation state, and active detail view.
+7. User decisions, pair-level calibration labels, field-resolution choices, separated records, and selected batch groups live in `state`.
+8. `exportDecisions()` writes duplicate decisions to a canonical-record CSV download.
+9. Review state for real dataset loads is persisted in IndexedDB and restored by dataset key when the same dataset is loaded again.
+10. Pair-level calibration labels live in `state.trainingLabels` and export/import separately through `exportTrainingLabels()` and `importTrainingLabels()`.
 
 ## State Model
 
@@ -229,13 +231,13 @@ node scripts/check-account-calibration.js \
 Then open `index.html` in a browser and verify:
 
 - Demo data loads for Contacts and Accounts.
-- Choosing CSV opens the Contacts/Accounts menu.
+- Choosing File opens the Contacts/Accounts menu.
 - Field Mapping appears after data load.
 - Match Controls threshold and High Recall recompute groups.
 - Match Groups selects, searches, sorts ascending/descending, hides labeled groups, and navigates correctly.
 - Duplicate / Not Duplicate decisions update the group list and export count.
 - Pair calibration labels update the `Export Labels` count and produce a pair-level CSV.
 - Import Labels restores an exported label CSV for the currently loaded dataset and updates the `Export Labels` count.
-- Reloading the same CSV restores pair labels, group decisions, accepted field choices, and separated-record choices.
+- Reloading the same dataset restores pair labels, group decisions, accepted field choices, and separated-record choices.
 - Separating and restoring records updates the active cluster.
 - Export Decisions downloads a canonical-record CSV.

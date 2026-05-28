@@ -2,13 +2,13 @@
 
 [![Checks](https://github.com/alexremington/salesforce-duplicate-reviewer/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/alexremington/salesforce-duplicate-reviewer/actions/workflows/checks.yml)
 
-A static browser UI for reviewing possible duplicate Salesforce Contact and Account records from CSV exports.
+A static browser UI for reviewing possible duplicate Salesforce Contact and Account records from Salesforce JSON datasets or CSV exports.
 
 For local setup, see [SETUP.md](SETUP.md). For teammate handoff, see [TEAM-HANDOFF.md](TEAM-HANDOFF.md).
 
 ## Open The App
 
-Open `index.html` in a browser. No server or package install is required for CSV review.
+Open `index.html` in a browser. No server or package install is required for manual JSON or CSV review.
 
 To use server-backed features such as Salesforce merge actions or staging auto-load URLs, start the local server:
 
@@ -30,11 +30,11 @@ Manual start:
 npm start
 ```
 
-Click `Choose CSV`, then choose whether the import is a `Contacts` or `Accounts` file. Recent files remember which object type was used when they were loaded, so the same file can be reopened with the correct object type.
+Click `Choose File`, then choose whether the import is a `Contacts` or `Accounts` file. Recent files remember which object type was used when they were loaded, so the same file can be reopened with the correct object type.
 
-After a CSV is selected, the Source panel and review pane show a loading state while the browser parses the file and calculates match groups.
+After a file is selected, the Source panel and review pane show a loading state while the browser parses the file and calculates match groups.
 
-A loading modal appears while CSV data is being read, matched, and restored from saved review state. The same modal appears while exported label CSVs are imported.
+A loading modal appears while data is being read, matched, and restored from saved review state. Server-backed loads use a Web Worker so JSON parsing and duplicate matching do not block the UI thread. The same modal appears while exported label CSVs are imported.
 
 ## Supported Matching Fields
 
@@ -168,13 +168,13 @@ After a successful staging export, the wrapper starts a local Duplicate Reviewer
 http://127.0.0.1:5180
 ```
 
-It then opens the app with the latest staging compatibility CSV auto-loaded. The app sends a macOS Notification Center alert after it finishes loading and matching the CSV, so the alert means the file is ready to review. The staging wrappers use a 60-second Bulk API polling interval by default to reduce Salesforce API calls for large exports.
+It then opens the app with the latest staging JSON dataset auto-loaded. The app sends a macOS Notification Center alert after it finishes loading and matching the dataset, so the alert means the file is ready to review. The staging wrappers use a 60-second Bulk API polling interval by default to reduce Salesforce API calls for large exports.
 
-Opening `index.html` directly remains supported for manual CSV uploads. If it is opened from disk while the local server is already running, the page redirects itself to the server-backed URL so the latest Scheduler exports and staging auto-load URLs keep working. If the server is not running, the static page stays open as a manual-upload fallback.
+Opening `index.html` directly remains supported for manual JSON or CSV uploads. If it is opened from disk while the local server is already running, the page redirects itself to the server-backed URL so the latest Scheduler exports and staging auto-load URLs keep working. If the server is not running, the static page stays open as a manual-upload fallback.
 
 For day-to-day review work, use `Launch Duplicate Reviewer.command` on macOS or `Launch Duplicate Reviewer.ps1` on Windows. The server-backed app automatically adds the latest staging Contact and Account exports to `Recent files` when those exports exist, so the launcher is the single entry point for continuing work after Scheduler downloads finish.
 
-The staging auto-load URL includes `sticky=1`, so the local server also opens a small macOS alert dialog after the CSV is ready. That dialog stays onscreen until dismissed. Notification Center itself controls whether the notification is a temporary banner or a persistent alert in macOS System Settings.
+The staging auto-load URL includes `sticky=1`, so the local server also opens a small macOS alert dialog after the JSON dataset is ready. That dialog stays onscreen until dismissed. Notification Center itself controls whether the notification is a temporary banner or a persistent alert in macOS System Settings.
 
 The local server can also be started manually:
 
@@ -194,7 +194,7 @@ The starter refreshes a generated local static cache before launching or checkin
 ~/Library/Application Support/salesforce-duplicate-reviewer/static
 ```
 
-The OneDrive project folder is still the source of truth. The cache is only a runtime copy used so static app loads are not blocked by transient OneDrive file-provider read errors. If a compatibility CSV cannot be read from OneDrive, the server falls back to the matching `salesforce-report-latest.json` export and synthesizes the CSV response for the browser.
+The OneDrive project folder is still the source of truth. The cache is only a runtime copy used so static app loads are not blocked by transient OneDrive file-provider read errors. The server exposes `salesforce-report-latest.json` as the native review dataset and keeps CSV endpoints available for compatibility. If one format cannot be read from OneDrive, the server falls back to the other format when possible.
 
 The staging Contacts and Accounts wrappers are registered in the scheduler UI under `Duplicate Reviewer exports`.
 
