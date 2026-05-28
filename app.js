@@ -608,7 +608,6 @@ const state = {
   mapping: {},
   groups: [],
   selectedGroupKey: "",
-  selectedGroupKeys: new Set(),
   decisions: new Map(),
   mergeResults: new Map(),
   trainingLabels: new Map(),
@@ -649,8 +648,11 @@ const els = {
   fileMeta: document.getElementById("fileMeta"),
   sourcePill: document.getElementById("sourcePill"),
   recentFileList: document.getElementById("recentFileList"),
+  thresholdSlider: document.getElementById("thresholdSlider"),
   threshold: document.getElementById("threshold"),
   maxThreshold: document.getElementById("maxThreshold"),
+  thresholdMinNumber: document.getElementById("thresholdMinNumber"),
+  thresholdMaxNumber: document.getElementById("thresholdMaxNumber"),
   thresholdValue: document.getElementById("thresholdValue"),
   highRecallMode: document.getElementById("highRecallMode"),
   groupSearch: document.getElementById("groupSearch"),
@@ -662,11 +664,6 @@ const els = {
   rerunButton: document.getElementById("rerunButton"),
   groupList: document.getElementById("groupList"),
   groupCount: document.getElementById("groupCount"),
-  selectVisibleGroups: document.getElementById("selectVisibleGroups"),
-  selectedCount: document.getElementById("selectedCount"),
-  batchDuplicateButton: document.getElementById("batchDuplicateButton"),
-  batchNotDuplicateButton: document.getElementById("batchNotDuplicateButton"),
-  clearSelectionButton: document.getElementById("clearSelectionButton"),
   metrics: document.getElementById("metrics"),
   objectLabel: document.getElementById("objectLabel"),
   detailTitle: document.getElementById("detailTitle"),
@@ -750,6 +747,12 @@ function loadDemoData() {
 
 els.threshold.addEventListener("input", () => syncThresholdInputs("min"));
 els.maxThreshold.addEventListener("input", () => syncThresholdInputs("max"));
+els.thresholdMinNumber.addEventListener("input", () => syncThresholdNumberInput("min-number"));
+els.thresholdMaxNumber.addEventListener("input", () => syncThresholdNumberInput("max-number"));
+els.thresholdMinNumber.addEventListener("change", () => syncThresholdInputs("min-number"));
+els.thresholdMaxNumber.addEventListener("change", () => syncThresholdInputs("max-number"));
+els.thresholdMinNumber.addEventListener("blur", () => syncThresholdInputs("min-number"));
+els.thresholdMaxNumber.addEventListener("blur", () => syncThresholdInputs("max-number"));
 
 els.groupSortToggle.addEventListener("click", toggleGroupSortDirection);
 els.hideLabeledGroups.addEventListener("change", applyHideLabeledGroups);
@@ -793,10 +796,6 @@ els.groupList.addEventListener("scroll", () => {
     groupListRenderFrame = 0;
     renderGroups({ preserveScroll: true });
   });
-});
-els.groupList.addEventListener("change", (event) => {
-  if (!event.target.classList?.contains("group-select")) return;
-  setGroupSelection(event.target.dataset.groupSelectKey, event.target.checked);
 });
 
 els.detailSurface.addEventListener("change", (event) => {
@@ -863,18 +862,6 @@ els.recentFileList.addEventListener("click", async (event) => {
   const button = event.target.closest?.("[data-file-id]");
   if (!button) return;
   await loadRecentFile(button.dataset.fileId);
-});
-
-els.selectVisibleGroups.addEventListener("change", () => {
-  setVisibleGroupSelection(els.selectVisibleGroups.checked);
-});
-
-els.batchDuplicateButton.addEventListener("click", () => markSelectedGroups("duplicate"));
-els.batchNotDuplicateButton.addEventListener("click", () => markSelectedGroups("not-duplicate"));
-els.clearSelectionButton.addEventListener("click", () => {
-  state.selectedGroupKeys.clear();
-  renderGroupCheckStates();
-  renderBatchToolbar(filteredGroups());
 });
 
 ["dragenter", "dragover"].forEach((eventName) => {
@@ -1078,7 +1065,6 @@ function clearLoadedDatasetForPendingLoad() {
   state.mapping = {};
   state.groups = [];
   state.selectedGroupKey = "";
-  state.selectedGroupKeys.clear();
   state.decisions.clear();
   state.mergeResults.clear();
   state.trainingLabels.clear();
@@ -1825,7 +1811,6 @@ function ingestRows(rows, fileName, fromObjects, knownHeaders) {
   state.datasetKey = fromObjects ? "" : buildDatasetKey();
   state.reviewStateStatus = state.datasetKey && isFileHistoryAvailable() ? "Checking saved review state..." : "";
   state.selectedGroupKey = "";
-  state.selectedGroupKeys.clear();
   state.trainingLabels.clear();
   state.trainingPairIndexes.clear();
   mergeMasterSelections.clear();
@@ -1847,7 +1832,6 @@ function recompute() {
   if (!state.groups.some((group) => group.key === state.selectedGroupKey)) {
     state.selectedGroupKey = state.groups[0]?.key || "";
   }
-  pruneSelectedGroups();
   pruneFieldResolutions();
   pruneSeparatedRecords();
   visibleGroupsCache = null;
@@ -1866,7 +1850,6 @@ function applyMatchControls() {
   state.maxThreshold = nextMaxThreshold;
   state.highRecallMode = nextHighRecallMode;
   state.search = els.groupSearch.value.trim().toLowerCase();
-  state.selectedGroupKeys.clear();
   if (shouldRecompute) {
     recompute();
   } else {
@@ -1887,7 +1870,6 @@ function toggleGroupSortDirection() {
 
 function applyHideLabeledGroups() {
   state.hideLabeledGroups = els.hideLabeledGroups.checked;
-  state.selectedGroupKeys.clear();
   visibleGroupsCache = null;
   ensureSelectedGroupVisible();
   renderGroups();
@@ -1905,25 +1887,72 @@ function selectFirstVisibleGroup() {
 }
 
 function syncThresholdInputs(changed = "") {
-  let minScore = Number(els.threshold.value);
-  let maxScore = Number(els.maxThreshold.value);
+  const bounds = thresholdBounds();
+  let minScore = changed === "min-number"
+    ? readThresholdNumber(els.thresholdMinNumber, els.threshold.value)
+    : readThresholdNumber(els.threshold, state.threshold);
+  let maxScore = changed === "max-number"
+    ? readThresholdNumber(els.thresholdMaxNumber, els.maxThreshold.value)
+    : readThresholdNumber(els.maxThreshold, state.maxThreshold);
+
+  minScore = clampThresholdScore(minScore, bounds);
+  maxScore = clampThresholdScore(maxScore, bounds);
 
   if (changed === "min" && minScore > maxScore) {
-    maxScore = minScore;
-    els.maxThreshold.value = String(maxScore);
-  } else if (changed === "max" && maxScore < minScore) {
     minScore = maxScore;
-    els.threshold.value = String(minScore);
-  } else if (minScore > maxScore) {
+  } else if (changed === "min-number" && minScore > maxScore) {
+    minScore = maxScore;
+  } else if (changed === "max" && maxScore < minScore) {
     maxScore = minScore;
-    els.maxThreshold.value = String(maxScore);
+  } else if (changed === "max-number" && maxScore < minScore) {
+    maxScore = minScore;
+  } else if (minScore > maxScore) {
+    minScore = maxScore;
   }
 
+  els.threshold.value = String(minScore);
+  els.maxThreshold.value = String(maxScore);
+  els.thresholdMinNumber.value = String(minScore);
+  els.thresholdMaxNumber.value = String(maxScore);
+  syncThresholdSliderFill(minScore, maxScore, bounds);
   els.thresholdValue.textContent = thresholdRangeLabel(minScore, maxScore);
 }
 
 function thresholdRangeLabel(minScore = state.threshold, maxScore = state.maxThreshold) {
   return Number(minScore) === Number(maxScore) ? String(minScore) : `${minScore}-${maxScore}`;
+}
+
+function thresholdBounds() {
+  return {
+    min: Number(els.threshold.min) || 0,
+    max: Number(els.threshold.max) || 100
+  };
+}
+
+function readThresholdNumber(input, fallback) {
+  const value = Number(input.value);
+  return Number.isFinite(value) ? Math.round(value) : Number(fallback);
+}
+
+function syncThresholdNumberInput(changed) {
+  const input = changed === "min-number" ? els.thresholdMinNumber : els.thresholdMaxNumber;
+  const value = Number(input.value);
+  if (!Number.isFinite(value)) return;
+  const bounds = thresholdBounds();
+  if (value < bounds.min) return;
+  syncThresholdInputs(changed);
+}
+
+function clampThresholdScore(value, { min, max }) {
+  return Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
+}
+
+function syncThresholdSliderFill(minScore, maxScore, { min, max } = thresholdBounds()) {
+  const range = max - min || 1;
+  const minPercent = ((minScore - min) / range) * 100;
+  const maxPercent = ((maxScore - min) / range) * 100;
+  els.thresholdSlider?.style.setProperty("--threshold-min-pct", `${minPercent}%`);
+  els.thresholdSlider?.style.setProperty("--threshold-max-pct", `${maxPercent}%`);
 }
 
 function parseCsv(csvText) {
@@ -3959,6 +3988,9 @@ function renderSource() {
   els.objectLabel.textContent = config.label;
   els.threshold.value = state.threshold;
   els.maxThreshold.value = state.maxThreshold;
+  els.thresholdMinNumber.value = state.threshold;
+  els.thresholdMaxNumber.value = state.maxThreshold;
+  syncThresholdSliderFill(state.threshold, state.maxThreshold);
   els.thresholdValue.textContent = thresholdRangeLabel();
   els.highRecallMode.checked = state.highRecallMode;
   els.groupSearch.value = state.search;
@@ -4055,7 +4087,7 @@ function renderGroups(options = {}) {
   const filtered = filteredGroups();
   els.groupCount.textContent = filtered.length;
   renderGroupSortToggle();
-  renderBatchToolbar(filtered);
+  renderGroupFilterToolbar();
 
   if (!state.rows.length) {
     els.groupList.classList.remove("is-virtualized");
@@ -4121,10 +4153,11 @@ function renderGroupItem(group) {
   const activeRecords = getActiveGroupRecords(group);
   const separatedRecords = getSeparatedGroupRecords(group);
   const decision = state.decisions.get(group.key);
+  const labelStatus = groupTrainingLabelStatus(group);
   const groupClasses = [
     "group-item",
     group.key === state.selectedGroupKey ? "is-selected" : "",
-    state.selectedGroupKeys.has(group.key) ? "is-checked" : ""
+    labelStatus.className
   ]
     .filter(Boolean)
     .join(" ");
@@ -4134,21 +4167,22 @@ function renderGroupItem(group) {
   }`;
 
   return `
-    <article class="${groupClasses}" data-group-key="${escapeHtml(group.key)}">
-      <input
-        type="checkbox"
-        class="group-select"
-        data-group-select-key="${escapeHtml(group.key)}"
-        aria-label="Select group ${formatNumber(group.id)}"
-        ${state.selectedGroupKeys.has(group.key) ? "checked" : ""}
-      />
+    <article
+      class="${groupClasses}"
+      data-group-key="${escapeHtml(group.key)}"
+      data-label-status="${escapeHtml(labelStatus.status)}"
+      title="${escapeHtml(labelStatus.label)}"
+    >
       <button class="group-item-main" type="button" data-group-open-key="${escapeHtml(group.key)}">
         <div class="group-item-top">
           <div class="group-title">
             <strong>${escapeHtml(displayName(activeRecords[0] || group.records[0]))}</strong>
             <span>${escapeHtml(secondaryTitle)}</span>
           </div>
-          <span class="match-pill ${group.type}">${group.score}</span>
+          <span class="group-status-cluster">
+            ${renderGroupLabelIndicator(labelStatus)}
+            <span class="match-pill ${group.type}">${group.score}</span>
+          </span>
         </div>
         <div class="group-item-bottom">
           <span class="group-reason">${escapeHtml(reason)}</span>
@@ -4157,6 +4191,45 @@ function renderGroupItem(group) {
       </button>
     </article>
   `;
+}
+
+function groupTrainingLabelStatus(group) {
+  const pairs = getActiveGroupRecordPairs(group);
+  const totalCount = pairs.length;
+  const labeledCount = pairs.filter((pair) => state.trainingLabels.has(pair.key)).length;
+
+  if (!totalCount || !labeledCount) {
+    return {
+      status: "unlabeled",
+      className: "",
+      labeledCount,
+      totalCount,
+      label: "No calibration labels"
+    };
+  }
+
+  if (labeledCount === totalCount) {
+    return {
+      status: "full",
+      className: "is-label-full",
+      labeledCount,
+      totalCount,
+      label: `Fully labeled: ${formatNumber(labeledCount)} of ${formatNumber(totalCount)} pairs`
+    };
+  }
+
+  return {
+    status: "partial",
+    className: "is-label-partial",
+    labeledCount,
+    totalCount,
+    label: `Partially labeled: ${formatNumber(labeledCount)} of ${formatNumber(totalCount)} pairs`
+  };
+}
+
+function renderGroupLabelIndicator(labelStatus) {
+  if (labelStatus.status === "unlabeled") return "";
+  return `<span class="label-status-indicator ${labelStatus.status}" aria-label="${escapeHtml(labelStatus.label)}"></span>`;
 }
 
 function selectGroup(groupKey) {
@@ -4174,67 +4247,8 @@ function renderGroupSelection() {
   });
 }
 
-function renderGroupCheckStates() {
-  els.groupList.querySelectorAll(".group-item").forEach((item) => {
-    const checked = state.selectedGroupKeys.has(item.dataset.groupKey);
-    item.classList.toggle("is-checked", checked);
-    const checkbox = item.querySelector(".group-select");
-    if (checkbox) checkbox.checked = checked;
-  });
-}
-
-function renderBatchToolbar(filtered) {
-  const visibleKeys = filtered.map((group) => group.key);
-  const selectedVisibleCount = visibleKeys.filter((key) => state.selectedGroupKeys.has(key)).length;
-  const selectedCount = state.selectedGroupKeys.size;
-  const hasSelection = selectedCount > 0;
-
+function renderGroupFilterToolbar() {
   els.hideLabeledGroups.checked = state.hideLabeledGroups;
-  els.selectedCount.textContent = `${formatNumber(selectedCount)} selected`;
-  els.selectVisibleGroups.disabled = !visibleKeys.length;
-  els.selectVisibleGroups.checked = Boolean(visibleKeys.length && selectedVisibleCount === visibleKeys.length);
-  els.selectVisibleGroups.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visibleKeys.length;
-  els.batchDuplicateButton.disabled = !hasSelection;
-  els.batchNotDuplicateButton.disabled = !hasSelection;
-  els.clearSelectionButton.disabled = !hasSelection;
-}
-
-function setGroupSelection(groupKey, selected) {
-  if (!findGroupByKey(groupKey)) return;
-  if (selected) {
-    state.selectedGroupKeys.add(groupKey);
-  } else {
-    state.selectedGroupKeys.delete(groupKey);
-  }
-  renderGroupCheckStates();
-  renderBatchToolbar(filteredGroups());
-}
-
-function setVisibleGroupSelection(selected) {
-  filteredGroups().forEach((group) => {
-    if (selected) {
-      state.selectedGroupKeys.add(group.key);
-    } else {
-      state.selectedGroupKeys.delete(group.key);
-    }
-  });
-  renderGroupCheckStates();
-  renderBatchToolbar(filteredGroups());
-}
-
-function markSelectedGroups(decision) {
-  const groupKeys = new Set(state.groups.map((group) => group.key));
-  state.selectedGroupKeys.forEach((groupKey) => {
-    if (groupKeys.has(groupKey)) {
-      state.decisions.set(groupKey, decision);
-    }
-  });
-  if (state.hideLabeledGroups) state.selectedGroupKeys.clear();
-  visibleGroupsCache = null;
-  ensureSelectedGroupVisible();
-  renderGroups();
-  renderDetail();
-  scheduleReviewStateSave();
 }
 
 function navigateGroup(direction) {
@@ -4254,13 +4268,6 @@ function canNavigateGroup(direction) {
   const currentIndex = groups.findIndex((group) => group.key === state.selectedGroupKey);
   if (currentIndex === -1) return true;
   return direction > 0 ? currentIndex < groups.length - 1 : currentIndex > 0;
-}
-
-function pruneSelectedGroups() {
-  const groupKeys = new Set(state.groups.map((group) => group.key));
-  state.selectedGroupKeys.forEach((groupKey) => {
-    if (!groupKeys.has(groupKey)) state.selectedGroupKeys.delete(groupKey);
-  });
 }
 
 function pruneFieldResolutions() {
@@ -5026,8 +5033,8 @@ function labelCurrentTrainingPair(label) {
   renderTrainingExportButton();
   if (state.hideLabeledGroups) {
     ensureSelectedGroupVisible();
-    renderGroups();
   }
+  renderGroups();
   renderDetail();
 }
 
