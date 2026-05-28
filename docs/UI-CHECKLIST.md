@@ -9,7 +9,9 @@ Use this checklist for visual or interaction changes.
 - Important record state is visible where decisions happen, including Duplicate and Not Duplicate status.
 - Controls match their job: radio buttons for one retained value, segmented controls for modes, menus for object/source selection, and modals for reference information.
 - Icons are used for familiar commands when available, with accessible labels or tooltips.
+- Whitespace is distributed evenly between related panels, controls, and data regions.
 - Empty, loading, error, and success states are visible and actionable.
+- Scrolling remains available whenever content extends below the viewport.
 
 ## Duplicate Reviewer Specific
 
@@ -24,6 +26,7 @@ Use this checklist for visual or interaction changes.
 - At desktop width, comparison tables and merge matrices remain scannable.
 - At mobile width, primary controls wrap cleanly and text remains readable.
 - Page-level horizontal overflow is not introduced.
+- Page-level or pane-level vertical scrolling works whenever visible information continues below the viewport.
 - Text does not overlap adjacent controls, badges, cards, or table cells.
 - Any layout change that affects the workspace has a Playwright screenshot reviewed at desktop and mobile widths.
 
@@ -33,4 +36,3 @@ Use this checklist for visual or interaction changes.
 - Modals have a clear accessible name and close control.
 - Color is not the only signal for decision state.
 - Focus remains usable after opening and closing modal or menu controls.
-

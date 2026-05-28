@@ -30,19 +30,22 @@
 
 html {
   background: var(--bg);
+  min-height: 100%;
+  overflow-y: auto;
 }
 
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  height: 100vh;
+  height: auto;
   background:
     radial-gradient(circle at 12% 16%, rgba(23, 109, 97, 0.17), transparent 28rem),
     radial-gradient(circle at 92% 8%, rgba(173, 106, 19, 0.14), transparent 22rem),
     linear-gradient(135deg, #efe7d9 0%, #f8f4eb 46%, #e4d6bf 100%);
   color: var(--ink);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   font-size: 15px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
@@ -76,10 +79,11 @@ input[type="checkbox"] {
 }
 
 .app {
+  min-height: 100vh;
   height: 100vh;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .topbar {
@@ -317,7 +321,7 @@ h1 {
   display: grid;
   grid-template-columns: minmax(320px, 410px) minmax(0, 1fr);
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .control-pane {

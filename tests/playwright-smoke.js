@@ -17,13 +17,7 @@ async function run() {
   await fs.mkdir(outDir, { recursive: true });
   const csvPath = path.join(outDir, "contacts-smoke.csv");
   const accountCsvPath = path.join(outDir, "accounts-smoke.csv");
-  await fs.writeFile(csvPath, [
-    "Id,First Name,Last Name,Company,Email",
-    "003T00000000001,Maya,Rodriguez,Northstar Analytics,maya.rodriguez@example.com",
-    "003T00000000002,Maya,Rodriquez,Northstar Analytics Inc.,maya.rodriguez@example.com",
-    "003T00000000003,John,Pierce,CivicWire,jpierce@example.com",
-    "003T00000000004,John,Pierce,Civic Wire,john.pierce@example.com"
-  ].join("\n"));
+  await fs.writeFile(csvPath, contactSmokeCsv());
   await fs.writeFile(accountCsvPath, [
     "Id,Name,Website,Billing Street,Billing City,Billing State,Billing Postal Code,Billing Country",
     "001T00000000001,Northstar Analytics Inc.,northstar.example,125 Market St,San Francisco,CA,94105,United States",
@@ -47,6 +41,10 @@ async function run() {
 
     const emptyChooseVisible = await page.locator('[data-empty-action="choose-csv"]').isVisible();
     const emptyDemoVisible = await page.locator('[data-empty-action="demo-data"]').isVisible();
+    await page.locator("#chooseCsvButton").click();
+    await page.getByRole("menuitem", { name: "Contacts" }).waitFor({ state: "visible", timeout: 5000 });
+    await page.keyboard.press("Escape");
+    const csvMenuClosed = await page.locator("#csvObjectMenu").isHidden();
     await page.locator('[data-empty-action="demo-data"]').click();
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
 
@@ -54,6 +52,47 @@ async function run() {
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
     await page.locator(".group-item-main").first().click();
+    await page.getByRole("button", { name: /Match Controls/ }).click();
+    const matchControlsExpanded = await page.getByRole("button", { name: /Match Controls/ }).getAttribute("aria-expanded");
+    await page.locator("#threshold").evaluate((input) => {
+      input.value = "80";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const thresholdReadout = await page.locator("#thresholdValue").textContent();
+    await page.locator("#highRecallMode").check();
+    await page.locator("#applyControlsButton").click();
+    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    await page.locator("#groupSortToggle").click();
+    const sortPressed = await page.locator("#groupSortToggle").getAttribute("aria-pressed");
+    await page.locator(".group-select").first().check();
+    const batchDuplicateEnabled = await page.locator("#batchDuplicateButton").isEnabled();
+    await page.locator("#clearSelectionButton").click();
+    const selectedCountCleared = (await page.locator("#selectedCount").textContent()) === "0 selected";
+    await page.locator(".group-item-main").first().click();
+
+    await page.locator('[data-record-action="separate"]').first().click();
+    await page.locator(".record-separation-badge").first().waitFor({ state: "visible", timeout: 5000 });
+    const separatedBadgeVisible = await page.locator(".record-separation-badge").first().isVisible();
+    await page.locator('[data-record-action="restore"]').first().click();
+    await page.locator(".record-separation-badge").first().waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});
+
+    const fieldResolutionSelects = await page.locator(".field-resolution-select").count();
+    let fieldResolutionSelectable = true;
+    if (fieldResolutionSelects) {
+      const firstResolution = page.locator(".field-resolution-select").first();
+      const optionCount = await firstResolution.locator("option").count();
+      if (optionCount > 1) {
+        await firstResolution.selectOption({ index: 1 });
+      }
+      fieldResolutionSelectable = optionCount > 0;
+    }
+
+    const trainingMatchButton = page.locator('[data-label-action="match"]').first();
+    if (await trainingMatchButton.isVisible()) {
+      await trainingMatchButton.click();
+    }
+    const trainingExportEnabled = await page.locator("#trainingExportButton").isEnabled();
+
     await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
     await page.locator(".record-decision-badge.duplicate").first().waitFor({ state: "visible", timeout: 5000 });
 
@@ -66,18 +105,48 @@ async function run() {
     await page.screenshot({ path: path.join(outDir, "desktop-not-duplicate.png"), fullPage: false });
 
     await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
-    await page.getByRole("button", { name: "Merge" }).click();
+    await page.locator('[data-review-mode="merge"]').click();
     await page.locator(".merge-master-radio").first().waitFor({ state: "visible", timeout: 5000 });
     const mergeMasterRadios = await page.locator(".merge-master-radio").count();
     const mergeFieldRadios = await page.locator(".merge-field-radio").count();
+    if (mergeMasterRadios > 1) {
+      await page.locator(".merge-master-radio").nth(1).check();
+    }
+    const mergeMasterCanChange = mergeMasterRadios < 2 || await page.locator(".merge-master-radio").nth(1).isChecked();
+    const mergeFieldSelection = await page.evaluate(() => {
+      const radios = [...document.querySelectorAll(".merge-field-radio:not(:disabled)")];
+      const candidate = radios.find((radio) => {
+        if (radio.checked) return false;
+        const siblings = radios.filter((sibling) => sibling.name === radio.name);
+        const checkedSibling = siblings.find((sibling) => sibling.checked);
+        return checkedSibling && checkedSibling.value !== radio.value;
+      });
+      if (!candidate) return { attempted: false };
+      candidate.click();
+      return { attempted: true, name: candidate.name, value: candidate.value };
+    });
+    let mergeFieldCanChange = true;
+    if (mergeFieldSelection.attempted) {
+      await page.waitForTimeout(100);
+      mergeFieldCanChange = await page.evaluate(({ name, value }) => {
+        return [...document.querySelectorAll(".merge-field-radio")]
+          .some((radio) => radio.name === name && radio.value === value && radio.checked);
+      }, mergeFieldSelection);
+    }
+    await page.locator(".merge-confirmation-input").fill("MERGE");
+    const mergeConfirmationValue = await page.locator(".merge-confirmation-input").inputValue();
+    await page.setViewportSize({ width: 1280, height: 560 });
+    const reviewPaneScroll = await assertVerticalScrollAvailable(page, ".review-pane", "review pane");
+    const rootScrollPolicy = await assertRootScrollPolicy(page);
+    const interactiveReachability = await visibleInteractiveReachability(page);
     await page.screenshot({ path: path.join(outDir, "desktop-merge.png"), fullPage: false });
 
-    await page.getByRole("button", { name: "Choose CSV" }).click();
+    await page.locator("#chooseCsvButton").click();
     await page.getByRole("menuitem", { name: "Accounts" }).click();
     await page.locator("#csvInput").setInputFiles(accountCsvPath);
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
-    const accountMergeDisabled = await page.getByRole("button", { name: "Merge" }).isDisabled();
+    const accountMergeDisabled = await page.locator('[data-review-mode="merge"]').isDisabled();
     await page.screenshot({ path: path.join(outDir, "desktop-account-evaluate.png"), fullPage: false });
 
     await page.getByRole("button", { name: "Shortcuts" }).click();
@@ -88,6 +157,7 @@ async function run() {
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator(".review-header").scrollIntoViewIfNeeded();
+    const mobileScroll = await assertWindowScrollAvailable(page);
     await page.screenshot({ path: path.join(outDir, "mobile-review.png"), fullPage: false });
 
     const layout = await page.evaluate(() => ({
@@ -98,12 +168,34 @@ async function run() {
 
     if (!emptyChooseVisible) throw new Error("Expected empty-state Choose CSV action to be visible.");
     if (!emptyDemoVisible) throw new Error("Expected empty-state Load Demo action to be visible.");
+    if (!csvMenuClosed) throw new Error("Expected CSV object menu to close with Escape.");
+    if (matchControlsExpanded !== "true") throw new Error("Expected Match Controls panel to expand.");
+    if (thresholdReadout !== "80") throw new Error(`Expected threshold readout to update to 80, got ${thresholdReadout}.`);
+    if (sortPressed !== "true") throw new Error("Expected group sort toggle to respond.");
+    if (!batchDuplicateEnabled) throw new Error("Expected batch buttons to enable after selecting a visible group.");
+    if (!selectedCountCleared) throw new Error("Expected Clear selection to reset selected count.");
+    if (!separatedBadgeVisible) throw new Error("Expected Separate action to show a separated-record badge.");
+    if (!fieldResolutionSelectable) throw new Error("Expected visible field-resolution selects to contain options.");
+    if (!trainingExportEnabled) throw new Error("Expected training label action to enable label export.");
     if (!duplicateBadges) throw new Error("Expected at least one Duplicate decision badge.");
     if (!notDuplicateBadges) throw new Error("Expected at least one Not Duplicate decision badge.");
     if (!mergeMasterRadios) throw new Error("Expected Contact merge master radios.");
     if (!mergeFieldRadios) throw new Error("Expected Contact merge field radios.");
+    if (!mergeMasterCanChange) throw new Error("Expected Contact merge master radio selection to change.");
+    if (!mergeFieldCanChange) throw new Error("Expected Contact merge field radio selection to change.");
+    if (mergeConfirmationValue !== "MERGE") throw new Error("Expected Contact merge confirmation input to accept text.");
     if (!accountMergeDisabled) throw new Error("Expected Account merge mode to be disabled.");
     if (!shortcutsVisible) throw new Error("Expected shortcuts modal to be visible.");
+    if (!rootScrollPolicy.ok) throw new Error(`Root scrolling is suppressed: ${JSON.stringify(rootScrollPolicy)}`);
+    if (reviewPaneScroll.hasOverflow && !reviewPaneScroll.scrolled) {
+      throw new Error(`Review pane has clipped content but did not scroll: ${JSON.stringify(reviewPaneScroll)}`);
+    }
+    if (mobileScroll.hasOverflow && !mobileScroll.scrolled) {
+      throw new Error(`Mobile page has clipped content but did not scroll: ${JSON.stringify(mobileScroll)}`);
+    }
+    if (interactiveReachability.broken.length) {
+      throw new Error(`Visible interactive controls are not reachable: ${JSON.stringify(interactiveReachability.broken)}`);
+    }
     if (layout.pageScrollWidth > layout.viewportWidth || layout.bodyScrollWidth > layout.viewportWidth) {
       throw new Error(`Unexpected horizontal overflow: ${JSON.stringify(layout)}`);
     }
@@ -114,18 +206,186 @@ async function run() {
       baseUrl,
       emptyChooseVisible,
       emptyDemoVisible,
+      csvMenuClosed,
+      matchControlsExpanded,
+      thresholdReadout,
+      sortPressed,
+      batchDuplicateEnabled,
+      selectedCountCleared,
+      separatedBadgeVisible,
+      fieldResolutionSelects,
+      trainingExportEnabled,
       duplicateBadges,
       notDuplicateBadges,
       mergeMasterRadios,
       mergeFieldRadios,
+      mergeMasterCanChange,
+      mergeFieldCanChange,
       accountMergeDisabled,
       shortcutsVisible,
+      rootScrollPolicy,
+      reviewPaneScroll,
+      mobileScroll,
+      interactiveCount: interactiveReachability.count,
       layout,
       screenshotsDir: outDir
     }, null, 2));
   } finally {
     await browser.close();
   }
+}
+
+function contactSmokeCsv() {
+  const rows = [["Id", "First Name", "Last Name", "Company", "Email", "Phone", "Mobile"]];
+  const names = [
+    ["Maya", "Rodriguez"],
+    ["John", "Pierce"],
+    ["Priya", "Shah"],
+    ["Daniel", "Kim"],
+    ["Aisha", "Johnson"],
+    ["Lucas", "Martin"],
+    ["Nora", "Bennett"],
+    ["Ethan", "Cole"],
+    ["Sofia", "Rivera"],
+    ["Caleb", "Morgan"],
+    ["Leah", "Patel"],
+    ["Owen", "Reed"],
+    ["Amelia", "Stone"],
+    ["Noah", "Brooks"],
+    ["Grace", "Chen"],
+    ["Isaac", "Turner"],
+    ["Emma", "Walker"],
+    ["Liam", "Foster"],
+    ["Zoe", "Carter"],
+    ["Henry", "Morris"],
+    ["Mia", "Hayes"],
+    ["Leo", "Parker"],
+    ["Chloe", "Bailey"],
+    ["Miles", "Cooper"]
+  ];
+  for (let index = 1; index <= 24; index += 1) {
+    const firstId = `003T${String(index * 2 - 1).padStart(11, "0")}`;
+    const secondId = `003T${String(index * 2).padStart(11, "0")}`;
+    const email = `contact${index}@example.com`;
+    const [firstName, lastName] = names[index - 1];
+    const company = index % 2 ? `Northstar Analytics ${index}` : `CivicWire ${index}`;
+    rows.push([firstId, firstName, lastName, company, email, `(555) 010-${String(index).padStart(4, "0")}`, ""]);
+    rows.push([secondId, firstName, lastName, `${company} Inc.`, email, "", `(555) 020-${String(index).padStart(4, "0")}`]);
+  }
+  return rows.map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+async function assertRootScrollPolicy(page) {
+  return page.evaluate(() => {
+    const root = document.scrollingElement || document.documentElement;
+    const bodyStyle = getComputedStyle(document.body);
+    const htmlStyle = getComputedStyle(document.documentElement);
+    const rootHasOverflow = root.scrollHeight > root.clientHeight + 1;
+    const blockedValues = new Set(["hidden", "clip"]);
+    return {
+      ok: !blockedValues.has(bodyStyle.overflowY) && !blockedValues.has(htmlStyle.overflowY),
+      rootHasOverflow,
+      bodyOverflowY: bodyStyle.overflowY,
+      htmlOverflowY: htmlStyle.overflowY,
+      scrollHeight: root.scrollHeight,
+      clientHeight: root.clientHeight
+    };
+  });
+}
+
+async function assertVerticalScrollAvailable(page, selector, label) {
+  return page.locator(selector).first().evaluate((element, name) => {
+    const style = getComputedStyle(element);
+    const hasOverflow = element.scrollHeight > element.clientHeight + 1;
+    if (!hasOverflow) {
+      return {
+        label: name,
+        hasOverflow,
+        scrolled: true,
+        overflowY: style.overflowY,
+        scrollHeight: element.scrollHeight,
+        clientHeight: element.clientHeight
+      };
+    }
+
+    const before = element.scrollTop;
+    element.scrollTop = Math.min(element.scrollHeight - element.clientHeight, before + 180);
+    const after = element.scrollTop;
+    element.scrollTop = before;
+    return {
+      label: name,
+      hasOverflow,
+      scrolled: after > before,
+      overflowY: style.overflowY,
+      before,
+      after,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight
+    };
+  }, label);
+}
+
+async function assertWindowScrollAvailable(page) {
+  return page.evaluate(() => {
+    const root = document.scrollingElement || document.documentElement;
+    const hasOverflow = root.scrollHeight > root.clientHeight + 1;
+    if (!hasOverflow) {
+      return {
+        hasOverflow,
+        scrolled: true,
+        scrollHeight: root.scrollHeight,
+        clientHeight: root.clientHeight
+      };
+    }
+
+    const before = window.scrollY;
+    window.scrollTo(0, Math.min(root.scrollHeight - root.clientHeight, before + 260));
+    const after = window.scrollY;
+    return {
+      hasOverflow,
+      scrolled: after > before,
+      before,
+      after,
+      scrollHeight: root.scrollHeight,
+      clientHeight: root.clientHeight
+    };
+  });
+}
+
+async function visibleInteractiveReachability(page) {
+  return page.evaluate(() => {
+    const intentionallyHidden = new Set(["csvInput", "trainingImportInput"]);
+    const controls = [...document.querySelectorAll("button, input, select, textarea, a[href], [role='button'], [role='menuitem']")];
+    const visibleControls = controls.filter((element) => {
+      if (intentionallyHidden.has(element.id)) return false;
+      if (element.disabled || element.hidden || element.getAttribute("aria-hidden") === "true") return false;
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+    });
+    const broken = visibleControls
+      .filter((element) => {
+        const style = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.pointerEvents === "none" || rect.width < 8 || rect.height < 8;
+      })
+      .map((element) => ({
+        tag: element.tagName.toLowerCase(),
+        id: element.id || "",
+        className: String(element.className || ""),
+        text: String(element.textContent || element.getAttribute("aria-label") || "").trim().slice(0, 60)
+      }));
+
+    return {
+      count: visibleControls.length,
+      broken
+    };
+  });
 }
 
 run().catch((error) => {
