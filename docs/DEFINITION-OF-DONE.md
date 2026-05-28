@@ -10,6 +10,8 @@ A Duplicate Reviewer change is done when the implementation, verification, and s
 - Account merge remains disabled unless explicit account merge business rules are added in a later project.
 - Contact merge changes preserve the master record and field-level retained-value flow.
 - User-facing state is visible for duplicate decisions, merge readiness, loading, errors, and empty datasets.
+- Content that extends beyond the viewport remains reachable by page-level or pane-level scrolling.
+- Interactive controls touched by the change are covered by smoke tests or a focused manual pass.
 - `npm run check` passes.
 - `npm run smoke:ui` passes after UI changes.
 - CI is green before treating the change as ready to share.
@@ -25,4 +27,3 @@ A Duplicate Reviewer change is done when the implementation, verification, and s
 
 - Review desktop and mobile Playwright screenshots after visible UI changes.
 - Use the Windows VM for launcher, path, and browser checks when the change affects teammate setup or merge workflows.
-
