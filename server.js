@@ -33,6 +33,8 @@ const SF_CLI_BIN = process.env.SF_CLI_BIN || "sf";
 const MERGE_AUDIT_LOG = path.join(OUTPUT_DIR, "salesforce-merge-log.jsonl");
 const MAX_MERGE_VICTIMS = 20;
 const SALESFORCE_ID_PATTERN = /^[a-zA-Z0-9]{15}(?:[a-zA-Z0-9]{3})?$/;
+const MERGE_MASTER_FIELD_ALLOWLIST = new Set(["LeadSource"]);
+const MERGE_MASTER_FIELD_PATTERN = /^[A-Za-z][A-Za-z0-9_]*$/;
 
 const CSV_ENDPOINTS = new Map([
   [
@@ -371,6 +373,8 @@ async function mergeSalesforceRecords(body) {
     groupKey: mergeRequest.groupKey,
     masterId: mergeRequest.masterId,
     mergeIds: mergeRequest.mergeIds,
+    masterFields: mergeRequest.masterFields,
+    masterFieldsToNull: mergeRequest.masterFieldsToNull,
     orgAlias: SF_ORG_ALIAS
   };
 
@@ -385,7 +389,9 @@ async function mergeSalesforceRecords(body) {
           auth,
           objectType: mergeRequest.objectType,
           masterId: mergeRequest.masterId,
-          mergeIds: batch
+          mergeIds: batch,
+          masterFields: mergeRequest.masterFields,
+          masterFieldsToNull: mergeRequest.masterFieldsToNull
         })
       );
     }
@@ -396,6 +402,8 @@ async function mergeSalesforceRecords(body) {
       objectType: mergeRequest.objectType,
       groupKey: mergeRequest.groupKey,
       masterId: mergeRequest.masterId,
+      masterFields: mergeRequest.masterFields,
+      masterFieldsToNull: mergeRequest.masterFieldsToNull,
       mergedRecordIds: [...new Set(results.flatMap((result) => result.mergedRecordIds))],
       updatedRelatedIds: [...new Set(results.flatMap((result) => result.updatedRelatedIds))],
       batches: results,
@@ -416,6 +424,8 @@ function validateMergeRequest(body) {
   const objectType = normalizeMergeObjectType(body.objectType);
   const masterId = normalizeSalesforceId(body.masterId);
   const mergeIds = uniqueIds(Array.isArray(body.mergeIds) ? body.mergeIds : []).filter((id) => id !== masterId);
+  const masterFields = validateMergeMasterFields(body.masterFields);
+  const masterFieldsToNull = validateMergeMasterFieldsToNull(body.masterFieldsToNull, masterFields);
   const expectedPrefix = "003";
 
   if (body.confirmation !== "MERGE") throw httpError(400, "Type MERGE to confirm this Salesforce merge.");
@@ -433,8 +443,45 @@ function validateMergeRequest(body) {
     objectType,
     masterId,
     mergeIds,
+    masterFields,
+    masterFieldsToNull,
     groupKey: String(body.groupKey || "")
   };
+}
+
+function validateMergeMasterFields(value) {
+  if (value == null) return {};
+  if (typeof value !== "object" || Array.isArray(value)) throw httpError(400, "masterFields must be an object.");
+
+  return Object.entries(value).reduce((fields, [field, rawValue]) => {
+    const apiName = normalizeMergeMasterFieldName(field);
+    const text = String(rawValue ?? "").trim();
+    if (text) fields[apiName] = text;
+    return fields;
+  }, {});
+}
+
+function validateMergeMasterFieldsToNull(value, masterFields = {}) {
+  if (value == null) return [];
+  if (!Array.isArray(value)) throw httpError(400, "masterFieldsToNull must be an array.");
+
+  const fields = [];
+  const seen = new Set();
+  value.forEach((field) => {
+    const apiName = normalizeMergeMasterFieldName(field);
+    if (seen.has(apiName) || Object.prototype.hasOwnProperty.call(masterFields, apiName)) return;
+    seen.add(apiName);
+    fields.push(apiName);
+  });
+  return fields;
+}
+
+function normalizeMergeMasterFieldName(value) {
+  const apiName = String(value || "").trim();
+  if (!MERGE_MASTER_FIELD_PATTERN.test(apiName) || !MERGE_MASTER_FIELD_ALLOWLIST.has(apiName)) {
+    throw httpError(400, `Unsupported merge master field: ${apiName || "(blank)"}.`);
+  }
+  return apiName;
 }
 
 function normalizeMergeObjectType(value) {
@@ -522,7 +569,7 @@ function normalizeApiVersion(value) {
   return version.startsWith("v") ? version : `v${version}`;
 }
 
-async function mergeSalesforceRecordBatch({ auth, objectType, masterId, mergeIds }) {
+async function mergeSalesforceRecordBatch({ auth, objectType, masterId, mergeIds, masterFields = {}, masterFieldsToNull = [] }) {
   const soapVersion = auth.apiVersion.replace(/^v/i, "");
   const response = await fetch(`${auth.instanceUrl}/services/Soap/u/${soapVersion}`, {
     method: "POST",
@@ -534,7 +581,9 @@ async function mergeSalesforceRecordBatch({ auth, objectType, masterId, mergeIds
       sessionId: auth.accessToken,
       objectType,
       masterId,
-      mergeIds
+      mergeIds,
+      masterFields,
+      masterFieldsToNull
     })
   });
   const text = await response.text();
@@ -551,7 +600,14 @@ async function mergeSalesforceRecordBatch({ auth, objectType, masterId, mergeIds
   return result;
 }
 
-function buildMergeSoapEnvelope({ sessionId, objectType, masterId, mergeIds }) {
+function buildMergeSoapEnvelope({ sessionId, objectType, masterId, mergeIds, masterFields = {}, masterFieldsToNull = [] }) {
+  const fieldsToNullLines = masterFieldsToNull.map(
+    (field) => `          <sobj:fieldsToNull>${xmlEscape(field)}</sobj:fieldsToNull>`
+  );
+  const masterFieldLines = Object.entries(masterFields).map(
+    ([field, value]) => `          <sobj:${field}>${xmlEscape(value)}</sobj:${field}>`
+  );
+
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:urn="urn:partner.soap.sforce.com" xmlns:sobj="urn:sobject.partner.soap.sforce.com" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">',
@@ -564,7 +620,9 @@ function buildMergeSoapEnvelope({ sessionId, objectType, masterId, mergeIds }) {
     "    <urn:merge>",
     "      <urn:request>",
     `        <urn:masterRecord xsi:type="sobj:${xmlEscape(objectType)}">`,
+    ...fieldsToNullLines,
     `          <sobj:Id>${xmlEscape(masterId)}</sobj:Id>`,
+    ...masterFieldLines,
     "        </urn:masterRecord>",
     ...mergeIds.map((id) => `        <urn:recordToMergeIds>${xmlEscape(id)}</urn:recordToMergeIds>`),
     "      </urn:request>",

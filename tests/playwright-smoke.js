@@ -57,8 +57,11 @@ async function run() {
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
     await page.locator(".group-item-main").first().click();
-    await page.getByRole("button", { name: /Match Controls/ }).click();
-    const matchControlsExpanded = await page.getByRole("button", { name: /Match Controls/ }).getAttribute("aria-expanded");
+    const matchControlsButton = page.getByRole("button", { name: /Match Controls/ });
+    if (await matchControlsButton.getAttribute("aria-expanded") !== "true") {
+      await matchControlsButton.click();
+    }
+    const matchControlsExpanded = await matchControlsButton.getAttribute("aria-expanded");
     await setRangeValue(page, "#threshold", "80");
     await setRangeValue(page, "#maxThreshold", "99");
     const thresholdReadout = await page.locator("#thresholdValue").textContent();
@@ -74,6 +77,7 @@ async function run() {
     await setRangeValue(page, "#maxThreshold", "100");
     await page.locator("#applyControlsButton").click();
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    const customFilterState = await exerciseCustomFilters(page);
     await page.locator("#groupList").evaluate((element) => {
       element.scrollTop = element.scrollHeight;
       element.dispatchEvent(new Event("scroll", { bubbles: true }));
@@ -134,6 +138,7 @@ async function run() {
       await page.locator(".merge-master-radio").nth(1).check();
     }
     const mergeMasterCanChange = mergeMasterRadios < 2 || await page.locator(".merge-master-radio").nth(1).isChecked();
+    const leadSourceRule = await mergeLeadSourceRuleState(page);
     const mergeFieldSelection = await page.evaluate(() => {
       const radios = [...document.querySelectorAll(".merge-field-radio:not(:disabled)")];
       const candidate = radios.find((radio) => {
@@ -156,6 +161,7 @@ async function run() {
     }
     await page.locator(".merge-confirmation-input").fill("MERGE");
     const mergeConfirmationValue = await page.locator(".merge-confirmation-input").inputValue();
+    const mergePayload = await captureMergePayload(page);
     await page.setViewportSize({ width: 1280, height: 560 });
     const reviewPaneScroll = await assertVerticalScrollAvailable(page, ".review-pane", "review pane");
     const rootScrollPolicy = await assertRootScrollPolicy(page);
@@ -170,7 +176,7 @@ async function run() {
     const accountMergeDisabled = await page.locator('[data-review-mode="merge"]').isDisabled();
     await page.screenshot({ path: path.join(outDir, "desktop-account-evaluate.png"), fullPage: false });
 
-    await page.getByRole("button", { name: "Shortcuts" }).click();
+    await page.getByRole("button", { name: "Keyboard shortcuts" }).click();
     await page.getByRole("dialog", { name: "Keyboard shortcuts" }).waitFor({ state: "visible", timeout: 5000 });
     const shortcutsVisible = await page.getByRole("dialog", { name: "Keyboard shortcuts" }).isVisible();
     await page.screenshot({ path: path.join(outDir, "desktop-shortcuts.png"), fullPage: false });
@@ -207,6 +213,12 @@ async function run() {
     if (!thresholdFilteredScores.length || thresholdFilteredScores.some((score) => score < 80 || score > 99)) {
       throw new Error(`Expected max threshold to limit visible scores to 80-99: ${JSON.stringify(thresholdFilteredScores)}`);
     }
+    if (customFilterState.filteredCount !== 2 || customFilterState.logicValue !== "1 OR 2") {
+      throw new Error(`Expected custom boolean filters to narrow the group list: ${JSON.stringify(customFilterState)}`);
+    }
+    if (!customFilterState.dateOperators.includes("relative date")) {
+      throw new Error(`Expected date filters to expose Salesforce-compatible relative dates: ${JSON.stringify(customFilterState)}`);
+    }
     if (sortPressed !== "true") throw new Error("Expected group sort toggle to respond.");
     if (!sortTopState.firstSelected || sortTopState.scrollTop > 1 || !sortTopState.scoresAscending) {
       throw new Error(`Expected sorting ascending to keep the first visible group selected at the top: ${JSON.stringify(sortTopState)}`);
@@ -220,8 +232,17 @@ async function run() {
     if (!mergeMasterRadios) throw new Error("Expected Contact merge master radios.");
     if (!mergeFieldRadios) throw new Error("Expected Contact merge field radios.");
     if (!mergeMasterCanChange) throw new Error("Expected Contact merge master radio selection to change.");
+    if (!leadSourceRule.found || leadSourceRule.status !== "Oldest record rule" || !leadSourceRule.checkedValues.includes("Web")) {
+      throw new Error(`Expected Lead Source to be locked to the oldest-created Contact: ${JSON.stringify(leadSourceRule)}`);
+    }
+    if (leadSourceRule.disabledCount !== leadSourceRule.radioCount || !leadSourceRule.hasHardRuleClass) {
+      throw new Error(`Expected Lead Source hard-rule radios to be disabled and visually marked: ${JSON.stringify(leadSourceRule)}`);
+    }
     if (!mergeFieldCanChange) throw new Error("Expected Contact merge field radio selection to change.");
     if (mergeConfirmationValue !== "MERGE") throw new Error("Expected Contact merge confirmation input to accept text.");
+    if (mergePayload.masterFields?.LeadSource !== "Web") {
+      throw new Error(`Expected Salesforce merge payload to preserve oldest Lead Source: ${JSON.stringify(mergePayload)}`);
+    }
     if (!accountMergeDisabled) throw new Error("Expected Account merge mode to be disabled.");
     if (!shortcutsVisible) throw new Error("Expected shortcuts modal to be visible.");
     if (!rootScrollPolicy.ok) throw new Error(`Root scrolling is suppressed: ${JSON.stringify(rootScrollPolicy)}`);
@@ -252,6 +273,7 @@ async function run() {
       thresholdClampState,
       thresholdTypedState,
       thresholdFilteredScores,
+      customFilterState,
       sortPressed,
       sortTopState,
       separatedBadgeVisible,
@@ -263,7 +285,9 @@ async function run() {
       mergeMasterRadios,
       mergeFieldRadios,
       mergeMasterCanChange,
+      leadSourceRule,
       mergeFieldCanChange,
+      mergePayload,
       accountMergeDisabled,
       shortcutsVisible,
       fileModeRedirect,
@@ -310,7 +334,7 @@ async function assertFileModeRedirect(browser) {
 }
 
 function contactSmokeCsv() {
-  const rows = [["Id", "First Name", "Last Name", "Company", "Email", "Phone", "Mobile"]];
+  const rows = [["Id", "First Name", "Last Name", "Company", "Email", "Lead Source", "Created Date", "Phone", "Mobile"]];
   const names = [
     ["Maya", "Rodriguez"],
     ["John", "Pierce"],
@@ -346,10 +370,58 @@ function contactSmokeCsv() {
     const company = index % 2 ? `Northstar Analytics ${index}` : `CivicWire ${index}`;
     const firstPhone = `(555) 010-${String(index).padStart(4, "0")}`;
     const secondMobile = nearMatch ? `(555) 990-${String(index).padStart(4, "0")}` : `(555) 020-${String(index).padStart(4, "0")}`;
-    rows.push([firstId, firstName, lastName, company, email, firstPhone, ""]);
-    rows.push([secondId, firstName, lastName, `${company} Inc.`, email, "", secondMobile]);
+    const day = String((index % 28) + 1).padStart(2, "0");
+    rows.push([firstId, firstName, lastName, company, email, "Web", `2024-01-${day}T09:00:00.000Z`, firstPhone, ""]);
+    rows.push([secondId, firstName, lastName, `${company} Inc.`, email, "Referral", `2025-01-${day}T09:00:00.000Z`, "", secondMobile]);
   }
   return rows.map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+async function mergeLeadSourceRuleState(page) {
+  return page.evaluate(() => {
+    const rows = [...document.querySelectorAll(".merge-matrix tbody tr")];
+    const row = rows.find((item) => {
+      return item.querySelector(".merge-field-name strong")?.textContent?.trim() === "Lead Source";
+    });
+    if (!row) return { found: false };
+
+    const radios = [...row.querySelectorAll(".merge-field-radio")];
+    return {
+      found: true,
+      status: row.querySelector(".merge-field-name span")?.textContent?.trim() || "",
+      checkedValues: radios.filter((radio) => radio.checked).map((radio) => radio.value),
+      disabledCount: radios.filter((radio) => radio.disabled).length,
+      radioCount: radios.length,
+      hasHardRuleClass: row.classList.contains("has-hard-rule")
+    };
+  });
+}
+
+async function captureMergePayload(page) {
+  let payload = null;
+  await page.route("**/api/salesforce/merge", async (route) => {
+    payload = JSON.parse(route.request().postData() || "{}");
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        status: "success",
+        objectType: "Contact",
+        groupKey: payload.groupKey,
+        masterId: payload.masterId,
+        mergedRecordIds: payload.mergeIds || [],
+        updatedRelatedIds: [],
+        mergedAt: new Date().toISOString()
+      })
+    });
+  });
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator(".merge-submit-button").click();
+  await page.locator(".merge-result.success").waitFor({ state: "visible", timeout: 5000 });
+  await page.unroute("**/api/salesforce/merge");
+  return payload || {};
 }
 
 async function setRangeValue(page, selector, value) {
@@ -357,6 +429,52 @@ async function setRangeValue(page, selector, value) {
     input.value = nextValue;
     input.dispatchEvent(new Event("input", { bubbles: true }));
   }, value);
+}
+
+async function exerciseCustomFilters(page) {
+  await addFilter(page, 1);
+  await configureFilter(page, 0, "email", "contains", "contact1@example.com");
+  await addFilter(page, 2);
+  await configureFilter(page, 1, "email", "contains", "contact2@example.com");
+  await page.locator(".filter-logic-input").fill("1 OR 2");
+
+  await addFilter(page, 3);
+  const dateFilter = page.locator(".filter-row").nth(2);
+  await dateFilter.locator(".filter-field-select").selectOption("createdDate");
+  const dateOperators = await dateFilter.locator(".filter-operator-select option").evaluateAll((options) => {
+    return options.map((option) => option.textContent?.trim() || "");
+  });
+  await page.locator("[data-filter-remove]").nth(2).click();
+  await page.locator(".filter-logic-input").fill("1 OR 2");
+
+  await page.locator("#applyControlsButton").click();
+  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+  const filteredCount = await page.locator("#groupCount").evaluate((node) => Number(node.textContent?.replace(/,/g, "") || 0));
+  const logicValue = await page.locator(".filter-logic-input").inputValue();
+
+  while (await page.locator("[data-filter-remove]").count()) {
+    await page.locator("[data-filter-remove]").first().click();
+  }
+  await page.locator("#applyControlsButton").click();
+  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+
+  return {
+    filteredCount,
+    logicValue,
+    dateOperators
+  };
+}
+
+async function addFilter(page, expectedCount) {
+  await page.locator(".filter-builder-title [data-filter-add], .filter-empty-add").first().click();
+  await page.locator(".filter-row").nth(expectedCount - 1).waitFor({ state: "visible", timeout: 5000 });
+}
+
+async function configureFilter(page, index, field, operator, value) {
+  const row = page.locator(".filter-row").nth(index);
+  await row.locator(".filter-field-select").selectOption(field);
+  await row.locator(".filter-operator-select").selectOption(operator);
+  await row.locator(".filter-value-control").first().fill(value);
 }
 
 async function setNumberValue(page, selector, value) {
