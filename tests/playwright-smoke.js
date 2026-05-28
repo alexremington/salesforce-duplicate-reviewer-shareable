@@ -44,10 +44,12 @@ async function run() {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     const latestRecentFiles = await assertLatestRecentFiles(page);
     const lightTheme = await themeColorState(page);
+    const lightPaneSurfaces = await paneSurfaceState(page);
     await page.screenshot({ path: path.join(outDir, "desktop-empty.png"), fullPage: false });
     await page.emulateMedia({ colorScheme: "dark" });
     await page.waitForTimeout(100);
     const darkTheme = await themeColorState(page);
+    const darkPaneSurfaces = await paneSurfaceState(page);
     await page.screenshot({ path: path.join(outDir, "desktop-empty-dark.png"), fullPage: false });
     await page.emulateMedia({ colorScheme: "light" });
 
@@ -212,6 +214,9 @@ async function run() {
     if (!lightTheme.colorScheme.includes("light") || !darkTheme.colorScheme.includes("dark") || lightTheme.bodyBg === darkTheme.bodyBg) {
       throw new Error(`Expected the UI theme to follow system light/dark mode: ${JSON.stringify({ lightTheme, darkTheme })}`);
     }
+    if (!lightPaneSurfaces.standardized || !darkPaneSurfaces.standardized) {
+      throw new Error(`Expected layout panes to share one canvas background: ${JSON.stringify({ lightPaneSurfaces, darkPaneSurfaces })}`);
+    }
     if (!filterAddDisabledBeforeLoad || !applyDisabledBeforeLoad || !labelStatusDisabledBeforeLoad || !hideLabeledDisabledBeforeLoad) {
       throw new Error("Expected match filters and Apply to be disabled before a dataset is loaded.");
     }
@@ -311,6 +316,8 @@ async function run() {
       thresholdTypedState,
       lightTheme,
       darkTheme,
+      lightPaneSurfaces,
+      darkPaneSurfaces,
       fastestSearchDefaultUnchecked,
       thresholdFilteredScores,
       customFilterState,
@@ -482,6 +489,28 @@ async function themeColorState(page) {
       bodyColor: body.color,
       topbarBg: topbar.backgroundColor,
       accent: root.getPropertyValue("--accent").trim()
+    };
+  });
+}
+
+async function paneSurfaceState(page) {
+  return page.evaluate(() => {
+    const entries = {
+      body: document.body,
+      app: document.querySelector(".app"),
+      mainGrid: document.querySelector(".main-grid"),
+      controlPane: document.querySelector(".control-pane"),
+      workspaceColumn: document.querySelector(".workspace-column"),
+      reviewPane: document.querySelector(".review-pane")
+    };
+    const colors = Object.fromEntries(Object.entries(entries).map(([name, element]) => {
+      return [name, element ? getComputedStyle(element).backgroundColor : "missing"];
+    }));
+    const uniqueColors = [...new Set(Object.values(colors))];
+    return {
+      colors,
+      uniqueColors,
+      standardized: uniqueColors.length === 1
     };
   });
 }

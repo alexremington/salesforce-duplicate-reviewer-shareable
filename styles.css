@@ -53,6 +53,7 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
+  background: var(--bg);
   overflow: visible;
 }
 
@@ -64,7 +65,7 @@ body {
   gap: 20px;
   padding: 18px 24px;
   background: var(--surface-panel);
-  border-bottom: 1px solid var(--line-subtle);
+  border-bottom: 1px solid var(--line);
   box-shadow: 0 1px 0 var(--inset-highlight) inset, var(--shadow-soft);
   backdrop-filter: blur(18px);
   z-index: 10;
@@ -305,6 +306,7 @@ h1 {
   display: grid;
   grid-template-columns: minmax(320px, 410px) minmax(0, 1fr);
   min-height: 0;
+  background: var(--bg);
   overflow: visible;
 }
 
@@ -313,6 +315,7 @@ h1 {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  background: var(--bg);
   overflow: hidden;
 }
 
@@ -321,8 +324,8 @@ h1 {
   flex-direction: column;
   gap: 14px;
   padding: 18px;
-  border-right: 1px solid var(--line-subtle);
-  background: var(--surface-subtle);
+  border-right: 1px solid var(--line);
+  background: var(--bg);
   min-height: 0;
   overflow: auto;
   scrollbar-gutter: stable;
@@ -330,7 +333,7 @@ h1 {
 
 .panel {
   background: var(--surface-panel);
-  border: 1px solid var(--line-subtle);
+  border: 1px solid var(--line);
   border-radius: 22px;
   padding: 14px;
   box-shadow: var(--shadow-soft);
@@ -1266,6 +1269,7 @@ select:focus {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  background: var(--bg);
   overflow: auto;
   scrollbar-gutter: stable;
 }
@@ -1278,7 +1282,7 @@ select:focus {
 
 .metric {
   background: var(--surface-panel);
-  border: 1px solid var(--line-subtle);
+  border: 1px solid var(--line);
   border-radius: 20px;
   padding: 14px;
   display: grid;
@@ -1307,7 +1311,7 @@ select:focus {
   align-items: flex-start;
   gap: 16px;
   background: var(--surface-panel);
-  border: 1px solid var(--line-subtle);
+  border: 1px solid var(--line);
   border-radius: 26px;
   padding: 20px;
   box-shadow: var(--shadow-soft);
@@ -1389,7 +1393,7 @@ select:focus {
 .detail-surface {
   min-height: 480px;
   background: var(--surface-panel);
-  border: 1px solid var(--line-subtle);
+  border: 1px solid var(--line);
   border-radius: 26px;
   box-shadow: var(--shadow);
   overflow: hidden;
