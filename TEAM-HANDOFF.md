@@ -27,5 +27,8 @@ Replace the app folder with the latest release archive, or pull the latest appro
 
 - Run `npm run check`.
 - Run `npm run smoke:ui` after UI changes.
+- Use [docs/FEATURE-BRIEF.md](docs/FEATURE-BRIEF.md) before larger workflow changes.
+- Check [docs/UI-CHECKLIST.md](docs/UI-CHECKLIST.md) for visual or interaction changes.
+- Use [docs/DEFINITION-OF-DONE.md](docs/DEFINITION-OF-DONE.md) before sharing a completed change.
 - Update [SETUP.md](SETUP.md) when setup steps change.
 - Create a `v*` tag when a version is ready for teammates so GitHub Actions packages a release archive.
