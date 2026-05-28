@@ -2,12 +2,13 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
+const { loadPlaywright } = require("../scripts/playwright-loader");
 
 let chromium;
 try {
-  ({ chromium } = require("playwright"));
+  ({ chromium } = loadPlaywright());
 } catch (error) {
-  console.error("Playwright is not installed. Run `npm install --no-save playwright` and `npx playwright install chromium`, then retry.");
+  console.error(error.message);
   process.exit(2);
 }
 
