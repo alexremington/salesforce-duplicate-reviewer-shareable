@@ -47,6 +47,7 @@ Use the launcher for normal review work after Scheduler downloads finish. The se
 For UI smoke tests on a local machine, install Playwright once for all managed apps:
 
 ```bash
+npm run sync:shared
 npm run setup:playwright
 ```
 

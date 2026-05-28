@@ -14,7 +14,7 @@ Share a GitHub Release archive or a clean clone of the public-safe branch. Do no
 
 Use the launcher for normal server-backed work. When latest Contact or Account exports exist under `Output/`, the app adds them to `Recent files` automatically.
 
-For local UI smoke tests, run `npm run setup:playwright` once from any managed app. That creates a shared Playwright install in the Automation Projects folder.
+For local UI smoke tests, run `npm run sync:shared` after shared resource updates, then run `npm run setup:playwright` once from any managed app. That creates a shared Playwright install in the Automation Projects folder.
 
 ## Updating
 

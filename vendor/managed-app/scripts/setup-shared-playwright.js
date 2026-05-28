@@ -4,7 +4,7 @@ const childProcess = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const PROJECT_DIR = path.resolve(__dirname, "..");
+const PROJECT_DIR = path.resolve(process.argv[2] || process.env.MANAGED_APP_ROOT || process.cwd());
 const AUTOMATION_PROJECTS_DIR = path.dirname(PROJECT_DIR);
 const SHARED_ROOT = path.resolve(process.env.PLAYWRIGHT_SHARED_ROOT || path.join(AUTOMATION_PROJECTS_DIR, ".shared-playwright"));
 const PACKAGE_JSON = path.join(SHARED_ROOT, "package.json");

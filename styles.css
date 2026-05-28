@@ -1,5 +1,4 @@
 :root {
-  color-scheme: light;
   --bg: #ece5d8;
   --surface: #fffdf7;
   --surface-alt: #f7f0e4;
@@ -20,62 +19,13 @@
   --green-soft: #e5f5e9;
   --shadow: 0 22px 70px rgba(46, 36, 21, 0.12);
   --shadow-soft: 0 10px 30px rgba(46, 36, 21, 0.08);
-  font-family:
-    "Avenir Next", "Gill Sans", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-html {
-  background: var(--bg);
-  min-height: 100%;
-  overflow-y: auto;
 }
 
 body {
-  margin: 0;
-  min-width: 320px;
-  min-height: 100vh;
-  height: auto;
   background:
     radial-gradient(circle at 12% 16%, rgba(23, 109, 97, 0.17), transparent 28rem),
     radial-gradient(circle at 92% 8%, rgba(173, 106, 19, 0.14), transparent 22rem),
     linear-gradient(135deg, #efe7d9 0%, #f8f4eb 46%, #e4d6bf 100%);
-  color: var(--ink);
-  overflow-x: hidden;
-  overflow-y: auto;
-  font-size: 15px;
-  line-height: 1.45;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-}
-
-button,
-input,
-select,
-textarea {
-  min-width: 0;
-  font: inherit;
-}
-
-button {
-  cursor: pointer;
-}
-
-button:focus-visible,
-.button:focus-visible,
-.mini-button:focus-visible,
-.icon-button:focus-visible,
-.recent-file:focus-visible,
-.group-item-main:focus-visible {
-  outline: 3px solid rgba(23, 109, 97, 0.3);
-  outline-offset: 3px;
-}
-
-input[type="checkbox"] {
-  accent-color: var(--accent);
 }
 
 .app {

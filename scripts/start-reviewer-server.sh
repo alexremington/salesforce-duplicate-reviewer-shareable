@@ -93,6 +93,8 @@ sync_static_assets() {
   copy_static_asset "${PROJECT_DIR}/redirect-file-mode.js" "${STATIC_DIR}/redirect-file-mode.js"
   copy_static_asset "${PROJECT_DIR}/app.js" "${STATIC_DIR}/app.js"
   copy_static_asset "${PROJECT_DIR}/styles.css" "${STATIC_DIR}/styles.css"
+  /bin/mkdir -p "${STATIC_DIR}/vendor/managed-app/css"
+  copy_static_asset "${PROJECT_DIR}/vendor/managed-app/css/managed-app-base.css" "${STATIC_DIR}/vendor/managed-app/css/managed-app-base.css"
 }
 
 copy_static_asset() {
