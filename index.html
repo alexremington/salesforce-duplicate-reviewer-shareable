@@ -91,10 +91,16 @@
               <span class="score-readout" id="thresholdValue">86</span>
             </div>
             <div class="panel-body" id="matchControlsPanelBody" hidden>
-              <label class="range-label" for="threshold">
-                Review threshold
-                <input id="threshold" type="range" min="70" max="100" value="86" />
-              </label>
+              <div class="threshold-controls">
+                <label class="range-label" for="threshold">
+                  Minimum score
+                  <input id="threshold" type="range" min="70" max="100" value="86" />
+                </label>
+                <label class="range-label" for="maxThreshold">
+                  Maximum score
+                  <input id="maxThreshold" type="range" min="70" max="100" value="100" />
+                </label>
+              </div>
               <div class="check-row">
                 <label><input id="highRecallMode" type="checkbox" /> High recall</label>
               </div>

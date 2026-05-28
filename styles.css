@@ -489,6 +489,11 @@ h1 {
   font-weight: 700;
 }
 
+.threshold-controls {
+  display: grid;
+  gap: 12px;
+}
+
 .search-label + .search-label {
   margin-top: 12px;
 }
