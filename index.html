@@ -301,9 +301,12 @@
     <div class="loading-modal" id="loadingModal" role="alertdialog" aria-modal="true" aria-labelledby="loadingModalTitle" aria-describedby="loadingModalMessage" hidden>
       <div class="loading-modal-card">
         <div class="loading-spinner loading-modal-spinner" aria-hidden="true"></div>
-        <div>
+        <div class="loading-modal-content">
           <strong id="loadingModalTitle">Loading</strong>
           <span id="loadingModalMessage">Preparing records.</span>
+          <div class="loading-progress" id="loadingProgress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <span id="loadingProgressBar"></span>
+          </div>
         </div>
       </div>
     </div>
