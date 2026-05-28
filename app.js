@@ -729,7 +729,6 @@ const state = {
   maxThreshold: 100,
   highRecallMode: true,
   sortDirection: "desc",
-  hideLabeledGroups: false,
   reviewMode: "evaluate",
   trainingConfidence: "high",
   filters: [],
@@ -773,7 +772,6 @@ const els = {
   labelStatusFilter: document.getElementById("labelStatusFilter"),
   groupFilterBuilder: document.getElementById("groupFilterBuilder"),
   groupSortToggle: document.getElementById("groupSortToggle"),
-  hideLabeledGroups: document.getElementById("hideLabeledGroups"),
   applyControlsButton: document.getElementById("applyControlsButton"),
   mappingPanel: document.getElementById("mappingPanel"),
   mappingGrid: document.getElementById("mappingGrid"),
@@ -871,7 +869,6 @@ els.thresholdMinNumber.addEventListener("blur", () => syncThresholdInputs("min-n
 els.thresholdMaxNumber.addEventListener("blur", () => syncThresholdInputs("max-number"));
 
 els.groupSortToggle.addEventListener("click", toggleGroupSortDirection);
-els.hideLabeledGroups.addEventListener("change", applyHideLabeledGroups);
 els.applyControlsButton.addEventListener("click", applyMatchControls);
 els.labelStatusFilter.addEventListener("change", handleLabelStatusFilterChange);
 els.groupFilterBuilder.addEventListener("click", handleGroupFilterClick);
@@ -1989,14 +1986,6 @@ function toggleGroupSortDirection() {
   state.sortDirection = state.sortDirection === "asc" ? "desc" : "asc";
   visibleGroupsCache = null;
   selectFirstVisibleGroup();
-  renderGroups();
-  renderDetail();
-}
-
-function applyHideLabeledGroups() {
-  state.hideLabeledGroups = els.hideLabeledGroups.checked;
-  visibleGroupsCache = null;
-  ensureSelectedGroupVisible();
   renderGroups();
   renderDetail();
 }
@@ -4224,7 +4213,6 @@ function renderGroups(options = {}) {
   const filtered = filteredGroups();
   els.groupCount.textContent = filtered.length;
   renderGroupSortToggle();
-  renderGroupFilterToolbar();
 
   if (!state.rows.length) {
     els.groupList.classList.remove("is-virtualized");
@@ -4382,11 +4370,6 @@ function renderGroupSelection() {
     item.classList.toggle("is-selected", selected);
     if (selected) item.scrollIntoView({ block: "nearest" });
   });
-}
-
-function renderGroupFilterToolbar() {
-  els.hideLabeledGroups.checked = state.hideLabeledGroups;
-  els.hideLabeledGroups.disabled = !state.rows.length;
 }
 
 function renderFilterBuilder() {
@@ -5251,7 +5234,6 @@ function filteredGroups() {
     visibleGroupsCache.filterSignature === groupFiltersSignature() &&
     visibleGroupsCache.sortDirection === state.sortDirection &&
     visibleGroupsCache.maxThreshold === state.maxThreshold &&
-    visibleGroupsCache.hideLabeledGroups === state.hideLabeledGroups &&
     visibleGroupsCache.trainingLabelCount === state.trainingLabels.size &&
     visibleGroupsCache.decisionCount === state.decisions.size &&
     visibleGroupsCache.objectType === state.objectType &&
@@ -5266,7 +5248,6 @@ function filteredGroups() {
     filterSignature: groupFiltersSignature(),
     sortDirection: state.sortDirection,
     maxThreshold: state.maxThreshold,
-    hideLabeledGroups: state.hideLabeledGroups,
     trainingLabelCount: state.trainingLabels.size,
     decisionCount: state.decisions.size,
     objectType: state.objectType,
@@ -5282,19 +5263,12 @@ function getFilteredGroups() {
   const labelStatusFilters = activeLabelStatusFilters();
   const filtered = state.groups.filter((group) => {
     if (group.score > state.maxThreshold) return false;
-    if (state.hideLabeledGroups && isGroupLabeled(group)) return false;
     if (labelStatusFilters.size && !labelStatusFilters.has(groupTrainingLabelStatus(group).status)) return false;
     if (!activeEntries.length) return true;
     if (filterLogic.error) return false;
     return groupMatchesFilters(group, activeEntries, filterLogic);
   });
   return state.sortDirection === "asc" ? [...filtered].reverse() : filtered;
-}
-
-function isGroupLabeled(group) {
-  if (state.decisions.has(group.key)) return true;
-  const pairs = getActiveGroupRecordPairs(group);
-  return Boolean(pairs.length) && pairs.every((pair) => state.trainingLabels.has(pair.key));
 }
 
 function findGroupByKey(groupKey) {
@@ -5987,9 +5961,6 @@ function labelCurrentTrainingPair(label) {
   visibleGroupsCache = null;
   scheduleReviewStateSave();
   renderTrainingExportButton();
-  if (state.hideLabeledGroups) {
-    ensureSelectedGroupVisible();
-  }
   renderGroups();
   renderDetail();
 }
