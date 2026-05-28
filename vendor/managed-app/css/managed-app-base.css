@@ -1,0 +1,93 @@
+:root {
+  color-scheme: light;
+  --managed-font-family: "Avenir Next", "Gill Sans", "Trebuchet MS", ui-sans-serif, system-ui, sans-serif;
+  --managed-font-size: 15px;
+  --managed-line-height: 1.45;
+  --managed-focus-outline: 3px solid rgba(23, 109, 97, 0.3);
+  --managed-focus-offset: 3px;
+  --managed-ring: 0 0 0 4px rgba(23, 109, 97, 0.14);
+  --managed-bg: #ece5d8;
+  --managed-surface: #fffdf7;
+  --managed-surface-alt: #f7f0e4;
+  --managed-surface-strong: #ffffff;
+  --managed-line: #ded0ba;
+  --managed-line-strong: #bfa98b;
+  --managed-ink: #18221f;
+  --managed-muted: #69736d;
+  --managed-accent: #176d61;
+  --managed-accent-strong: #0d4e46;
+  --managed-accent-soft: #dcefe8;
+  --managed-blue: #275f9f;
+  --managed-amber: #ad6a13;
+  --managed-amber-soft: #fff2d8;
+  --managed-red: #a5372d;
+  --managed-red-soft: #fff0ec;
+  --managed-green: #236f46;
+  --managed-green-soft: #e5f5e9;
+  --managed-shadow: 0 22px 70px rgba(46, 36, 21, 0.12);
+  --managed-shadow-soft: 0 10px 30px rgba(46, 36, 21, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--bg, var(--paper, var(--managed-bg)));
+  overflow-y: auto;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  height: auto;
+  color: var(--ink, var(--managed-ink));
+  font-family: var(--managed-font-family);
+  font-size: var(--managed-font-size);
+  line-height: var(--managed-line-height);
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea,
+summary {
+  min-width: 0;
+  font: inherit;
+}
+
+button,
+summary {
+  cursor: pointer;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--accent, var(--managed-accent));
+}
+
+[hidden] {
+  display: none !important;
+}
+
+:where(button, input, select, textarea, summary, a[href], [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: var(--managed-focus-outline);
+  outline-offset: var(--managed-focus-offset);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+}

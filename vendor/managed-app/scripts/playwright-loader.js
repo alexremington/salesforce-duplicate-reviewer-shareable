@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { createRequire } = require("node:module");
 
-const PROJECT_DIR = path.resolve(__dirname, "..");
+const PROJECT_DIR = findManagedAppRoot(__dirname);
 const AUTOMATION_PROJECTS_DIR = path.dirname(PROJECT_DIR);
 
 function loadPlaywright() {
@@ -38,6 +38,25 @@ function sharedNodeModulesDirs() {
     .map((dir) => path.resolve(dir))
     .filter((dir, index, all) => all.indexOf(dir) === index)
     .filter((dir) => fs.existsSync(path.join(dir, "playwright")));
+}
+
+function findManagedAppRoot(startDir) {
+  let currentDir = path.resolve(startDir);
+  while (true) {
+    const packagePath = path.join(currentDir, "package.json");
+    if (fs.existsSync(packagePath)) {
+      try {
+        const manifest = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+        if (manifest.scripts?.["smoke:ui"]) return currentDir;
+      } catch {
+        // Keep walking.
+      }
+    }
+
+    const parentDir = path.dirname(currentDir);
+    if (parentDir === currentDir) return process.cwd();
+    currentDir = parentDir;
+  }
 }
 
 module.exports = { loadPlaywright };

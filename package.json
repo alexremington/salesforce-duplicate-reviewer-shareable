@@ -7,7 +7,8 @@
     "check": "scripts/check.sh",
     "check:windows": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-windows.ps1",
     "check:shareable": "scripts/check-shareable.sh",
-    "setup:playwright": "node scripts/setup-shared-playwright.js",
+    "sync:shared": "node ../automation-shared-resources/scripts/sync-shared-resources.js .",
+    "setup:playwright": "node vendor/managed-app/scripts/setup-shared-playwright.js",
     "smoke:ui": "node tests/playwright-smoke.js",
     "smoke:ui:local": "node scripts/run-ui-smoke.js",
     "start": "node server.js"
