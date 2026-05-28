@@ -14,6 +14,8 @@ Share a GitHub Release archive or a clean clone of the public-safe branch. Do no
 
 Use the launcher for normal server-backed work. When latest Contact or Account exports exist under `Output/`, the app adds them to `Recent files` automatically.
 
+For local UI smoke tests, run `npm run setup:playwright` once from any managed app. That creates a shared Playwright install in the Automation Projects folder.
+
 ## Updating
 
 Replace the app folder with the latest release archive, or pull the latest approved branch. Keep each user's `.env`, exports, logs, and Salesforce CLI authentication local to that user's machine.

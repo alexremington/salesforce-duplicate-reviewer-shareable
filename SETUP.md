@@ -44,6 +44,12 @@ The browser UI can also load CSV files directly through the file picker.
 
 Use the launcher for normal review work after Scheduler downloads finish. The server-backed app automatically adds the latest Contact and Account exports to `Recent files` when those exports exist.
 
+For UI smoke tests on a local machine, install Playwright once for all managed apps:
+
+```bash
+npm run setup:playwright
+```
+
 ## Team Notes
 
 - Keep generated exports in `Output/`; Git ignores that folder.
