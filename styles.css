@@ -778,6 +778,11 @@ input[type="range"] {
   accent-color: var(--accent);
 }
 
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--accent);
+}
+
 input[type="search"],
 input[type="text"],
 input[type="number"],
@@ -828,6 +833,12 @@ select:focus {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+}
+
+.check-row input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
 }
 
 .match-control-actions {
