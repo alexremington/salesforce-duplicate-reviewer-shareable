@@ -98,10 +98,13 @@ async function handleRequest(request, response) {
   if (request.method === "GET" && url.pathname === "/api/health") {
     sendJson(response, {
       ok: true,
+      appId: "salesforce-duplicate-reviewer",
       stickyNotifications: true,
       stagingAccounts: true,
       salesforceMerge: true,
-      salesforceMergeObjectTypes: ["Contact"]
+      salesforceMergeObjectTypes: ["Contact"],
+      pid: process.pid,
+      port: PORT
     });
     return;
   }

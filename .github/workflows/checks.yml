@@ -57,30 +57,8 @@ jobs:
           npm install --no-save playwright
           npx playwright install --with-deps chromium
 
-      - name: Start app
-        run: |
-          npm start > /tmp/duplicate-reviewer.log 2>&1 &
-          echo "$!" > /tmp/duplicate-reviewer.pid
-
-          for attempt in {1..30}; do
-            if curl -fsS http://127.0.0.1:5180/api/health > /dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-
-          cat /tmp/duplicate-reviewer.log
-          exit 1
-
-      - name: Run UI smoke test
-        run: npm run smoke:ui
-
-      - name: Stop app
-        if: always()
-        run: |
-          if [ -f /tmp/duplicate-reviewer.pid ]; then
-            kill "$(cat /tmp/duplicate-reviewer.pid)" 2>/dev/null || true
-          fi
+      - name: Run isolated UI smoke test
+        run: npm run smoke:ui:local
 
   windows-portability:
     name: Windows portability
