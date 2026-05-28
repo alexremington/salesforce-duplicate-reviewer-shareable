@@ -616,6 +616,7 @@ const state = {
   fieldResolutions: new Map(),
   separatedRecords: new Map(),
   threshold: 86,
+  maxThreshold: 100,
   highRecallMode: false,
   sortDirection: "desc",
   hideLabeledGroups: false,
@@ -649,6 +650,7 @@ const els = {
   sourcePill: document.getElementById("sourcePill"),
   recentFileList: document.getElementById("recentFileList"),
   threshold: document.getElementById("threshold"),
+  maxThreshold: document.getElementById("maxThreshold"),
   thresholdValue: document.getElementById("thresholdValue"),
   highRecallMode: document.getElementById("highRecallMode"),
   groupSearch: document.getElementById("groupSearch"),
@@ -746,9 +748,8 @@ function loadDemoData() {
   ingestRows(rows, `Demo ${OBJECT_CONFIG[state.objectType].label}`, true);
 }
 
-els.threshold.addEventListener("input", () => {
-  els.thresholdValue.textContent = els.threshold.value;
-});
+els.threshold.addEventListener("input", () => syncThresholdInputs("min"));
+els.maxThreshold.addEventListener("input", () => syncThresholdInputs("max"));
 
 els.groupSortToggle.addEventListener("click", toggleGroupSortDirection);
 els.hideLabeledGroups.addEventListener("change", applyHideLabeledGroups);
@@ -1855,11 +1856,14 @@ function recompute() {
 }
 
 function applyMatchControls() {
+  syncThresholdInputs();
   const nextThreshold = Number(els.threshold.value);
+  const nextMaxThreshold = Number(els.maxThreshold.value);
   const nextHighRecallMode = els.highRecallMode.checked;
   const shouldRecompute = nextThreshold !== state.threshold || nextHighRecallMode !== state.highRecallMode;
 
   state.threshold = nextThreshold;
+  state.maxThreshold = nextMaxThreshold;
   state.highRecallMode = nextHighRecallMode;
   state.search = els.groupSearch.value.trim().toLowerCase();
   state.selectedGroupKeys.clear();
@@ -1876,7 +1880,7 @@ function applyMatchControls() {
 function toggleGroupSortDirection() {
   state.sortDirection = state.sortDirection === "asc" ? "desc" : "asc";
   visibleGroupsCache = null;
-  ensureSelectedGroupVisible();
+  selectFirstVisibleGroup();
   renderGroups();
   renderDetail();
 }
@@ -1894,6 +1898,32 @@ function ensureSelectedGroupVisible() {
   const groups = filteredGroups();
   if (groups.some((group) => group.key === state.selectedGroupKey)) return;
   state.selectedGroupKey = groups[0]?.key || "";
+}
+
+function selectFirstVisibleGroup() {
+  state.selectedGroupKey = filteredGroups()[0]?.key || "";
+}
+
+function syncThresholdInputs(changed = "") {
+  let minScore = Number(els.threshold.value);
+  let maxScore = Number(els.maxThreshold.value);
+
+  if (changed === "min" && minScore > maxScore) {
+    maxScore = minScore;
+    els.maxThreshold.value = String(maxScore);
+  } else if (changed === "max" && maxScore < minScore) {
+    minScore = maxScore;
+    els.threshold.value = String(minScore);
+  } else if (minScore > maxScore) {
+    maxScore = minScore;
+    els.maxThreshold.value = String(maxScore);
+  }
+
+  els.thresholdValue.textContent = thresholdRangeLabel(minScore, maxScore);
+}
+
+function thresholdRangeLabel(minScore = state.threshold, maxScore = state.maxThreshold) {
+  return Number(minScore) === Number(maxScore) ? String(minScore) : `${minScore}-${maxScore}`;
 }
 
 function parseCsv(csvText) {
@@ -3928,7 +3958,8 @@ function renderSource() {
   const config = OBJECT_CONFIG[state.objectType];
   els.objectLabel.textContent = config.label;
   els.threshold.value = state.threshold;
-  els.thresholdValue.textContent = state.threshold;
+  els.maxThreshold.value = state.maxThreshold;
+  els.thresholdValue.textContent = thresholdRangeLabel();
   els.highRecallMode.checked = state.highRecallMode;
   els.groupSearch.value = state.search;
   els.fileName.textContent = state.loadingFileName || state.fileName || "CSV import";
@@ -4261,6 +4292,7 @@ function filteredGroups() {
     visibleGroupsCache.groups === state.groups &&
     visibleGroupsCache.search === state.search &&
     visibleGroupsCache.sortDirection === state.sortDirection &&
+    visibleGroupsCache.maxThreshold === state.maxThreshold &&
     visibleGroupsCache.hideLabeledGroups === state.hideLabeledGroups &&
     visibleGroupsCache.trainingLabelCount === state.trainingLabels.size &&
     visibleGroupsCache.decisionCount === state.decisions.size &&
@@ -4275,6 +4307,7 @@ function filteredGroups() {
     groups: state.groups,
     search: state.search,
     sortDirection: state.sortDirection,
+    maxThreshold: state.maxThreshold,
     hideLabeledGroups: state.hideLabeledGroups,
     trainingLabelCount: state.trainingLabels.size,
     decisionCount: state.decisions.size,
@@ -4287,6 +4320,7 @@ function filteredGroups() {
 
 function getFilteredGroups() {
   const filtered = state.groups.filter((group) => {
+    if (group.score > state.maxThreshold) return false;
     if (state.hideLabeledGroups && isGroupLabeled(group)) return false;
     if (!state.search) return true;
     return groupSearchText(group).includes(state.search);
@@ -4376,7 +4410,7 @@ function renderDetail() {
           </svg>
         </div>
         <strong>${state.loadError ? "CSV could not be loaded" : state.rows.length ? "No duplicate groups" : "No duplicate groups yet"}</strong>
-        <span>${state.loadError ? escapeHtml(state.loadError) : state.rows.length ? "Adjust the threshold or mapping." : "Choose a CSV or load demo data."}</span>
+        <span>${state.loadError ? escapeHtml(state.loadError) : state.rows.length ? "Adjust the thresholds or mapping." : "Choose a CSV or load demo data."}</span>
         <div class="empty-actions">
           <button class="button button-primary" type="button" data-empty-action="choose-csv">Choose CSV</button>
           <button class="button button-secondary" type="button" data-empty-action="demo-data">Load Demo</button>

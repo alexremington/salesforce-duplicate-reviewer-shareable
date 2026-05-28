@@ -59,16 +59,29 @@ async function run() {
     await page.locator(".group-item-main").first().click();
     await page.getByRole("button", { name: /Match Controls/ }).click();
     const matchControlsExpanded = await page.getByRole("button", { name: /Match Controls/ }).getAttribute("aria-expanded");
-    await page.locator("#threshold").evaluate((input) => {
-      input.value = "80";
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
+    await setRangeValue(page, "#threshold", "80");
+    await setRangeValue(page, "#maxThreshold", "99");
     const thresholdReadout = await page.locator("#thresholdValue").textContent();
     await page.locator("#highRecallMode").check();
     await page.locator("#applyControlsButton").click();
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    const thresholdFilteredScores = await visibleGroupScores(page);
+    await setRangeValue(page, "#maxThreshold", "100");
+    await page.locator("#applyControlsButton").click();
+    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    await page.locator("#groupList").evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await page.waitForTimeout(100);
     await page.locator("#groupSortToggle").click();
     const sortPressed = await page.locator("#groupSortToggle").getAttribute("aria-pressed");
+    await page.waitForFunction(() => {
+      const list = document.querySelector("#groupList");
+      const firstGroup = document.querySelector(".group-item");
+      return list && firstGroup && list.scrollTop <= 1 && firstGroup.classList.contains("is-selected");
+    }, null, { timeout: 5000 });
+    const sortTopState = await groupListTopState(page);
     await page.locator(".group-select").first().check();
     const batchDuplicateEnabled = await page.locator("#batchDuplicateButton").isEnabled();
     await page.locator("#clearSelectionButton").click();
@@ -178,8 +191,14 @@ async function run() {
     }
     if (!csvMenuClosed) throw new Error("Expected CSV object menu to close with Escape.");
     if (matchControlsExpanded !== "true") throw new Error("Expected Match Controls panel to expand.");
-    if (thresholdReadout !== "80") throw new Error(`Expected threshold readout to update to 80, got ${thresholdReadout}.`);
+    if (thresholdReadout !== "80-99") throw new Error(`Expected threshold readout to update to 80-99, got ${thresholdReadout}.`);
+    if (!thresholdFilteredScores.length || thresholdFilteredScores.some((score) => score < 80 || score > 99)) {
+      throw new Error(`Expected max threshold to limit visible scores to 80-99: ${JSON.stringify(thresholdFilteredScores)}`);
+    }
     if (sortPressed !== "true") throw new Error("Expected group sort toggle to respond.");
+    if (!sortTopState.firstSelected || sortTopState.scrollTop > 1 || !sortTopState.scoresAscending) {
+      throw new Error(`Expected sorting ascending to keep the first visible group selected at the top: ${JSON.stringify(sortTopState)}`);
+    }
     if (!batchDuplicateEnabled) throw new Error("Expected batch buttons to enable after selecting a visible group.");
     if (!selectedCountCleared) throw new Error("Expected Clear selection to reset selected count.");
     if (!separatedBadgeVisible) throw new Error("Expected Separate action to show a separated-record badge.");
@@ -218,7 +237,9 @@ async function run() {
       csvMenuClosed,
       matchControlsExpanded,
       thresholdReadout,
+      thresholdFilteredScores,
       sortPressed,
+      sortTopState,
       batchDuplicateEnabled,
       selectedCountCleared,
       separatedBadgeVisible,
@@ -306,13 +327,47 @@ function contactSmokeCsv() {
   for (let index = 1; index <= 24; index += 1) {
     const firstId = `003T${String(index * 2 - 1).padStart(11, "0")}`;
     const secondId = `003T${String(index * 2).padStart(11, "0")}`;
-    const email = `contact${index}@example.com`;
+    const nearMatch = index % 3 === 0;
+    const email = nearMatch ? "" : `contact${index}@example.com`;
     const [firstName, lastName] = names[index - 1];
     const company = index % 2 ? `Northstar Analytics ${index}` : `CivicWire ${index}`;
-    rows.push([firstId, firstName, lastName, company, email, `(555) 010-${String(index).padStart(4, "0")}`, ""]);
-    rows.push([secondId, firstName, lastName, `${company} Inc.`, email, "", `(555) 020-${String(index).padStart(4, "0")}`]);
+    const firstPhone = `(555) 010-${String(index).padStart(4, "0")}`;
+    const secondMobile = nearMatch ? `(555) 990-${String(index).padStart(4, "0")}` : `(555) 020-${String(index).padStart(4, "0")}`;
+    rows.push([firstId, firstName, lastName, company, email, firstPhone, ""]);
+    rows.push([secondId, firstName, lastName, `${company} Inc.`, email, "", secondMobile]);
   }
   return rows.map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+async function setRangeValue(page, selector, value) {
+  await page.locator(selector).evaluate((input, nextValue) => {
+    input.value = nextValue;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }, value);
+}
+
+async function visibleGroupScores(page) {
+  return page.locator(".group-item .group-item-top .match-pill").evaluateAll((nodes) => {
+    return nodes
+      .map((node) => Number(node.textContent?.trim()))
+      .filter((score) => Number.isFinite(score));
+  });
+}
+
+async function groupListTopState(page) {
+  return page.evaluate(() => {
+    const list = document.querySelector("#groupList");
+    const firstGroup = document.querySelector(".group-item");
+    const scores = [...document.querySelectorAll(".group-item .group-item-top .match-pill")]
+      .map((node) => Number(node.textContent?.trim()))
+      .filter((score) => Number.isFinite(score));
+    return {
+      scrollTop: list?.scrollTop || 0,
+      firstSelected: firstGroup?.classList.contains("is-selected") || false,
+      firstScore: scores[0] || 0,
+      scoresAscending: scores.every((score, index) => index === 0 || scores[index - 1] <= score)
+    };
+  });
 }
 
 function csvCell(value) {
