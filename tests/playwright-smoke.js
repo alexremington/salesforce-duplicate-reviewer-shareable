@@ -61,6 +61,7 @@ async function run() {
     const labelStatusInMatchGroups = await page.locator('#matchGroupsPanelBody [data-label-status-filter][value="unlabeled"]').count();
     const labelStatusInMatchControls = await page.locator("#matchControlsPanelBody [data-label-status-filter]").count();
     const hideLabeledRemoved = await page.locator("#hideLabeledGroups").count() === 0;
+    const loadingProgressbar = await loadingProgressbarState(page);
     await page.locator("#chooseCsvButton").click();
     await page.getByRole("menuitem", { name: "Contacts" }).waitFor({ state: "visible", timeout: 5000 });
     await page.keyboard.press("Escape");
@@ -88,10 +89,12 @@ async function run() {
     const fastestSearchDefaultUnchecked = !(await page.locator("#highRecallMode").isChecked());
     const labelStatusEnabledAfterLoad = await page.locator('[data-label-status-filter][value="unlabeled"]').isEnabled();
     await page.locator("#applyControlsButton").click();
+    await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
     const thresholdFilteredScores = await visibleGroupScores(page);
     await setRangeValue(page, "#maxThreshold", "100");
     await page.locator("#applyControlsButton").click();
+    await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
     const customFilterState = await exerciseCustomFilters(page);
     await page.locator("#groupList").evaluate((element) => {
@@ -189,7 +192,7 @@ async function run() {
     await page.getByRole("menuitem", { name: "Accounts" }).click();
     await page.locator("#csvInput").setInputFiles(accountCsvPath);
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
-    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    await waitForFirstGroup(page, "Account CSV load");
     const accountMergeDisabled = await page.locator('[data-review-mode="merge"]').isDisabled();
     await page.screenshot({ path: path.join(outDir, "desktop-account-evaluate.png"), fullPage: false });
 
@@ -223,6 +226,9 @@ async function run() {
     }
     if (!labelStatusInMatchGroups || labelStatusInMatchControls || !hideLabeledRemoved) {
       throw new Error("Expected Label status in Match Groups and Hide labeled removed.");
+    }
+    if (!loadingProgressbar.exists || loadingProgressbar.min !== "0" || loadingProgressbar.max !== "100") {
+      throw new Error(`Expected the loading modal to include a determinate progress bar: ${JSON.stringify(loadingProgressbar)}`);
     }
     if (!latestRecentFiles.contacts || !latestRecentFiles.accounts) {
       throw new Error(`Expected latest Contact and Account exports in Recent files: ${JSON.stringify(latestRecentFiles)}`);
@@ -336,6 +342,7 @@ async function run() {
       darkTheme,
       lightPaneSurfaces,
       darkPaneSurfaces,
+      loadingProgressbar,
       fastestSearchDefaultUnchecked,
       thresholdFilteredScores,
       customFilterState,
@@ -363,9 +370,54 @@ async function run() {
       layout,
       screenshotsDir: outDir
     }, null, 2));
+  } catch (error) {
+    if (messages.length) {
+      console.error(`Browser console warnings/errors before failure: ${messages.join(" | ")}`);
+    }
+    throw error;
   } finally {
     await browser.close();
   }
+}
+
+async function waitForFirstGroup(page, label) {
+  try {
+    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+  } catch (error) {
+    const debugState = await duplicateReviewerDebugState(page);
+    console.error(`${label} did not render a visible group: ${JSON.stringify(debugState)}`);
+    throw error;
+  }
+}
+
+async function duplicateReviewerDebugState(page) {
+  return page.evaluate(() => ({
+    objectType: state.objectType,
+    rowCount: state.rows.length,
+    groupCount: state.groups.length,
+    visibleGroupNodes: document.querySelectorAll(".group-item-main").length,
+    threshold: state.threshold,
+    maxThreshold: state.maxThreshold,
+    filterCount: state.filters.length,
+    filterLogicMode: state.filterLogicMode,
+    labelStatusFilters: [...state.labelStatusFilters],
+    pendingLabelStatusFilters: [...state.pendingLabelStatusFilters],
+    loadError: state.loadError,
+    reviewStateStatus: state.reviewStateStatus,
+    groupListText: document.querySelector("#groupList")?.textContent?.trim().slice(0, 400) || ""
+  }));
+}
+
+async function loadingProgressbarState(page) {
+  const locator = page.locator("#loadingProgress");
+  if (await locator.count() !== 1) return { exists: false, role: "", min: "", max: "", now: "" };
+  return locator.evaluate((element) => ({
+    exists: true,
+    role: element.getAttribute("role") || "",
+    min: element.getAttribute("aria-valuemin") || "",
+    max: element.getAttribute("aria-valuemax") || "",
+    now: element.getAttribute("aria-valuenow") || ""
+  }));
 }
 
 async function assertLatestRecentFiles(page) {

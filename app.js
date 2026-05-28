@@ -347,6 +347,8 @@ const MAX_DUPLICATE_BUCKET_SIZE = 75;
 const MAX_CANDIDATE_PAIRS = 100000;
 const MAX_HIGH_RECALL_CANDIDATE_PAIRS = 250000;
 const CANDIDATE_ATTEMPT_LIMIT_FACTOR = 5;
+const MATCHING_YIELD_INTERVAL_MS = 32;
+const SCORING_CHUNK_SIZE = 1200;
 const GROUP_ITEM_ESTIMATED_HEIGHT = 108;
 const GROUP_LIST_OVERSCAN = 8;
 const DRAFT_GROUP_FILTER_ID = "__draft-filter";
@@ -710,7 +712,8 @@ const state = {
   loadingModal: {
     active: false,
     title: "",
-    message: ""
+    message: "",
+    progress: 0
   },
   isLoadingFile: false,
   loadingFileName: "",
@@ -800,7 +803,9 @@ const els = {
   shortcutsCloseButton: document.getElementById("shortcutsCloseButton"),
   loadingModal: document.getElementById("loadingModal"),
   loadingModalTitle: document.getElementById("loadingModalTitle"),
-  loadingModalMessage: document.getElementById("loadingModalMessage")
+  loadingModalMessage: document.getElementById("loadingModalMessage"),
+  loadingProgress: document.getElementById("loadingProgress"),
+  loadingProgressBar: document.getElementById("loadingProgressBar")
 };
 
 els.chooseCsvButton.addEventListener("click", () => {
@@ -853,11 +858,18 @@ if (typeof window !== "undefined") {
   window.addEventListener("pagehide", flushPendingReviewStateSave);
 }
 
-els.demoButton.addEventListener("click", loadDemoData);
+els.demoButton.addEventListener("click", () => {
+  loadDemoData();
+});
 
-function loadDemoData() {
-  const rows = SAMPLE_DATA[state.objectType].map((row) => ({ ...row }));
-  ingestRows(rows, `Demo ${OBJECT_CONFIG[state.objectType].label}`, true);
+async function loadDemoData() {
+  showLoadingModal("Loading Demo Data", "Matching sample records.", 0);
+  try {
+    const rows = SAMPLE_DATA[state.objectType].map((row) => ({ ...row }));
+    await ingestRows(rows, `Demo ${OBJECT_CONFIG[state.objectType].label}`, true);
+  } finally {
+    hideLoadingModal();
+  }
 }
 
 els.threshold.addEventListener("input", () => syncThresholdInputs("min"));
@@ -879,7 +891,7 @@ els.groupFilterBuilder.addEventListener("input", handleGroupFilterInput);
 
 els.rerunButton.addEventListener("click", () => {
   state.mapping = readMappingFromControls();
-  recompute();
+  recompute({ title: "Re-running Matches", message: "Matching records with the updated field mapping." });
 });
 
 els.duplicateButton.addEventListener("click", () => markDecision("duplicate"));
@@ -1086,7 +1098,9 @@ function loadFile(file, objectType = state.objectType) {
 
 async function loadCsvText(csvText, { fileName, objectType = state.objectType, size = 0, saveRecent = false } = {}) {
   state.objectType = normalizeObjectType(objectType, state.objectType);
+  await updateLoadingProgress("Parsing CSV.", 4);
   const parsed = parseCsv(csvText);
+  await updateLoadingProgress("Matching records.", 7);
   await ingestRows(parsed.rows, fileName || "CSV import", false, parsed.headers);
   if (saveRecent) {
     saveRecentFileInBackground({
@@ -1214,6 +1228,12 @@ function nextPaint() {
   });
 }
 
+function yieldToBrowser() {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
 async function initializeFileHistory() {
   if (!isFileHistoryAvailable()) {
     renderRecentFiles("Recent files are unavailable in this browser");
@@ -1281,8 +1301,12 @@ async function loadRecentFile(fileId) {
     showLoadingModal("Loading Recent CSV", `Parsing and matching ${record.name}.`);
     await nextPaint();
     const csvText = await recentFileCsvText(record);
-    const parsed = parseCsv(csvText);
-    await ingestRows(parsed.rows, record.name, false, parsed.headers);
+    await loadCsvText(csvText, {
+      fileName: record.name,
+      objectType,
+      size: record.size || csvText.length,
+      saveRecent: false
+    });
     saveRecentFileInBackground({
       name: record.name,
       displayName: record.displayName || record.name,
@@ -1676,7 +1700,7 @@ async function restoreReviewStateForCurrentDataset() {
   if (!state.datasetKey || !isFileHistoryAvailable()) return;
   const datasetKey = state.datasetKey;
   if (state.loadingModal.active) {
-    showLoadingModal("Loading CSV", "Restoring saved review state.");
+    await updateLoadingProgress("Restoring saved review state.", 99);
   }
 
   try {
@@ -1922,7 +1946,7 @@ function restoredReviewStateStatus(counts) {
   return parts.length ? `Restored ${parts.join(", ")}` : "";
 }
 
-function ingestRows(rows, fileName, fromObjects, knownHeaders) {
+async function ingestRows(rows, fileName, fromObjects, knownHeaders) {
   flushPendingReviewStateSave();
   endFileLoad();
   state.fileName = fileName;
@@ -1947,24 +1971,36 @@ function ingestRows(rows, fileName, fromObjects, knownHeaders) {
     state.fieldResolutions.clear();
     state.separatedRecords.clear();
   }
-  recompute();
+  await recompute({ title: "Matching Records", message: "Preparing records for matching." });
   return fromObjects ? Promise.resolve() : restoreReviewStateForCurrentDataset();
 }
 
-function recompute() {
-  state.groups = buildGroups(state.rows, state.objectType, state.mapping, state.threshold, state.highRecallMode);
-  groupLookupCache = null;
-  if (!state.groups.some((group) => group.key === state.selectedGroupKey)) {
-    state.selectedGroupKey = state.groups[0]?.key || "";
+async function recompute({ title = "Matching Records", message = "Preparing records for matching." } = {}) {
+  const shouldOwnModal = !state.loadingModal.active;
+  if (shouldOwnModal) {
+    showLoadingModal(title, message, 0);
+    await nextPaint();
   }
-  pruneFieldResolutions();
-  pruneSeparatedRecords();
-  visibleGroupsCache = null;
-  ensureSelectedGroupVisible();
-  render();
+
+  try {
+    state.groups = await buildGroupsAsync(state.rows, state.objectType, state.mapping, state.threshold, state.highRecallMode, updateLoadingProgress);
+    await updateLoadingProgress("Rendering duplicate groups.", 98);
+    groupLookupCache = null;
+    if (!state.groups.some((group) => group.key === state.selectedGroupKey)) {
+      state.selectedGroupKey = state.groups[0]?.key || "";
+    }
+    pruneFieldResolutions();
+    pruneSeparatedRecords();
+    visibleGroupsCache = null;
+    ensureSelectedGroupVisible();
+    render();
+    await updateLoadingProgress("Ready.", 100);
+  } finally {
+    if (shouldOwnModal) hideLoadingModal();
+  }
 }
 
-function applyMatchControls() {
+async function applyMatchControls() {
   if (!state.rows.length) return;
   syncThresholdInputs();
   const nextThreshold = Number(els.threshold.value);
@@ -1976,7 +2012,7 @@ function applyMatchControls() {
   state.maxThreshold = nextMaxThreshold;
   state.highRecallMode = nextHighRecallMode;
   if (shouldRecompute) {
-    recompute();
+    await recompute({ title: "Updating Matches", message: "Rebuilding candidate matches." });
   } else {
     visibleGroupsCache = null;
     ensureSelectedGroupVisible();
@@ -2190,26 +2226,39 @@ function readMappingFromControls() {
 /**
  * Build duplicate review groups from original CSV rows.
  *
- * The expensive normalization work happens once in prepareRows(). Candidate
+ * The expensive normalization work happens once in prepareRowsAsync(). Candidate
  * buckets then decide which row pairs are worth scoring, which keeps large CSVs
  * away from all-pairs comparison in normal cases.
  */
-function buildGroups(rows, objectType, mapping, threshold, highRecallMode = false) {
-  if (!rows.length) return [];
-  const { preparedRows, scorer } = getScoringContext(rows, objectType, mapping);
-  const pairKeys =
-    objectType === "contact"
-      ? getContactCandidatePairs(preparedRows, highRecallMode)
-      : getAccountCandidatePairs(preparedRows, highRecallMode, candidatePairLimit(highRecallMode), threshold);
-  const pairs = scoreCandidatePairs(pairKeys, preparedRows, scorer, threshold);
+async function buildGroupsAsync(rows, objectType, mapping, threshold, highRecallMode = false, progress = async () => {}) {
+  if (!rows.length) {
+    await progress("No records to match.", 100);
+    return [];
+  }
 
+  await progress("Preparing records.", 8);
+  const { preparedRows, scorer } = await getScoringContextAsync(rows, objectType, mapping, progress);
+
+  await progress("Finding candidate pairs.", 22);
+  const pairKeys = objectType === "contact"
+    ? await getContactCandidatePairsAsync(preparedRows, highRecallMode, candidatePairLimit(highRecallMode), progress)
+    : await getAccountCandidatePairsAsync(preparedRows, highRecallMode, candidatePairLimit(highRecallMode), threshold, progress);
+
+  await progress(`Scoring ${formatNumber(pairKeys.size)} candidate pairs.`, 44);
+  const pairs = await scoreCandidatePairsAsync(pairKeys, preparedRows, scorer, threshold, progress);
+
+  await progress("Building match groups.", 82);
   const groupsByRoot = collectPairGroups(pairs, rows.length);
+  await yieldToBrowser();
 
-  return [...groupsByRoot.values()]
+  const groups = [...groupsByRoot.values()]
     .map((group) => summarizeGroup(group, preparedRows, scorer))
     .filter((group) => group.score >= threshold)
     .sort(compareGroups)
     .map((group, index) => ({ ...group, id: index + 1 }));
+
+  await progress("Rendering duplicate groups.", 96);
+  return groups;
 }
 
 function getScoringContext(rows, objectType, mapping) {
@@ -2224,6 +2273,30 @@ function getScoringContext(rows, objectType, mapping) {
 
   const preparedRows = prepareRows(rows, objectType, mapping);
   const fieldStats = buildFieldStats(preparedRows, objectType);
+  const scorer = createPairScorer(objectType, fieldStats);
+  scoringContextCache = {
+    rows,
+    objectType,
+    mapping,
+    preparedRows,
+    fieldStats,
+    scorer
+  };
+  return scoringContextCache;
+}
+
+async function getScoringContextAsync(rows, objectType, mapping, progress = async () => {}) {
+  if (
+    scoringContextCache &&
+    scoringContextCache.rows === rows &&
+    scoringContextCache.objectType === objectType &&
+    scoringContextCache.mapping === mapping
+  ) {
+    return scoringContextCache;
+  }
+
+  const preparedRows = await prepareRowsAsync(rows, objectType, mapping, progress);
+  const fieldStats = await buildFieldStatsAsync(preparedRows, objectType, progress);
   const scorer = createPairScorer(objectType, fieldStats);
   scoringContextCache = {
     rows,
@@ -2253,13 +2326,26 @@ function createContactScoreCache() {
   };
 }
 
-function scoreCandidatePairs(pairKeys, preparedRows, scorer, threshold) {
+async function scoreCandidatePairsAsync(pairKeys, preparedRows, scorer, threshold, progress = async () => {}) {
+  const keys = [...pairKeys];
   const pairs = [];
-  pairKeys.forEach((key) => {
-    const [leftIndex, rightIndex] = key.split("|").map(Number);
+  const total = Math.max(keys.length, 1);
+  let lastYield = performance.now();
+
+  for (let index = 0; index < keys.length; index += 1) {
+    const [leftIndex, rightIndex] = keys[index].split("|").map(Number);
     const score = scorePreparedPair(preparedRows[leftIndex], preparedRows[rightIndex], scorer);
     if (score.value >= threshold) pairs.push(score);
-  });
+
+    const shouldYield = (index + 1) % SCORING_CHUNK_SIZE === 0 || performance.now() - lastYield >= MATCHING_YIELD_INTERVAL_MS;
+    if (shouldYield) {
+      const percent = 44 + ((index + 1) / total) * 34;
+      await progress(`Scoring candidate pairs (${formatNumber(index + 1)} of ${formatNumber(keys.length)}).`, percent);
+      lastYield = performance.now();
+    }
+  }
+
+  await progress("Sorting scored pairs.", 78);
   pairs.sort((a, b) => b.value - a.value || b.fieldMatchRatio - a.fieldMatchRatio);
   return pairs;
 }
@@ -2347,6 +2433,25 @@ function prepareRows(rows, objectType, mapping) {
   return rows.map((row, index) => prepare(row, mapping, index, cache));
 }
 
+async function prepareRowsAsync(rows, objectType, mapping, progress = async () => {}) {
+  const prepare = objectType === "contact" ? prepareContactRow : prepareAccountRow;
+  const cache = createPrepareCache();
+  const preparedRows = [];
+  const total = Math.max(rows.length, 1);
+  let lastYield = performance.now();
+
+  for (let index = 0; index < rows.length; index += 1) {
+    preparedRows.push(prepare(rows[index], mapping, index, cache));
+    if (index % SCORING_CHUNK_SIZE === 0 || performance.now() - lastYield >= MATCHING_YIELD_INTERVAL_MS) {
+      const percent = 8 + ((index + 1) / total) * 8;
+      await progress(`Preparing records (${formatNumber(index + 1)} of ${formatNumber(rows.length)}).`, percent);
+      lastYield = performance.now();
+    }
+  }
+
+  return preparedRows;
+}
+
 function createPrepareCache() {
   return {
     contactNames: new Map(),
@@ -2378,6 +2483,34 @@ function buildFieldStats(preparedRows, objectType) {
       fieldCounts.set(value, (fieldCounts.get(value) || 0) + 1);
     });
   });
+
+  return stats;
+}
+
+async function buildFieldStatsAsync(preparedRows, objectType, progress = async () => {}) {
+  if (objectType !== "account") return null;
+  const fields = Object.keys(ACCOUNT_FIELD_WEIGHTS).filter((field) => field !== "name");
+  const stats = {
+    rowCount: preparedRows.length,
+    fields: Object.fromEntries(fields.map((field) => [field, new Map()]))
+  };
+  const total = Math.max(preparedRows.length, 1);
+  let lastYield = performance.now();
+
+  for (let index = 0; index < preparedRows.length; index += 1) {
+    const row = preparedRows[index];
+    fields.forEach((field) => {
+      const value = row[field];
+      if (!value) return;
+      const fieldCounts = stats.fields[field];
+      fieldCounts.set(value, (fieldCounts.get(value) || 0) + 1);
+    });
+    if (index % SCORING_CHUNK_SIZE === 0 || performance.now() - lastYield >= MATCHING_YIELD_INTERVAL_MS) {
+      const percent = 16 + ((index + 1) / total) * 4;
+      await progress(`Preparing account field statistics (${formatNumber(index + 1)} of ${formatNumber(preparedRows.length)}).`, percent);
+      lastYield = performance.now();
+    }
+  }
 
   return stats;
 }
@@ -2472,14 +2605,18 @@ function matchedFieldRatio(fieldScores) {
   return scores.filter((score) => score >= MATCHED_FIELD_THRESHOLD).length / scores.length;
 }
 
-/**
- * Candidate buckets are intentionally broad enough to catch likely duplicates
- * while avoiding quadratic scoring for every large import.
- */
-function getContactCandidatePairs(rows, highRecallMode = false, maxCandidatePairs = candidatePairLimit(highRecallMode)) {
+async function getContactCandidatePairsAsync(
+  rows,
+  highRecallMode = false,
+  maxCandidatePairs = candidatePairLimit(highRecallMode),
+  progress = async () => {}
+) {
   const buckets = new Map();
+  const total = Math.max(rows.length, 1);
+  let lastYield = performance.now();
 
-  rows.forEach((row) => {
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex];
     const { index, firstName, lastName, company, email, domain, linkedIn, phones } = row;
 
     addBucket(buckets, `email:${email}`, index, email);
@@ -2489,26 +2626,38 @@ function getContactCandidatePairs(rows, highRecallMode = false, maxCandidatePair
     addBucket(buckets, `last-first:${lastName}|${firstName.slice(0, 1)}`, index, lastName && firstName);
     addBucket(buckets, `company-last:${company}|${lastName}`, index, company && lastName);
     addBucket(buckets, `domain-last:${domain}|${lastName}`, index, domain && lastName);
-  });
+    if (rowIndex % SCORING_CHUNK_SIZE === 0 || performance.now() - lastYield >= MATCHING_YIELD_INTERVAL_MS) {
+      const percent = 22 + ((rowIndex + 1) / total) * 5;
+      await progress(`Building candidate buckets (${formatNumber(rowIndex + 1)} of ${formatNumber(rows.length)}).`, percent);
+      lastYield = performance.now();
+    }
+  }
 
-  return pairsFromBuckets(
+  await progress(`Scanning ${formatNumber(buckets.size)} candidate buckets.`, 28);
+  return pairsFromBucketsAsync(
     buckets,
     rows,
     rows.length <= 300 ? rows.length : 0,
     highRecallMode ? contactHighRecallBucketKeys : null,
-    maxCandidatePairs
+    maxCandidatePairs,
+    null,
+    progress
   );
 }
 
-function getAccountCandidatePairs(
+async function getAccountCandidatePairsAsync(
   rows,
   highRecallMode = false,
   maxCandidatePairs = candidatePairLimit(highRecallMode),
-  threshold = state.threshold
+  threshold = state.threshold,
+  progress = async () => {}
 ) {
   const buckets = new Map();
+  const total = Math.max(rows.length, 1);
+  let lastYield = performance.now();
 
-  rows.forEach((row) => {
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex];
     const {
       index,
       name,
@@ -2530,15 +2679,22 @@ function getAccountCandidatePairs(
     if (highRecallMode) {
       accountHighRecallBucketKeys(row).forEach((key) => addBucket(buckets, key, index, key));
     }
-  });
+    if (rowIndex % SCORING_CHUNK_SIZE === 0 || performance.now() - lastYield >= MATCHING_YIELD_INTERVAL_MS) {
+      const percent = 22 + ((rowIndex + 1) / total) * 5;
+      await progress(`Building candidate buckets (${formatNumber(rowIndex + 1)} of ${formatNumber(rows.length)}).`, percent);
+      lastYield = performance.now();
+    }
+  }
 
-  return pairsFromBuckets(
+  await progress(`Scanning ${formatNumber(buckets.size)} candidate buckets.`, 28);
+  return pairsFromBucketsAsync(
     buckets,
     rows,
     rows.length <= 300 ? rows.length : 0,
     highRecallMode ? accountHighRecallBucketKeys : null,
     maxCandidatePairs,
-    accountCandidatePairFilter(threshold)
+    accountCandidatePairFilter(threshold),
+    progress
   );
 }
 
@@ -2662,31 +2818,67 @@ function addBucket(buckets, key, index, isValid) {
   buckets.get(key).push(index);
 }
 
-function pairsFromBuckets(
+async function pairsFromBucketsAsync(
   buckets,
   rows,
   exhaustiveSize,
   splitKeyFn = null,
   maxCandidatePairs = MAX_CANDIDATE_PAIRS,
-  candidateFilter = null
+  candidateFilter = null,
+  progress = async () => {}
 ) {
   const pairs = new Set();
   const searchState = createCandidateSearchState(maxCandidatePairs, candidateFilter);
+  const sortedBuckets = sortedCandidateBuckets(buckets);
+  const totalBuckets = Math.max(sortedBuckets.length, 1);
+  let lastYield = performance.now();
 
-  for (const indexes of sortedCandidateBuckets(buckets)) {
-    addPairsFromCandidateIndexes(indexes, pairs, rows, splitKeyFn, maxCandidatePairs, candidateFilter, searchState);
-    if (pairs.size >= maxCandidatePairs || searchState.stopped) return finishCandidatePairs(pairs, searchState);
+  const pulse = async (bucketIndex) => {
+    if (performance.now() - lastYield < MATCHING_YIELD_INTERVAL_MS) return;
+    const percent = 28 + (bucketIndex / totalBuckets) * 12;
+    await progress(`Finding candidate pairs (${formatNumber(pairs.size)} found).`, percent);
+    lastYield = performance.now();
+  };
+
+  for (let bucketIndex = 0; bucketIndex < sortedBuckets.length; bucketIndex += 1) {
+    await addPairsFromCandidateIndexesAsync(
+      sortedBuckets[bucketIndex],
+      pairs,
+      rows,
+      splitKeyFn,
+      maxCandidatePairs,
+      candidateFilter,
+      searchState,
+      () => pulse(bucketIndex + 1)
+    );
+    if (pairs.size >= maxCandidatePairs || searchState.stopped) {
+      await progress(`Found ${formatNumber(pairs.size)} candidate pairs.`, 42);
+      return finishCandidatePairs(pairs, searchState);
+    }
+    await pulse(bucketIndex + 1);
   }
 
   if (exhaustiveSize) {
+    const exhaustiveTotal = Math.max(candidatePairEstimate(exhaustiveSize), 1);
+    let attempts = 0;
     for (let left = 0; left < exhaustiveSize; left += 1) {
       for (let right = left + 1; right < exhaustiveSize; right += 1) {
+        attempts += 1;
         addCandidatePair(left, right, pairs, rows, maxCandidatePairs, candidateFilter, searchState);
-        if (pairs.size >= maxCandidatePairs || searchState.stopped) return finishCandidatePairs(pairs, searchState);
+        if (pairs.size >= maxCandidatePairs || searchState.stopped) {
+          await progress(`Found ${formatNumber(pairs.size)} candidate pairs.`, 42);
+          return finishCandidatePairs(pairs, searchState);
+        }
+        if (performance.now() - lastYield >= MATCHING_YIELD_INTERVAL_MS) {
+          const percent = 40 + (attempts / exhaustiveTotal) * 3;
+          await progress(`Checking small-dataset candidates (${formatNumber(pairs.size)} found).`, percent);
+          lastYield = performance.now();
+        }
       }
     }
   }
 
+  await progress(`Found ${formatNumber(pairs.size)} candidate pairs.`, 42);
   return finishCandidatePairs(pairs, searchState);
 }
 
@@ -2717,9 +2909,18 @@ function candidatePairEstimate(size) {
   return (size * (size - 1)) / 2;
 }
 
-function addPairsFromCandidateIndexes(indexes, pairs, rows, splitKeyFn, maxCandidatePairs, candidateFilter, searchState) {
+async function addPairsFromCandidateIndexesAsync(
+  indexes,
+  pairs,
+  rows,
+  splitKeyFn,
+  maxCandidatePairs,
+  candidateFilter,
+  searchState,
+  pulse
+) {
   if (indexes.length <= MAX_DUPLICATE_BUCKET_SIZE) {
-    addPairCombinations(indexes, pairs, rows, maxCandidatePairs, candidateFilter, searchState);
+    await addPairCombinationsAsync(indexes, pairs, rows, maxCandidatePairs, candidateFilter, searchState, pulse);
     return;
   }
   if (!splitKeyFn) return;
@@ -2731,16 +2932,19 @@ function addPairsFromCandidateIndexes(indexes, pairs, rows, splitKeyFn, maxCandi
 
   for (const splitIndexes of splitBuckets.values()) {
     if (splitIndexes.length < 2 || splitIndexes.length > MAX_DUPLICATE_BUCKET_SIZE) continue;
-    addPairCombinations(splitIndexes, pairs, rows, maxCandidatePairs, candidateFilter, searchState);
+    await addPairCombinationsAsync(splitIndexes, pairs, rows, maxCandidatePairs, candidateFilter, searchState, pulse);
     if (pairs.size >= maxCandidatePairs || searchState.stopped) return;
   }
 }
 
-function addPairCombinations(indexes, pairs, rows, maxCandidatePairs, candidateFilter, searchState) {
+async function addPairCombinationsAsync(indexes, pairs, rows, maxCandidatePairs, candidateFilter, searchState, pulse) {
+  let attempts = 0;
   for (let left = 0; left < indexes.length; left += 1) {
     for (let right = left + 1; right < indexes.length; right += 1) {
+      attempts += 1;
       addCandidatePair(indexes[left], indexes[right], pairs, rows, maxCandidatePairs, candidateFilter, searchState);
       if (pairs.size >= maxCandidatePairs || searchState.stopped) return;
+      if (attempts % SCORING_CHUNK_SIZE === 0) await pulse();
     }
   }
 }
@@ -4073,11 +4277,12 @@ function render() {
   renderLoadingModal();
 }
 
-function showLoadingModal(title, message) {
+function showLoadingModal(title, message, progress = 0) {
   state.loadingModal = {
     active: true,
     title,
-    message
+    message,
+    progress
   };
   renderLoadingModal();
 }
@@ -4086,18 +4291,39 @@ function hideLoadingModal() {
   state.loadingModal = {
     active: false,
     title: "",
-    message: ""
+    message: "",
+    progress: 0
   };
   renderLoadingModal();
 }
 
+async function updateLoadingProgress(message, progress) {
+  if (!state.loadingModal.active) return;
+  state.loadingModal = {
+    ...state.loadingModal,
+    message: message || state.loadingModal.message,
+    progress: clampProgress(progress)
+  };
+  renderLoadingModal();
+  await yieldToBrowser();
+}
+
 function renderLoadingModal() {
   if (!els.loadingModal) return;
-  const { active, title, message } = state.loadingModal;
+  const { active, title, message, progress } = state.loadingModal;
   els.loadingModal.hidden = !active;
   els.loadingModal.setAttribute("aria-busy", active ? "true" : "false");
   els.loadingModalTitle.textContent = title || "Loading";
   els.loadingModalMessage.textContent = message || "Preparing records.";
+  const progressValue = clampProgress(progress);
+  els.loadingProgress?.setAttribute("aria-valuenow", String(Math.round(progressValue)));
+  els.loadingProgressBar?.style.setProperty("--loading-progress", `${progressValue}%`);
+}
+
+function clampProgress(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(0, Math.min(100, number));
 }
 
 function renderSource() {
