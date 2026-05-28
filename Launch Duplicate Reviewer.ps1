@@ -44,8 +44,20 @@ function Get-DuplicateReviewerHealth {
 
 function Test-DuplicateReviewer {
   $health = Get-DuplicateReviewerHealth
+  return Test-DuplicateReviewerHealth $health
+}
+
+function Test-DuplicateReviewerHealth {
+  param($Health)
+  $health = $Health
   if (-not $health) { return $false }
   return $health.appId -eq 'salesforce-duplicate-reviewer' -or $health.salesforceMerge -eq $true
+}
+
+function Test-DuplicateReviewerRequiredFeatures {
+  param($Health)
+  if (-not (Test-DuplicateReviewerHealth $Health)) { return $false }
+  return $Health.salesforceMerge -eq $true -and $Health.latestStagingFiles -eq $true
 }
 
 function Test-PortListening {
@@ -61,16 +73,35 @@ function Test-PortListening {
   }
 }
 
-if (-not (Test-DuplicateReviewer)) {
-  if (Test-PortListening) {
-    throw "Port $Port is already in use by a different local process. Stop that process or set DUPLICATE_REVIEWER_PORT in .env."
-  }
+function Start-DuplicateReviewerServer {
   Write-Host 'Starting Salesforce Duplicate Reviewer...'
   Start-Process `
     -FilePath 'cmd.exe' `
     -ArgumentList "/c set PORT=$Port&& npm start >> `"$OutLog`" 2>> `"$ErrLog`"" `
     -WorkingDirectory $ProjectDir `
     -WindowStyle Hidden
+}
+
+$Health = Get-DuplicateReviewerHealth
+if (-not (Test-DuplicateReviewerHealth $Health)) {
+  if (Test-PortListening) {
+    throw "Port $Port is already in use by a different local process. Stop that process or set DUPLICATE_REVIEWER_PORT in .env."
+  }
+  Start-DuplicateReviewerServer
+} elseif (-not (Test-DuplicateReviewerRequiredFeatures $Health)) {
+  if (-not $Health.pid) {
+    throw "Salesforce Duplicate Reviewer is running but needs to be restarted for current features. Stop the existing server on port $Port, then run this launcher again."
+  }
+  Write-Host 'Restarting Salesforce Duplicate Reviewer to enable current features...'
+  Stop-Process -Id ([int]$Health.pid) -Force -ErrorAction SilentlyContinue
+  for ($attempt = 1; $attempt -le 40; $attempt += 1) {
+    if (-not (Test-PortListening)) { break }
+    Start-Sleep -Milliseconds 250
+  }
+  if (Test-PortListening) {
+    throw "Port $Port is still in use after restart attempt. Stop the existing server, then run this launcher again."
+  }
+  Start-DuplicateReviewerServer
 } else {
   Write-Host 'Salesforce Duplicate Reviewer is already running.'
 }

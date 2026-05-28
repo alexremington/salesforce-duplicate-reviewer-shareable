@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
 const childProcess = require("node:child_process");
+const fs = require("node:fs/promises");
 const http = require("node:http");
 const net = require("node:net");
+const os = require("node:os");
 const path = require("node:path");
 
 const PROJECT_DIR = path.resolve(__dirname, "..");
@@ -14,6 +16,7 @@ const READY_ATTEMPTS = 80;
 const READY_DELAY_MS = 250;
 
 let serverProcess = null;
+let smokeStagingDir = "";
 
 main().catch((error) => {
   console.error(error);
@@ -23,11 +26,27 @@ main().catch((error) => {
 async function main() {
   const port = await getFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
+  smokeStagingDir = await fs.mkdtemp(path.join(os.tmpdir(), "duplicate-reviewer-staging-"));
+  const contactsCsvPath = path.join(smokeStagingDir, "contacts-latest.csv");
+  const accountsCsvPath = path.join(smokeStagingDir, "accounts-latest.csv");
+  await fs.writeFile(contactsCsvPath, [
+    "Id,First Name,Last Name,Company,Email",
+    "003T00000090001,Smoke,Contact,Northstar,smoke-contact@example.com",
+    "003T00000090002,Smoke,Contact,Northstar Inc,smoke-contact@example.com"
+  ].join("\n"));
+  await fs.writeFile(accountsCsvPath, [
+    "Id,Name,Website,Billing City",
+    "001T00000090001,Smoke Account,smoke.example,San Francisco",
+    "001T00000090002,Smoke Account Inc,https://smoke.example,San Francisco"
+  ].join("\n"));
+
   const serverEnv = {
     ...process.env,
     HOST: "127.0.0.1",
     PORT: String(port),
-    DUPLICATE_REVIEWER_STATIC_DIR: PROJECT_DIR
+    DUPLICATE_REVIEWER_STATIC_DIR: PROJECT_DIR,
+    STAGING_CONTACTS_CSV: contactsCsvPath,
+    STAGING_ACCOUNTS_CSV: accountsCsvPath
   };
 
   serverProcess = childProcess.spawn(process.execPath, ["server.js"], {
@@ -47,6 +66,9 @@ async function main() {
     process.exitCode = smokeExitCode;
   } finally {
     await stopProcess(serverProcess);
+    if (smokeStagingDir) {
+      await fs.rm(smokeStagingDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 }
 
@@ -170,4 +192,3 @@ function onceExit(processHandle) {
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-

@@ -35,7 +35,9 @@ server_is_duplicate_reviewer() {
 }
 
 server_supports_required_features() {
-  [[ "$(server_health)" == *'"salesforceMerge":true'* ]]
+  local health
+  health="$(server_health)"
+  [[ "${health}" == *'"salesforceMerge":true'* && "${health}" == *'"latestStagingFiles":true'* ]]
 }
 
 write_server_plist() {
@@ -88,6 +90,7 @@ PLIST
 sync_static_assets() {
   /bin/mkdir -p "${STATIC_DIR}"
   copy_static_asset "${PROJECT_DIR}/index.html" "${STATIC_DIR}/index.html"
+  copy_static_asset "${PROJECT_DIR}/redirect-file-mode.js" "${STATIC_DIR}/redirect-file-mode.js"
   copy_static_asset "${PROJECT_DIR}/app.js" "${STATIC_DIR}/app.js"
   copy_static_asset "${PROJECT_DIR}/styles.css" "${STATIC_DIR}/styles.css"
 }

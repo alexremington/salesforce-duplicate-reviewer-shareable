@@ -42,6 +42,8 @@ http://127.0.0.1:5180
 
 The browser UI can also load CSV files directly through the file picker.
 
+Use the launcher for normal review work after Scheduler downloads finish. The server-backed app automatically adds the latest Contact and Account exports to `Recent files` when those exports exist.
+
 ## Team Notes
 
 - Keep generated exports in `Output/`; Git ignores that folder.

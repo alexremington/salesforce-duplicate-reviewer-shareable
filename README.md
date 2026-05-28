@@ -172,6 +172,8 @@ It then opens the app with the latest staging compatibility CSV auto-loaded. The
 
 Opening `index.html` directly remains supported for manual CSV uploads. If it is opened from disk while the local server is already running, the page redirects itself to the server-backed URL so the latest Scheduler exports and staging auto-load URLs keep working. If the server is not running, the static page stays open as a manual-upload fallback.
 
+For day-to-day review work, use `Launch Duplicate Reviewer.command` on macOS or `Launch Duplicate Reviewer.ps1` on Windows. The server-backed app automatically adds the latest staging Contact and Account exports to `Recent files` when those exports exist, so the launcher is the single entry point for continuing work after Scheduler downloads finish.
+
 The staging auto-load URL includes `sticky=1`, so the local server also opens a small macOS alert dialog after the CSV is ready. That dialog stays onscreen until dismissed. Notification Center itself controls whether the notification is a temporary banner or a persistent alert in macOS System Settings.
 
 The local server can also be started manually:

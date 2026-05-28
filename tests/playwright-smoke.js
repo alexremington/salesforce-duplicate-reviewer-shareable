@@ -40,6 +40,7 @@ async function run() {
     page.on("pageerror", (error) => messages.push(`pageerror: ${error.message}`));
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
+    const latestRecentFiles = await assertLatestRecentFiles(page);
     await page.screenshot({ path: path.join(outDir, "desktop-empty.png"), fullPage: false });
 
     const emptyChooseVisible = await page.locator('[data-empty-action="choose-csv"]').isVisible();
@@ -171,6 +172,9 @@ async function run() {
 
     if (!emptyChooseVisible) throw new Error("Expected empty-state Choose CSV action to be visible.");
     if (!emptyDemoVisible) throw new Error("Expected empty-state Load Demo action to be visible.");
+    if (!latestRecentFiles.contacts || !latestRecentFiles.accounts) {
+      throw new Error(`Expected latest Contact and Account exports in Recent files: ${JSON.stringify(latestRecentFiles)}`);
+    }
     if (!csvMenuClosed) throw new Error("Expected CSV object menu to close with Escape.");
     if (matchControlsExpanded !== "true") throw new Error("Expected Match Controls panel to expand.");
     if (thresholdReadout !== "80") throw new Error(`Expected threshold readout to update to 80, got ${thresholdReadout}.`);
@@ -209,6 +213,7 @@ async function run() {
       baseUrl,
       emptyChooseVisible,
       emptyDemoVisible,
+      latestRecentFiles,
       csvMenuClosed,
       matchControlsExpanded,
       thresholdReadout,
@@ -237,6 +242,16 @@ async function run() {
   } finally {
     await browser.close();
   }
+}
+
+async function assertLatestRecentFiles(page) {
+  await page.locator(".recent-file").filter({ hasText: "Contacts" }).first().waitFor({ state: "visible", timeout: 5000 });
+  await page.locator(".recent-file").filter({ hasText: "Accounts" }).first().waitFor({ state: "visible", timeout: 5000 });
+
+  return {
+    contacts: await page.locator(".recent-file").filter({ hasText: "Contacts" }).count(),
+    accounts: await page.locator(".recent-file").filter({ hasText: "Accounts" }).count()
+  };
 }
 
 async function assertFileModeRedirect(browser) {
