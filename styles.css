@@ -660,6 +660,13 @@ select:focus {
   white-space: nowrap;
 }
 
+.select-visible input,
+.hide-labeled-control input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+}
+
 .selected-count {
   color: var(--muted);
   font-size: 12px;
