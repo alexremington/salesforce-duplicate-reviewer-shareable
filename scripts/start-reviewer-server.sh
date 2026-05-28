@@ -24,8 +24,18 @@ server_pid() {
   /usr/sbin/lsof -tiTCP:"${PORT}" -sTCP:LISTEN -n -P 2>/dev/null | /usr/bin/awk 'NR == 1 { print; exit }' || true
 }
 
+server_health() {
+  /usr/bin/curl -fsS "${URL}/api/health" 2>/dev/null || true
+}
+
+server_is_duplicate_reviewer() {
+  local health
+  health="$(server_health)"
+  [[ "${health}" == *'"appId":"salesforce-duplicate-reviewer"'* || "${health}" == *'"salesforceMerge":true'* ]]
+}
+
 server_supports_required_features() {
-  /usr/bin/curl -fsS "${URL}/api/health" 2>/dev/null | /usr/bin/grep -q '"salesforceMerge":true'
+  [[ "$(server_health)" == *'"salesforceMerge":true'* ]]
 }
 
 write_server_plist() {
@@ -112,6 +122,11 @@ start_server_agent() {
 
 pid="$(server_pid)"
 sync_static_assets
+if [[ -n "${pid}" ]] && ! server_is_duplicate_reviewer; then
+  echo "Port ${PORT} is already in use by a different local process. Stop that process or set DUPLICATE_REVIEWER_PORT in .env." >&2
+  exit 1
+fi
+
 if [[ -n "${pid}" ]] && ! server_supports_required_features; then
   echo "Restarting Salesforce Duplicate Reviewer server at ${URL} to enable current features"
   /bin/launchctl bootout "${SERVICE_TARGET}" >/dev/null 2>&1 || true

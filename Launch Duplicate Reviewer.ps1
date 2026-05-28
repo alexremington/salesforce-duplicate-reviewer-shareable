@@ -34,16 +34,37 @@ $ErrLog = Join-Path $LogDir 'duplicate-reviewer.err.log'
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
-function Test-DuplicateReviewer {
+function Get-DuplicateReviewerHealth {
   try {
-    Invoke-WebRequest -Uri "$Url/api/health" -UseBasicParsing -TimeoutSec 2 | Out-Null
-    return $true
+    return Invoke-RestMethod -Uri "$Url/api/health" -TimeoutSec 2
+  } catch {
+    return $null
+  }
+}
+
+function Test-DuplicateReviewer {
+  $health = Get-DuplicateReviewerHealth
+  if (-not $health) { return $false }
+  return $health.appId -eq 'salesforce-duplicate-reviewer' -or $health.salesforceMerge -eq $true
+}
+
+function Test-PortListening {
+  $client = [System.Net.Sockets.TcpClient]::new()
+  try {
+    $connect = $client.ConnectAsync('127.0.0.1', [int]$Port)
+    if (-not $connect.Wait(250)) { return $false }
+    return $client.Connected
   } catch {
     return $false
+  } finally {
+    $client.Dispose()
   }
 }
 
 if (-not (Test-DuplicateReviewer)) {
+  if (Test-PortListening) {
+    throw "Port $Port is already in use by a different local process. Stop that process or set DUPLICATE_REVIEWER_PORT in .env."
+  }
   Write-Host 'Starting Salesforce Duplicate Reviewer...'
   Start-Process `
     -FilePath 'cmd.exe' `
