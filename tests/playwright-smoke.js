@@ -1,6 +1,7 @@
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 
 let chromium;
 try {
@@ -28,6 +29,8 @@ async function run() {
   const messages = [];
 
   try {
+    const fileModeRedirect = await assertFileModeRedirect(browser);
+
     const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
     page.on("console", (message) => {
       if (["error", "warning"].includes(message.type())) {
@@ -223,6 +226,7 @@ async function run() {
       mergeFieldCanChange,
       accountMergeDisabled,
       shortcutsVisible,
+      fileModeRedirect,
       rootScrollPolicy,
       reviewPaneScroll,
       mobileScroll,
@@ -232,6 +236,26 @@ async function run() {
     }, null, 2));
   } finally {
     await browser.close();
+  }
+}
+
+async function assertFileModeRedirect(browser) {
+  const page = await browser.newPage();
+  const indexUrl = new URL(pathToFileURL(path.join(__dirname, "..", "index.html")).href);
+  indexUrl.searchParams.set("server", baseUrl);
+  indexUrl.searchParams.set("source", "staging-contacts");
+
+  try {
+    await page.goto(indexUrl.href, { waitUntil: "domcontentloaded" });
+    await page.waitForURL((url) => {
+      return url.origin === new URL(baseUrl).origin
+        && url.searchParams.get("autoload") === "staging-contacts"
+        && !url.searchParams.has("source")
+        && !url.searchParams.has("server");
+    }, { timeout: 5000 });
+    return page.url();
+  } finally {
+    await page.close();
   }
 }
 

@@ -40,7 +40,7 @@ Then open:
 http://127.0.0.1:5180
 ```
 
-The browser-only UI can also load CSV files directly through the file picker.
+Opening `index.html` directly remains supported for manual CSV uploads. If it is opened from disk while the local server is already running, the page redirects itself to the server-backed URL so the latest Scheduler exports and staging auto-load URLs keep working. If the server is not running, the static page stays open as a manual-upload fallback.
 
 ## Workflows
 
