@@ -42,6 +42,8 @@ http://127.0.0.1:5180
 
 Opening `index.html` directly remains supported for manual CSV uploads. If it is opened from disk while the local server is already running, the page redirects itself to the server-backed URL so the latest Scheduler exports and staging auto-load URLs keep working. If the server is not running, the static page stays open as a manual-upload fallback.
 
+For day-to-day review work, use `Launch Duplicate Reviewer.command` on macOS or `Launch Duplicate Reviewer.ps1` on Windows. The server-backed app automatically adds the latest configured Contact and Account exports to `Recent files` when those exports exist, so the launcher is the single entry point for continuing work after downloads finish.
+
 ## Workflows
 
 - `Evaluate`: review match scores, mark groups Duplicate or Not Duplicate, label pairs, and export model-feedback labels.

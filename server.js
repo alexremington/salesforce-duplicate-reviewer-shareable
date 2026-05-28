@@ -40,7 +40,9 @@ const CSV_ENDPOINTS = new Map([
     {
       path: STAGING_CONTACTS_CSV,
       jsonPath: STAGING_CONTACTS_CSV.replace(/\.csv$/i, ".json"),
-      fileName: "salesforce-report-latest.csv"
+      fileName: "salesforce-report-latest.csv",
+      objectType: "contact",
+      label: "Latest Contacts"
     }
   ],
   [
@@ -48,7 +50,9 @@ const CSV_ENDPOINTS = new Map([
     {
       path: STAGING_ACCOUNTS_CSV,
       jsonPath: STAGING_ACCOUNTS_CSV.replace(/\.csv$/i, ".json"),
-      fileName: "salesforce-report-latest.csv"
+      fileName: "salesforce-report-latest.csv",
+      objectType: "account",
+      label: "Latest Accounts"
     }
   ]
 ]);
@@ -101,6 +105,7 @@ async function handleRequest(request, response) {
       appId: "salesforce-duplicate-reviewer",
       stickyNotifications: true,
       stagingAccounts: true,
+      latestStagingFiles: true,
       salesforceMerge: true,
       salesforceMergeObjectTypes: ["Contact"],
       pid: process.pid,
@@ -118,6 +123,12 @@ async function handleRequest(request, response) {
       "Cache-Control": "no-store"
     });
     response.end(data);
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/staging/latest-files") {
+    const files = await stagingLatestFiles();
+    sendJson(response, { files });
     return;
   }
 
@@ -287,6 +298,43 @@ async function readCsvEndpointData(endpoint) {
     if (!endpoint.jsonPath || !isTransientFileProviderReadError(error)) throw error;
     const json = await readFileWithRetry(endpoint.jsonPath, 2);
     return Buffer.from(salesforceJsonExportToCsv(json), "utf8");
+  }
+}
+
+async function stagingLatestFiles() {
+  const files = await Promise.all(
+    [...CSV_ENDPOINTS.entries()].map(async ([endpointPath, endpoint]) => {
+      const stat = await latestEndpointStat(endpoint);
+      if (!stat) return null;
+
+      return {
+        source: endpointPath.includes("accounts") ? "staging-accounts" : "staging-contacts",
+        objectType: endpoint.objectType,
+        label: endpoint.label,
+        name: endpoint.fileName,
+        endpoint: endpointPath,
+        size: stat.size,
+        updatedAt: Math.floor(stat.mtimeMs)
+      };
+    })
+  );
+
+  return files.filter(Boolean);
+}
+
+async function latestEndpointStat(endpoint) {
+  try {
+    return await fs.stat(endpoint.path);
+  } catch (error) {
+    if (error.code !== "ENOENT" && !isTransientFileProviderReadError(error)) throw error;
+  }
+
+  if (!endpoint.jsonPath) return null;
+  try {
+    return await fs.stat(endpoint.jsonPath);
+  } catch (error) {
+    if (error.code === "ENOENT" || isTransientFileProviderReadError(error)) return null;
+    throw error;
   }
 }
 

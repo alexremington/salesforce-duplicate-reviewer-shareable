@@ -248,6 +248,7 @@ const FILE_HISTORY_DB_NAME = "salesforce-duplicate-reviewer";
 const FILE_HISTORY_DB_VERSION = 2;
 const FILE_HISTORY_STORE = "recentFiles";
 const REVIEW_STATE_STORE = "reviewStates";
+const LATEST_STAGING_FILES_ENDPOINT = "/api/staging/latest-files";
 const MATCHED_FIELD_THRESHOLD = 0.9;
 const EXACT_HEADER_ONLY_ALIASES = new Set([
   "account",
@@ -997,12 +998,14 @@ async function loadFromUrlIfRequested() {
     "staging-contacts": {
       endpoint: "/api/staging-contacts/latest.csv",
       defaultObjectType: "contact",
-      defaultFileName: "salesforce-report-latest.csv"
+      defaultFileName: "salesforce-report-latest.csv",
+      label: "Latest Contacts"
     },
     "staging-accounts": {
       endpoint: "/api/staging-accounts/latest.csv",
       defaultObjectType: "account",
-      defaultFileName: "salesforce-report-latest.csv"
+      defaultFileName: "salesforce-report-latest.csv",
+      label: "Latest Accounts"
     }
   };
   const source = sources[autoload];
@@ -1022,6 +1025,7 @@ async function loadFromUrlIfRequested() {
     if (params.get("saveRecent") !== "0") {
       saveRecentFileInBackground({
         name: fileName,
+        displayName: source.label,
         size: csvText.length,
         objectType,
         endpoint: source.endpoint
@@ -1109,11 +1113,46 @@ async function initializeFileHistory() {
     await refreshRecentFiles();
   } catch {
     renderRecentFiles("Recent files could not be loaded");
+    return;
+  }
+
+  try {
+    await seedLatestStagingFiles();
+  } catch (error) {
+    console.warn("Latest exports could not be added to recent files", error);
   }
 }
 
 function isFileHistoryAvailable() {
   return typeof indexedDB !== "undefined";
+}
+
+function isServerBackedApp() {
+  return window.location.protocol === "http:" || window.location.protocol === "https:";
+}
+
+async function seedLatestStagingFiles() {
+  if (!isServerBackedApp()) return;
+
+  const response = await fetch(LATEST_STAGING_FILES_ENDPOINT, { cache: "no-store" });
+  if (!response.ok) return;
+
+  const payload = await response.json();
+  const files = Array.isArray(payload.files) ? payload.files : [];
+  for (const file of files) {
+    const endpoint = String(file.endpoint || "");
+    const name = String(file.name || "");
+    if (!endpoint || !name) continue;
+
+    await saveRecentFile({
+      name,
+      displayName: String(file.label || file.displayName || name),
+      size: Number(file.size) || 0,
+      objectType: normalizeObjectType(file.objectType),
+      endpoint,
+      updatedAt: Number(file.updatedAt) || Date.now()
+    });
+  }
 }
 
 async function loadRecentFile(fileId) {
@@ -1135,6 +1174,7 @@ async function loadRecentFile(fileId) {
     await ingestRows(parsed.rows, record.name, false, parsed.headers);
     saveRecentFileInBackground({
       name: record.name,
+      displayName: record.displayName || record.name,
       size: record.size || csvText.length,
       objectType: normalizeObjectType(state.objectType),
       content: record.content || "",
@@ -1169,11 +1209,12 @@ async function saveRecentFile(fileRecord) {
   const record = {
     id: recentFileId(objectType, fileRecord.name),
     name: fileRecord.name,
+    displayName: String(fileRecord.displayName || fileRecord.name),
     size: fileRecord.size || content.length,
     objectType,
     content: canStoreContent ? content : "",
     endpoint,
-    updatedAt: Date.now()
+    updatedAt: Number(fileRecord.updatedAt) || Date.now()
   };
 
   await putRecentFile(db, record);
@@ -1259,12 +1300,15 @@ function renderRecentFiles(message = "") {
 
   els.recentFileList.innerHTML = state.recentFiles
     .map(
-      (file) => `
+      (file) => {
+        const displayName = file.displayName || file.name;
+        return `
         <button class="recent-file" type="button" data-file-id="${escapeHtml(file.id)}">
-          <span class="recent-file-name">${escapeHtml(file.name)}</span>
+          <span class="recent-file-name">${escapeHtml(displayName)}</span>
           <span class="recent-file-meta">${escapeHtml(OBJECT_CONFIG[file.objectType]?.label || file.objectType)} · ${escapeHtml(formatFileSize(file.size))}</span>
         </button>
-      `
+      `;
+      }
     )
     .join("");
 }
