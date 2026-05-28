@@ -58,6 +58,17 @@ const CSV_ENDPOINTS = new Map([
     }
   ]
 ]);
+const JSON_ENDPOINTS = new Map(
+  [...CSV_ENDPOINTS.entries()].map(([endpointPath, endpoint]) => [
+    endpointPath.replace(/\.csv$/i, ".json"),
+    {
+      ...endpoint,
+      path: endpoint.jsonPath,
+      csvPath: endpoint.path,
+      fileName: endpoint.fileName.replace(/\.csv$/i, ".json")
+    }
+  ])
+);
 
 main().catch((error) => {
   console.error(error);
@@ -108,6 +119,7 @@ async function handleRequest(request, response) {
       stickyNotifications: true,
       stagingAccounts: true,
       latestStagingFiles: true,
+      jsonDatasets: true,
       salesforceMerge: true,
       salesforceMergeObjectTypes: ["Contact"],
       pid: process.pid,
@@ -125,6 +137,18 @@ async function handleRequest(request, response) {
       "Cache-Control": "no-store"
     });
     response.end(data);
+    return;
+  }
+
+  if (request.method === "GET" && JSON_ENDPOINTS.has(url.pathname)) {
+    const endpoint = JSON_ENDPOINTS.get(url.pathname);
+    const data = await readJsonEndpointData(endpoint);
+    response.writeHead(200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Disposition": `inline; filename="${endpoint.fileName}"`,
+      "Cache-Control": "no-store"
+    });
+    response.end(`${JSON.stringify(data)}\n`);
     return;
   }
 
@@ -303,9 +327,20 @@ async function readCsvEndpointData(endpoint) {
   }
 }
 
+async function readJsonEndpointData(endpoint) {
+  try {
+    const json = await readFileWithRetry(endpoint.path);
+    return reviewDatasetFromJsonExport(json, endpoint);
+  } catch (error) {
+    if (!endpoint.csvPath || (error.code !== "ENOENT" && !isTransientFileProviderReadError(error))) throw error;
+    const csv = await readFileWithRetry(endpoint.csvPath, 2);
+    return reviewDatasetFromCsv(csv, endpoint);
+  }
+}
+
 async function stagingLatestFiles() {
   const files = await Promise.all(
-    [...CSV_ENDPOINTS.entries()].map(async ([endpointPath, endpoint]) => {
+    [...JSON_ENDPOINTS.entries()].map(async ([endpointPath, endpoint]) => {
       const stat = await latestEndpointStat(endpoint);
       if (!stat) return null;
 
@@ -331,9 +366,10 @@ async function latestEndpointStat(endpoint) {
     if (error.code !== "ENOENT" && !isTransientFileProviderReadError(error)) throw error;
   }
 
-  if (!endpoint.jsonPath) return null;
+  const fallbackPath = endpoint.jsonPath || endpoint.csvPath;
+  if (!fallbackPath) return null;
   try {
-    return await fs.stat(endpoint.jsonPath);
+    return await fs.stat(fallbackPath);
   } catch (error) {
     if (error.code === "ENOENT" || isTransientFileProviderReadError(error)) return null;
     throw error;
@@ -346,6 +382,152 @@ function salesforceJsonExportToCsv(json) {
     throw httpError(500, "Salesforce JSON export is not in the expected column/row format.");
   }
   return rowsToCsv([payload.columns, ...payload.rows]);
+}
+
+function reviewDatasetFromJsonExport(json, endpoint) {
+  const payload = JSON.parse(Buffer.isBuffer(json) ? json.toString("utf8") : String(json || ""));
+  if (payload?.schema === "salesforce-duplicate-reviewer.dataset" && Array.isArray(payload.records)) {
+    return {
+      ...payload,
+      schemaVersion: Number(payload.schemaVersion) || 1,
+      objectType: endpoint.objectType,
+      fileName: endpoint.fileName,
+      source: {
+        ...(payload.source || {}),
+        name: endpoint.label
+      }
+    };
+  }
+
+  if (Array.isArray(payload.columns) && Array.isArray(payload.rows)) {
+    const columns = payload.columns.map((column) => String(column || ""));
+    return reviewDatasetEnvelope({
+      endpoint,
+      fields: columns.map((column) => ({ apiName: column, label: column, type: "text" })),
+      records: payload.rows.map((row) => rowArrayToObject(columns, row)),
+      format: "salesforce-json-export"
+    });
+  }
+
+  const records = Array.isArray(payload.records)
+    ? payload.records
+    : Array.isArray(payload.result?.records)
+      ? payload.result.records
+      : null;
+  if (records) {
+    const normalizedRecords = records.map(normalizeJsonRecord);
+    const columns = inferRecordHeaders(normalizedRecords);
+    return reviewDatasetEnvelope({
+      endpoint,
+      fields: columns.map((column) => ({ apiName: column, label: column, type: "text" })),
+      records: normalizedRecords,
+      format: "salesforce-records-json"
+    });
+  }
+
+  throw httpError(500, "Salesforce JSON export is not in the expected dataset format.");
+}
+
+function reviewDatasetFromCsv(csv, endpoint) {
+  const parsed = parseCsv(Buffer.isBuffer(csv) ? csv.toString("utf8") : String(csv || ""));
+  return reviewDatasetEnvelope({
+    endpoint,
+    fields: parsed.headers.map((header) => ({ apiName: header, label: header, type: "text" })),
+    records: parsed.rows,
+    format: "csv-fallback"
+  });
+}
+
+function reviewDatasetEnvelope({ endpoint, fields, records, format }) {
+  return {
+    schema: "salesforce-duplicate-reviewer.dataset",
+    schemaVersion: 1,
+    objectType: endpoint.objectType,
+    fileName: endpoint.fileName,
+    source: {
+      system: "salesforce",
+      name: endpoint.label,
+      format
+    },
+    fields,
+    records
+  };
+}
+
+function rowArrayToObject(headers, row) {
+  const values = Array.isArray(row) ? row : [];
+  return Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""]));
+}
+
+function normalizeJsonRecord(record) {
+  if (!record || typeof record !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(record)
+      .filter(([key]) => key !== "attributes")
+      .map(([key, value]) => [key, normalizeJsonCell(value)])
+  );
+}
+
+function normalizeJsonCell(value) {
+  if (value == null) return "";
+  if (typeof value === "object") return JSON.stringify(value);
+  return value;
+}
+
+function inferRecordHeaders(records) {
+  const headers = new Set();
+  records.forEach((record) => {
+    Object.keys(record).forEach((key) => headers.add(key));
+  });
+  return [...headers];
+}
+
+function parseCsv(csvText) {
+  const rows = [];
+  let record = [];
+  let cell = "";
+  let headers = null;
+  let insideQuotes = false;
+
+  for (let index = 0; index < csvText.length; index += 1) {
+    const char = csvText[index];
+    const next = csvText[index + 1];
+
+    if (char === '"' && insideQuotes && next === '"') {
+      cell += '"';
+      index += 1;
+    } else if (char === '"') {
+      insideQuotes = !insideQuotes;
+    } else if (char === "," && !insideQuotes) {
+      record.push(cell);
+      cell = "";
+    } else if ((char === "\n" || char === "\r") && !insideQuotes) {
+      if (char === "\r" && next === "\n") index += 1;
+      headers = pushCsvRecord(rows, headers, record, cell);
+      record = [];
+      cell = "";
+    } else {
+      cell += char;
+    }
+  }
+
+  if (cell.length || record.length) {
+    headers = pushCsvRecord(rows, headers, record, cell);
+  }
+
+  return { headers: headers || [], rows };
+}
+
+function pushCsvRecord(rows, headers, record, cell) {
+  record.push(cell);
+  if (!record.some((value) => value.trim().length > 0)) return headers;
+
+  if (!headers) {
+    return record.map((header) => header.replace(/^\uFEFF/, "").trim());
+  }
+
+  rows.push(rowArrayToObject(headers, record));
+  return headers;
 }
 
 async function readJsonBody(request, maxBytes = 32 * 1024) {

@@ -37,7 +37,7 @@ server_is_duplicate_reviewer() {
 server_supports_required_features() {
   local health
   health="$(server_health)"
-  [[ "${health}" == *'"salesforceMerge":true'* && "${health}" == *'"latestStagingFiles":true'* ]]
+  [[ "${health}" == *'"salesforceMerge":true'* && "${health}" == *'"latestStagingFiles":true'* && "${health}" == *'"jsonDatasets":true'* ]]
 }
 
 write_server_plist() {
@@ -92,6 +92,7 @@ sync_static_assets() {
   copy_static_asset "${PROJECT_DIR}/index.html" "${STATIC_DIR}/index.html"
   copy_static_asset "${PROJECT_DIR}/redirect-file-mode.js" "${STATIC_DIR}/redirect-file-mode.js"
   copy_static_asset "${PROJECT_DIR}/app.js" "${STATIC_DIR}/app.js"
+  copy_static_asset "${PROJECT_DIR}/matching-worker.js" "${STATIC_DIR}/matching-worker.js"
   copy_static_asset "${PROJECT_DIR}/styles.css" "${STATIC_DIR}/styles.css"
   /bin/mkdir -p "${STATIC_DIR}/vendor/managed-app/css"
   copy_static_asset "${PROJECT_DIR}/vendor/managed-app/css/managed-app-base.css" "${STATIC_DIR}/vendor/managed-app/css/managed-app-base.css"

@@ -45,8 +45,8 @@ if ! "${PROJECT_DIR}/scripts/run-salesforce-bulk-query.sh" "$@"; then
 fi
 
 reviewer_url="$("${PROJECT_DIR}/scripts/start-reviewer-server.sh" | tail -n 1)"
-autoload_url="${reviewer_url}/?autoload=staging-accounts&object=account&notify=1&sticky=1&name=${LATEST_CSV_NAME}"
+autoload_url="${reviewer_url}/?autoload=staging-accounts&object=account&notify=1&sticky=1&name=${LATEST_JSON_NAME}"
 
 /usr/bin/open "${autoload_url}"
 echo "Opened Salesforce Duplicate Reviewer at ${autoload_url}"
-echo "The app will show a Notification Center alert after the compatibility CSV is loaded and ready to review."
+echo "The app will show a Notification Center alert after the latest JSON dataset is loaded and ready to review."

@@ -2,7 +2,7 @@
 
 [![Checks](https://github.com/alexremington/salesforce-duplicate-reviewer-shareable/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/alexremington/salesforce-duplicate-reviewer-shareable/actions/workflows/checks.yml)
 
-Local-first browser UI for reviewing likely duplicate Salesforce Account and Contact records.
+Local-first browser UI for reviewing likely duplicate Salesforce Account and Contact records from Salesforce JSON datasets or CSV exports.
 
 For local setup, see [SETUP.md](SETUP.md). For teammate handoff, see [TEAM-HANDOFF.md](TEAM-HANDOFF.md).
 
@@ -14,7 +14,7 @@ For local setup, see [SETUP.md](SETUP.md). For teammate handoff, see [TEAM-HANDO
 
 ## Run The App
 
-Open `index.html` in a browser for CSV-only review.
+Open `index.html` in a browser for manual JSON or CSV review.
 
 macOS:
 
@@ -40,9 +40,13 @@ Then open:
 http://127.0.0.1:5180
 ```
 
-Opening `index.html` directly remains supported for manual CSV uploads. If it is opened from disk while the local server is already running, the page redirects itself to the server-backed URL so the latest Scheduler exports and staging auto-load URLs keep working. If the server is not running, the static page stays open as a manual-upload fallback.
+Click `Choose File`, then choose whether the import is a `Contacts` or `Accounts` file. Recent files remember which object type was used when they were loaded, so the same file can be reopened with the correct object type.
 
-For day-to-day review work, use `Launch Duplicate Reviewer.command` on macOS or `Launch Duplicate Reviewer.ps1` on Windows. The server-backed app automatically adds the latest configured Contact and Account exports to `Recent files` when those exports exist, so the launcher is the single entry point for continuing work after downloads finish.
+Server-backed latest loads use JSON datasets and a Web Worker so parsing and duplicate matching do not block the UI. Manual JSON and CSV imports remain supported.
+
+Opening `index.html` directly remains supported for manual JSON or CSV uploads. If it is opened from disk while the local server is already running, the page redirects itself to the server-backed URL so the latest Scheduler exports and staging auto-load URLs keep working. If the server is not running, the static page stays open as a manual-upload fallback.
+
+For day-to-day review work, use `Launch Duplicate Reviewer.command` on macOS or `Launch Duplicate Reviewer.ps1` on Windows. The server-backed app automatically adds the latest configured Contact and Account JSON datasets to `Recent files` when those exports exist, so the launcher is the single entry point for continuing work after downloads finish.
 
 ## Workflows
 
@@ -87,7 +91,7 @@ That helper creates a user LaunchAgent and refreshes a generated static cache un
 ~/Library/Application Support/salesforce-duplicate-reviewer/static
 ```
 
-The project folder remains the source of truth. The local cache only avoids transient OneDrive or cloud-file-provider read errors at runtime.
+The project folder remains the source of truth. The cache only avoids transient OneDrive or cloud-file-provider read errors at runtime. The server exposes `salesforce-report-latest.json` as the native review dataset and keeps CSV endpoints available for compatibility. If one format cannot be read from OneDrive, the server falls back to the other format when possible.
 
 ## Private Configuration
 

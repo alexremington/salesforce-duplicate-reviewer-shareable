@@ -29,6 +29,8 @@ async function main() {
   smokeStagingDir = await fs.mkdtemp(path.join(os.tmpdir(), "duplicate-reviewer-staging-"));
   const contactsCsvPath = path.join(smokeStagingDir, "contacts-latest.csv");
   const accountsCsvPath = path.join(smokeStagingDir, "accounts-latest.csv");
+  const contactsJsonPath = contactsCsvPath.replace(/\.csv$/i, ".json");
+  const accountsJsonPath = accountsCsvPath.replace(/\.csv$/i, ".json");
   await fs.writeFile(contactsCsvPath, [
     "Id,First Name,Last Name,Company,Email",
     "003T00000090001,Smoke,Contact,Northstar,smoke-contact@example.com",
@@ -39,6 +41,20 @@ async function main() {
     "001T00000090001,Smoke Account,smoke.example,San Francisco",
     "001T00000090002,Smoke Account Inc,https://smoke.example,San Francisco"
   ].join("\n"));
+  await fs.writeFile(contactsJsonPath, JSON.stringify({
+    columns: ["Id", "First Name", "Last Name", "Company", "Email"],
+    rows: [
+      ["003T00000090001", "Smoke", "Contact", "Northstar", "smoke-contact@example.com"],
+      ["003T00000090002", "Smoke", "Contact", "Northstar Inc", "smoke-contact@example.com"]
+    ]
+  }, null, 2));
+  await fs.writeFile(accountsJsonPath, JSON.stringify({
+    columns: ["Id", "Name", "Website", "Billing City"],
+    rows: [
+      ["001T00000090001", "Smoke Account", "smoke.example", "San Francisco"],
+      ["001T00000090002", "Smoke Account Inc", "https://smoke.example", "San Francisco"]
+    ]
+  }, null, 2));
 
   const serverEnv = {
     ...process.env,

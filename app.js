@@ -3,11 +3,14 @@
  * this file directly, so keep browser APIs plain and avoid build-step syntax.
  *
  * Runtime flow:
- * 1. CSV rows are ingested and mapped to a supported Salesforce object shape.
+ * 1. JSON or CSV rows are ingested and mapped to a supported Salesforce object shape.
  * 2. buildGroups obtains a scoring context with prepared rows and account stats.
  * 3. Candidate buckets reduce pair comparisons before scoring.
  * 4. Group summaries use all pairwise scores, while render/export use originals.
  */
+
+const IS_MATCHING_WORKER = typeof self !== "undefined" && self.__DUPLICATE_REVIEWER_MATCHING_WORKER__ === true;
+const SHOULD_BOOT_UI = !IS_MATCHING_WORKER && typeof window !== "undefined" && typeof document !== "undefined";
 
 const OBJECT_CONFIG = {
   contact: {
@@ -709,6 +712,7 @@ const state = {
   datasetKey: "",
   reviewStateStatus: "",
   loadError: "",
+  lastProcessingMode: "",
   loadingModal: {
     active: false,
     title: "",
@@ -755,6 +759,8 @@ let shortcutsReturnFocus = null;
 let visibleGroupsCache = null;
 let groupLookupCache = null;
 let groupListRenderFrame = 0;
+let matchingWorkerJob = null;
+let matchingWorkerJobSequence = 0;
 
 const els = {
   csvInput: document.getElementById("csvInput"),
@@ -808,6 +814,7 @@ const els = {
   loadingProgressBar: document.getElementById("loadingProgressBar")
 };
 
+if (SHOULD_BOOT_UI) {
 els.chooseCsvButton.addEventListener("click", () => {
   setCsvObjectMenuOpen(els.csvObjectMenu.hidden);
 });
@@ -1019,6 +1026,7 @@ initializeFileHistory().finally(() => {
   loadFromUrlIfRequested();
 });
 render();
+}
 
 function setupCollapsiblePanels() {
   document.querySelectorAll("[data-collapsible-panel]").forEach((panel) => {
@@ -1063,20 +1071,23 @@ function closeShortcutsModal() {
 
 function loadFile(file, objectType = state.objectType) {
   beginFileLoad(file.name, objectType);
+  const format = datasetFormatFromFileName(file.name);
   const reader = new FileReader();
   reader.onload = async () => {
     await nextPaint();
     try {
-      showLoadingModal("Loading CSV", `Parsing and matching ${file.name}.`);
+      showLoadingModal("Loading Dataset", `Parsing and matching ${file.name}.`);
       state.objectType = normalizeObjectType(objectType, state.objectType);
-      await loadCsvText(String(reader.result || ""), {
+      await loadDatasetText(String(reader.result || ""), {
         fileName: file.name,
         objectType,
+        format,
         size: file.size,
         saveRecent: true
       });
     } catch (error) {
-      state.loadError = error.message || "CSV could not be loaded.";
+      if (isAbortError(error)) return;
+      state.loadError = error.message || "Dataset could not be loaded.";
       state.reviewStateStatus = state.loadError;
       endFileLoad();
       renderSource();
@@ -1086,7 +1097,7 @@ function loadFile(file, objectType = state.objectType) {
     }
   };
   reader.onerror = () => {
-    state.loadError = "CSV could not be read.";
+    state.loadError = "Dataset could not be read.";
     state.reviewStateStatus = state.loadError;
     endFileLoad();
     hideLoadingModal();
@@ -1096,20 +1107,56 @@ function loadFile(file, objectType = state.objectType) {
   reader.readAsText(file);
 }
 
-async function loadCsvText(csvText, { fileName, objectType = state.objectType, size = 0, saveRecent = false } = {}) {
+function datasetFormatFromFileName(fileName = "") {
+  return /\.json$/i.test(String(fileName || "")) ? "json" : "csv";
+}
+
+async function loadDatasetText(datasetText, {
+  fileName,
+  objectType = state.objectType,
+  format = datasetFormatFromFileName(fileName),
+  size = 0,
+  saveRecent = false,
+  displayName = "",
+  endpoint = ""
+} = {}) {
   state.objectType = normalizeObjectType(objectType, state.objectType);
-  await updateLoadingProgress("Parsing CSV.", 4);
-  const parsed = parseCsv(csvText);
-  await updateLoadingProgress("Matching records.", 7);
-  await ingestRows(parsed.rows, fileName || "CSV import", false, parsed.headers);
+  const result = await processMatchingJob({
+    mode: "process-text",
+    text: datasetText,
+    format,
+    fileName: fileName || datasetFileNameForFormat(format),
+    objectType: state.objectType,
+    threshold: state.threshold,
+    highRecallMode: state.highRecallMode
+  }, updateLoadingProgress);
+
+  await applyProcessedDataset(result, { fromObjects: false });
   if (saveRecent) {
     saveRecentFileInBackground({
-      name: fileName || "CSV import",
-      size: size || csvText.length,
-      objectType: normalizeObjectType(state.objectType),
-      content: csvText
+      name: result.fileName || fileName || datasetFileNameForFormat(format),
+      displayName,
+      size: size || datasetText.length,
+      objectType: normalizeObjectType(result.objectType || state.objectType),
+      format: result.format || format,
+      content: endpoint ? "" : datasetText,
+      endpoint
     });
   }
+}
+
+async function loadCsvText(csvText, { fileName, objectType = state.objectType, size = 0, saveRecent = false } = {}) {
+  return loadDatasetText(csvText, {
+    fileName: fileName || "CSV import",
+    objectType,
+    format: "csv",
+    size,
+    saveRecent
+  });
+}
+
+function datasetFileNameForFormat(format) {
+  return format === "json" ? "JSON import" : "CSV import";
 }
 
 async function loadFromUrlIfRequested() {
@@ -1117,15 +1164,15 @@ async function loadFromUrlIfRequested() {
   const autoload = params.get("autoload") || params.get("source");
   const sources = {
     "staging-contacts": {
-      endpoint: "/api/staging-contacts/latest.csv",
+      endpoint: "/api/staging-contacts/latest.json",
       defaultObjectType: "contact",
-      defaultFileName: "salesforce-report-latest.csv",
+      defaultFileName: "salesforce-report-latest.json",
       label: "Latest Contacts"
     },
     "staging-accounts": {
-      endpoint: "/api/staging-accounts/latest.csv",
+      endpoint: "/api/staging-accounts/latest.json",
       defaultObjectType: "account",
-      defaultFileName: "salesforce-report-latest.csv",
+      defaultFileName: "salesforce-report-latest.json",
       label: "Latest Accounts"
     }
   };
@@ -1137,18 +1184,25 @@ async function loadFromUrlIfRequested() {
 
   beginFileLoad(fileName, objectType);
   try {
-    showLoadingModal("Loading CSV", `Fetching and matching ${fileName}.`);
+    showLoadingModal("Loading Dataset", `Fetching and matching ${fileName}.`);
     await nextPaint();
     const response = await fetch(source.endpoint, { cache: "no-store" });
-    if (!response.ok) throw new Error(`CSV fetch failed: ${response.status}`);
-    const csvText = await response.text();
-    await loadCsvText(csvText, { fileName, objectType, size: csvText.length, saveRecent: false });
+    if (!response.ok) throw new Error(`Dataset fetch failed: ${response.status}`);
+    const datasetText = await response.text();
+    await loadDatasetText(datasetText, {
+      fileName,
+      objectType,
+      format: datasetFormatFromFileName(source.endpoint || fileName),
+      size: datasetText.length,
+      saveRecent: false
+    });
     if (params.get("saveRecent") !== "0") {
       saveRecentFileInBackground({
-        name: fileName,
+        name: state.fileName || fileName,
         displayName: source.label,
-        size: csvText.length,
+        size: datasetText.length,
         objectType,
+        format: datasetFormatFromFileName(source.endpoint || state.fileName || fileName),
         endpoint: source.endpoint
       });
     }
@@ -1156,7 +1210,8 @@ async function loadFromUrlIfRequested() {
       notifyReviewReady(fileName, { sticky: params.get("sticky") === "1" }).catch(() => {});
     }
   } catch (error) {
-    state.loadError = error.message || "CSV could not be loaded.";
+    if (isAbortError(error)) return;
+    state.loadError = error.message || "Dataset could not be loaded.";
     state.reviewStateStatus = state.loadError;
     endFileLoad();
     renderSource();
@@ -1186,13 +1241,14 @@ function beginFileLoad(fileName, objectType = state.objectType) {
   state.loadingFileName = fileName || "";
   state.reviewStateStatus = "";
   state.loadError = "";
-  showLoadingModal("Loading CSV", `Reading ${fileName || "CSV file"}.`);
+  showLoadingModal("Loading Dataset", `Reading ${fileName || "dataset"}.`);
   renderSource();
   renderDetail();
 }
 
 function clearLoadedDatasetForPendingLoad() {
   state.fileName = "";
+  state.lastProcessingMode = "";
   state.headers = [];
   state.rows = [];
   state.mapping = {};
@@ -1280,6 +1336,7 @@ async function seedLatestStagingFiles() {
       displayName: String(file.label || file.displayName || name),
       size: Number(file.size) || 0,
       objectType: normalizeObjectType(file.objectType),
+      format: datasetFormatFromFileName(name || endpoint),
       endpoint,
       updatedAt: Number(file.updatedAt) || Date.now()
     });
@@ -1287,7 +1344,7 @@ async function seedLatestStagingFiles() {
 }
 
 async function loadRecentFile(fileId) {
-  showLoadingModal("Loading Recent CSV", "Reading saved file contents.");
+  showLoadingModal("Loading Recent Dataset", "Reading saved file contents.");
   try {
     const record = await getRecentFile(fileId);
     if (!record) {
@@ -1298,34 +1355,37 @@ async function loadRecentFile(fileId) {
 
     const objectType = recentRecordObjectType(record, state.objectType);
     beginFileLoad(record.name, objectType);
-    showLoadingModal("Loading Recent CSV", `Parsing and matching ${record.name}.`);
+    showLoadingModal("Loading Recent Dataset", `Parsing and matching ${record.name}.`);
     await nextPaint();
-    const csvText = await recentFileCsvText(record);
-    await loadCsvText(csvText, {
+    const datasetText = await recentFileDatasetText(record);
+    await loadDatasetText(datasetText, {
       fileName: record.name,
       objectType,
-      size: record.size || csvText.length,
+      format: record.format || datasetFormatFromFileName(record.name || record.endpoint),
+      size: record.size || datasetText.length,
       saveRecent: false
     });
     saveRecentFileInBackground({
       name: record.name,
       displayName: record.displayName || record.name,
-      size: record.size || csvText.length,
+      size: record.size || datasetText.length,
       objectType: normalizeObjectType(state.objectType),
+      format: record.format || datasetFormatFromFileName(record.name || record.endpoint),
       content: record.content || "",
       endpoint: record.endpoint || ""
     });
-  } catch {
+  } catch (error) {
+    if (isAbortError(error)) return;
     renderRecentFiles("Recent file could not be loaded");
   } finally {
     hideLoadingModal();
   }
 }
 
-async function recentFileCsvText(record) {
+async function recentFileDatasetText(record) {
   if (record.endpoint) {
     const response = await fetch(record.endpoint, { cache: "no-store" });
-    if (!response.ok) throw new Error(`Recent CSV fetch failed: ${response.status}`);
+    if (!response.ok) throw new Error(`Recent dataset fetch failed: ${response.status}`);
     return response.text();
   }
 
@@ -1338,6 +1398,7 @@ async function saveRecentFile(fileRecord) {
   const objectType = normalizeObjectType(fileRecord.objectType);
   const content = String(fileRecord.content || "");
   const endpoint = String(fileRecord.endpoint || "");
+  const format = fileRecord.format || datasetFormatFromFileName(fileRecord.name || endpoint);
   const canStoreContent = !endpoint && content.length <= MAX_RECENT_FILE_CONTENT_BYTES;
   if (!endpoint && !canStoreContent) return;
 
@@ -1347,6 +1408,7 @@ async function saveRecentFile(fileRecord) {
     displayName: String(fileRecord.displayName || fileRecord.name),
     size: fileRecord.size || content.length,
     objectType,
+    format,
     content: canStoreContent ? content : "",
     endpoint,
     updatedAt: Number(fileRecord.updatedAt) || Date.now()
@@ -1409,15 +1471,17 @@ async function compactOversizedRecentFiles(db, records) {
 
 function recentEndpointForName(name, objectType = "") {
   const normalizedName = String(name || "");
-  if (normalizedName === "salesforce-report-latest.csv") {
+  if (normalizedName === "salesforce-report-latest.csv" || normalizedName === "salesforce-report-latest.json") {
     return String(objectType || "").toLowerCase() === "account"
-      ? "/api/staging-accounts/latest.csv"
-      : "/api/staging-contacts/latest.csv";
+      ? "/api/staging-accounts/latest.json"
+      : "/api/staging-contacts/latest.json";
   }
 
   return {
     "salesforce-staging-contacts-latest.csv": "/api/staging-contacts/latest.csv",
-    "salesforce-staging-accounts-latest.csv": "/api/staging-accounts/latest.csv"
+    "salesforce-staging-accounts-latest.csv": "/api/staging-accounts/latest.csv",
+    "salesforce-staging-contacts-latest.json": "/api/staging-contacts/latest.json",
+    "salesforce-staging-accounts-latest.json": "/api/staging-accounts/latest.json"
   }[normalizedName] || "";
 }
 
@@ -1947,15 +2011,44 @@ function restoredReviewStateStatus(counts) {
 }
 
 async function ingestRows(rows, fileName, fromObjects, knownHeaders) {
+  stageRowsForReview({
+    rows,
+    fileName,
+    fromObjects,
+    headers: knownHeaders,
+    objectType: state.objectType
+  });
+  await recompute({ title: "Matching Records", message: "Preparing records for matching." });
+  return fromObjects ? Promise.resolve() : restoreReviewStateForCurrentDataset();
+}
+
+async function applyProcessedDataset(result, { fromObjects = false } = {}) {
+  state.lastProcessingMode = result.processingMode || "";
+  stageRowsForReview({
+    rows: result.rows || [],
+    fileName: result.fileName || datasetFileNameForFormat(result.format),
+    fromObjects,
+    headers: result.headers,
+    mapping: result.mapping,
+    objectType: result.objectType
+  });
+  await updateLoadingProgress("Rendering duplicate groups.", 98);
+  applyComputedGroups(result.groups || []);
+  await updateLoadingProgress("Ready.", 100);
+  return fromObjects ? Promise.resolve() : restoreReviewStateForCurrentDataset();
+}
+
+function stageRowsForReview({ rows, fileName, fromObjects, headers, mapping, objectType }) {
   flushPendingReviewStateSave();
   endFileLoad();
+  state.objectType = normalizeObjectType(objectType, state.objectType);
   state.fileName = fileName;
-  state.rows = rows;
+  state.rows = Array.isArray(rows) ? rows : [];
   state.rows.forEach((row, index) => {
     row.__rowIndex = index;
   });
-  state.headers = knownHeaders || inferHeaders(rows);
-  state.mapping = autoMapHeaders(state.headers, OBJECT_CONFIG[state.objectType].fields);
+  state.headers = Array.isArray(headers) && headers.length ? headers : inferHeaders(state.rows);
+  state.mapping = mapping || autoMapHeaders(state.headers, OBJECT_CONFIG[state.objectType].fields);
   pruneGroupFiltersForCurrentFields();
   state.datasetKey = fromObjects ? "" : buildDatasetKey();
   state.reviewStateStatus = state.datasetKey && isFileHistoryAvailable() ? "Checking saved review state..." : "";
@@ -1971,8 +2064,6 @@ async function ingestRows(rows, fileName, fromObjects, knownHeaders) {
     state.fieldResolutions.clear();
     state.separatedRecords.clear();
   }
-  await recompute({ title: "Matching Records", message: "Preparing records for matching." });
-  return fromObjects ? Promise.resolve() : restoreReviewStateForCurrentDataset();
 }
 
 async function recompute({ title = "Matching Records", message = "Preparing records for matching." } = {}) {
@@ -1983,21 +2074,169 @@ async function recompute({ title = "Matching Records", message = "Preparing reco
   }
 
   try {
-    state.groups = await buildGroupsAsync(state.rows, state.objectType, state.mapping, state.threshold, state.highRecallMode, updateLoadingProgress);
+    const result = await processMatchingJob({
+      mode: "recompute",
+      rows: state.rows,
+      objectType: state.objectType,
+      headers: state.headers,
+      mapping: state.mapping,
+      threshold: state.threshold,
+      highRecallMode: state.highRecallMode
+    }, updateLoadingProgress);
+    state.lastProcessingMode = result.processingMode || "";
     await updateLoadingProgress("Rendering duplicate groups.", 98);
-    groupLookupCache = null;
-    if (!state.groups.some((group) => group.key === state.selectedGroupKey)) {
-      state.selectedGroupKey = state.groups[0]?.key || "";
-    }
-    pruneFieldResolutions();
-    pruneSeparatedRecords();
-    visibleGroupsCache = null;
-    ensureSelectedGroupVisible();
-    render();
+    applyComputedGroups(result.groups || []);
     await updateLoadingProgress("Ready.", 100);
+  } catch (error) {
+    if (!isAbortError(error)) throw error;
   } finally {
     if (shouldOwnModal) hideLoadingModal();
   }
+}
+
+function applyComputedGroups(groups) {
+  state.groups = Array.isArray(groups) ? groups : [];
+  groupLookupCache = null;
+  if (!state.groups.some((group) => group.key === state.selectedGroupKey)) {
+    state.selectedGroupKey = state.groups[0]?.key || "";
+  }
+  pruneFieldResolutions();
+  pruneSeparatedRecords();
+  visibleGroupsCache = null;
+  ensureSelectedGroupVisible();
+  render();
+}
+
+function processMatchingJob(payload, progress = async () => {}) {
+  if (canUseMatchingWorker()) {
+    return processMatchingJobInWorker(payload, progress).catch((error) => {
+      if (isAbortError(error)) throw error;
+      console.warn("Matching worker failed; falling back to main thread.", error);
+      return processMatchingJobOnMain(payload, progress);
+    });
+  }
+  return processMatchingJobOnMain(payload, progress);
+}
+
+function canUseMatchingWorker() {
+  return !IS_MATCHING_WORKER && typeof Worker !== "undefined" && isServerBackedApp();
+}
+
+function processMatchingJobInWorker(payload, progress = async () => {}) {
+  if (matchingWorkerJob) {
+    matchingWorkerJob.reject(createAbortError("Matching job was replaced by a newer request."));
+    matchingWorkerJob.worker.terminate();
+  }
+
+  const jobId = ++matchingWorkerJobSequence;
+  const worker = new Worker("matching-worker.js");
+
+  return new Promise((resolve, reject) => {
+    matchingWorkerJob = { id: jobId, worker, reject };
+    worker.onmessage = (event) => {
+      const message = event.data || {};
+      if (!matchingWorkerJob || matchingWorkerJob.id !== jobId) return;
+
+      if (message.type === "progress") {
+        progress(message.message, message.progress).catch(() => {});
+        return;
+      }
+
+      if (message.type === "result") {
+        matchingWorkerJob = null;
+        worker.terminate();
+        resolve({
+          ...(message.result || {}),
+          processingMode: "worker"
+        });
+        return;
+      }
+
+      if (message.type === "error") {
+        matchingWorkerJob = null;
+        worker.terminate();
+        reject(new Error(message.message || "Matching worker failed."));
+      }
+    };
+    worker.onerror = (event) => {
+      if (!matchingWorkerJob || matchingWorkerJob.id !== jobId) return;
+      matchingWorkerJob = null;
+      worker.terminate();
+      reject(new Error(event.message || "Matching worker failed."));
+    };
+    worker.postMessage({ jobId, payload });
+  });
+}
+
+async function processMatchingJobOnMain(payload, progress = async () => {}) {
+  if (payload.mode === "process-text") {
+    const format = payload.format || datasetFormatFromFileName(payload.fileName);
+    await progress(format === "json" ? "Parsing JSON dataset." : "Parsing CSV.", 4);
+    const dataset = parseDatasetText(payload.text || "", {
+      format,
+      fileName: payload.fileName,
+      objectType: payload.objectType
+    });
+    const rows = dataset.rows || [];
+    rows.forEach((row, index) => {
+      row.__rowIndex = index;
+    });
+    const headers = dataset.headers?.length ? dataset.headers : inferHeaders(rows);
+    const mapping = dataset.mapping || autoMapHeaders(headers, OBJECT_CONFIG[dataset.objectType].fields);
+    stageMatchingContext(rows, dataset.objectType, headers, mapping);
+    await progress("Matching records.", 7);
+    const groups = await buildGroupsAsync(rows, dataset.objectType, mapping, payload.threshold, payload.highRecallMode, progress);
+    return {
+      ...dataset,
+      rows,
+      headers,
+      mapping,
+      groups,
+      processingMode: "main"
+    };
+  }
+
+  if (payload.mode === "recompute") {
+    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    rows.forEach((row, index) => {
+      row.__rowIndex = index;
+    });
+    const objectType = normalizeObjectType(payload.objectType, state.objectType);
+    const mapping = payload.mapping || {};
+    stageMatchingContext(rows, objectType, payload.headers || inferHeaders(rows), mapping);
+    const groups = await buildGroupsAsync(
+      rows,
+      objectType,
+      mapping,
+      payload.threshold,
+      payload.highRecallMode,
+      progress
+    );
+    return { groups, processingMode: "main" };
+  }
+
+  throw new Error(`Unsupported matching job: ${payload.mode || "unknown"}`);
+}
+
+function stageMatchingContext(rows, objectType, headers, mapping) {
+  state.objectType = normalizeObjectType(objectType, state.objectType);
+  state.rows = rows;
+  state.headers = headers || [];
+  state.mapping = mapping || {};
+}
+
+function createAbortError(message) {
+  try {
+    return new DOMException(message, "AbortError");
+  } catch {
+    const error = new Error(message);
+    error.name = "AbortError";
+    return error;
+  }
+}
+
+function isAbortError(error) {
+  return error?.name === "AbortError";
 }
 
 async function applyMatchControls() {
@@ -2106,6 +2345,93 @@ function syncThresholdSliderFill(minScore, maxScore, { min, max } = thresholdBou
   const maxPercent = ((maxScore - min) / range) * 100;
   els.thresholdSlider?.style.setProperty("--threshold-min-pct", `${minPercent}%`);
   els.thresholdSlider?.style.setProperty("--threshold-max-pct", `${maxPercent}%`);
+}
+
+function parseDatasetText(text, { format = "csv", fileName = "", objectType = state.objectType } = {}) {
+  if (format === "json") {
+    return normalizeReviewDatasetPayload(JSON.parse(String(text || "")), { fileName, objectType });
+  }
+
+  const parsed = parseCsv(text);
+  return {
+    format: "csv",
+    fileName: fileName || "CSV import",
+    objectType: normalizeObjectType(objectType, state.objectType),
+    headers: parsed.headers,
+    rows: parsed.rows
+  };
+}
+
+function normalizeReviewDatasetPayload(payload, { fileName = "", objectType = state.objectType } = {}) {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("JSON dataset must be an object.");
+  }
+
+  const normalizedObjectType = normalizeObjectType(
+    payload.objectType || payload.source?.objectType || objectType,
+    normalizeObjectType(objectType, state.objectType)
+  );
+  const normalizedFileName = String(payload.fileName || payload.source?.name || fileName || "JSON import");
+
+  if (Array.isArray(payload.columns) && Array.isArray(payload.rows)) {
+    const headers = payload.columns.map((header) => String(header || ""));
+    return {
+      format: "json",
+      fileName: normalizedFileName,
+      objectType: normalizedObjectType,
+      headers,
+      rows: payload.rows.map((row) => rowArrayToObject(headers, row))
+    };
+  }
+
+  const records = Array.isArray(payload.records)
+    ? payload.records
+    : Array.isArray(payload.result?.records)
+      ? payload.result.records
+      : null;
+  if (records) {
+    const rows = records.map(normalizeJsonRecord);
+    return {
+      format: "json",
+      fileName: normalizedFileName,
+      objectType: normalizedObjectType,
+      headers: datasetHeadersFromJsonPayload(payload, rows),
+      rows
+    };
+  }
+
+  throw new Error("JSON dataset must include either records or columns and rows.");
+}
+
+function rowArrayToObject(headers, row) {
+  const values = Array.isArray(row) ? row : [];
+  return Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""]));
+}
+
+function normalizeJsonRecord(record) {
+  if (!record || typeof record !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(record)
+      .filter(([key]) => key !== "attributes")
+      .map(([key, value]) => [key, normalizeJsonCell(value)])
+  );
+}
+
+function normalizeJsonCell(value) {
+  if (value == null) return "";
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "object") return JSON.stringify(value);
+  return value;
+}
+
+function datasetHeadersFromJsonPayload(payload, rows) {
+  const fieldHeaders = Array.isArray(payload.fields)
+    ? payload.fields
+        .map((field) => String(field?.apiName || field?.name || field?.label || ""))
+        .filter(Boolean)
+    : [];
+  const inferredHeaders = inferHeaders(rows);
+  return [...new Set([...fieldHeaders, ...inferredHeaders])];
 }
 
 function parseCsv(csvText) {
@@ -2224,7 +2550,7 @@ function readMappingFromControls() {
 }
 
 /**
- * Build duplicate review groups from original CSV rows.
+ * Build duplicate review groups from original dataset rows.
  *
  * The expensive normalization work happens once in prepareRowsAsync(). Candidate
  * buckets then decide which row pairs are worth scoring, which keeps large CSVs
@@ -4349,7 +4675,7 @@ function renderSource() {
   });
   renderLabelStatusFilterHost();
   renderFilterBuilder();
-  els.fileName.textContent = state.loadingFileName || state.fileName || "CSV import";
+  els.fileName.textContent = state.loadingFileName || state.fileName || "Dataset import";
   els.fileMeta.textContent = sourceMetaText(config);
   els.sourcePill.textContent = state.isLoadingFile ? "Loading" : state.rows.length ? "Loaded" : "No file";
   if (state.loadError && !state.isLoadingFile) els.sourcePill.textContent = "Error";
@@ -5581,11 +5907,11 @@ function renderDetail() {
   els.decisionStatus.className = `decision-status ${currentDecision}`;
 
   if (state.isLoadingFile) {
-    els.detailTitle.textContent = "Loading CSV";
+    els.detailTitle.textContent = "Loading Dataset";
     els.detailSurface.innerHTML = `
       <div class="empty-state loading-state">
         <div class="loading-spinner" aria-hidden="true"></div>
-        <strong>Loading ${escapeHtml(state.loadingFileName || "CSV")}</strong>
+        <strong>Loading ${escapeHtml(state.loadingFileName || "dataset")}</strong>
         <span>Parsing records and calculating match groups.</span>
       </div>
     `;
@@ -5603,10 +5929,10 @@ function renderDetail() {
               : '<path d="M8 7h8M8 12h8M8 17h5" /><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />'}
           </svg>
         </div>
-        <strong>${state.loadError ? "CSV could not be loaded" : state.rows.length ? "No duplicate groups" : "No duplicate groups yet"}</strong>
-        <span>${state.loadError ? escapeHtml(state.loadError) : state.rows.length ? "Adjust the thresholds or mapping." : "Choose a CSV or load demo data."}</span>
+        <strong>${state.loadError ? "Dataset could not be loaded" : state.rows.length ? "No duplicate groups" : "No duplicate groups yet"}</strong>
+        <span>${state.loadError ? escapeHtml(state.loadError) : state.rows.length ? "Adjust the thresholds or mapping." : "Choose a CSV or JSON file, or load demo data."}</span>
         <div class="empty-actions">
-          <button class="button button-primary" type="button" data-empty-action="choose-csv">Choose CSV</button>
+          <button class="button button-primary" type="button" data-empty-action="choose-csv">Choose File</button>
           <button class="button button-secondary" type="button" data-empty-action="demo-data">Load Demo</button>
         </div>
       </div>

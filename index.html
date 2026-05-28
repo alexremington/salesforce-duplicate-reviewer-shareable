@@ -29,13 +29,13 @@
               aria-expanded="false"
               aria-controls="csvObjectMenu"
             >
-              Choose CSV
+              Choose File
             </button>
             <div class="csv-object-menu" id="csvObjectMenu" role="menu" hidden>
               <button type="button" role="menuitem" data-csv-object="contact">Contacts</button>
               <button type="button" role="menuitem" data-csv-object="account">Accounts</button>
             </div>
-            <input id="csvInput" type="file" accept=".csv,text/csv" />
+            <input id="csvInput" type="file" accept=".csv,.json,text/csv,application/json" />
           </div>
           <button class="button button-secondary" type="button" id="exportButton" disabled>Export Decisions</button>
           <button class="button button-secondary" type="button" id="trainingExportButton" disabled>Export Labels</button>
@@ -67,7 +67,7 @@
             </div>
             <div class="panel-body" id="sourcePanelBody">
               <div class="file-drop" id="dropZone">
-                <strong id="fileName">CSV import</strong>
+                <strong id="fileName">Dataset import</strong>
                 <span id="fileMeta">No records loaded</span>
               </div>
               <div class="recent-files">
@@ -257,9 +257,9 @@
                 </svg>
               </div>
               <strong>No duplicate groups yet</strong>
-              <span>Choose a CSV or load demo data.</span>
+              <span>Choose a CSV or JSON file, or load demo data.</span>
               <div class="empty-actions">
-                <button class="button button-primary" type="button" data-empty-action="choose-csv">Choose CSV</button>
+                <button class="button button-primary" type="button" data-empty-action="choose-csv">Choose File</button>
                 <button class="button button-secondary" type="button" data-empty-action="demo-data">Load Demo</button>
               </div>
             </div>
