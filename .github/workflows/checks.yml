@@ -81,3 +81,20 @@ jobs:
           if [ -f /tmp/duplicate-reviewer.pid ]; then
             kill "$(cat /tmp/duplicate-reviewer.pid)" 2>/dev/null || true
           fi
+
+  windows-portability:
+    name: Windows portability
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Run Windows portability checks
+        shell: pwsh
+        run: npm run check:windows

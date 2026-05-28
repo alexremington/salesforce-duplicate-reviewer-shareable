@@ -5,6 +5,7 @@
   "description": "Local-first UI for reviewing Salesforce account and contact duplicate candidates.",
   "scripts": {
     "check": "scripts/check.sh",
+    "check:windows": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-windows.ps1",
     "check:shareable": "scripts/check-shareable.sh",
     "smoke:ui": "node tests/playwright-smoke.js",
     "start": "node server.js"
