@@ -178,8 +178,7 @@ h1 {
 }
 
 .button:disabled,
-.icon-button:disabled,
-.filter-empty-add:disabled {
+.icon-button:disabled {
   color: var(--disabled);
   border-color: var(--line);
   background: var(--neutral-soft);
@@ -348,24 +347,25 @@ h1 {
 
 .match-controls-grid {
   display: grid;
-  grid-template-columns: minmax(240px, 320px) minmax(150px, 200px) minmax(260px, 1fr);
+  grid-template-columns: minmax(280px, 0.86fr) minmax(430px, 1.14fr);
   align-items: start;
-  gap: 16px;
+  gap: 18px;
 }
 
-.match-controls-panel .check-row,
-.match-controls-panel .filter-builder,
-.match-controls-panel .match-control-actions {
-  margin-top: 0;
+.match-controls-left,
+.match-controls-right {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
 }
 
 .match-controls-panel .check-row {
-  align-self: center;
+  margin: 0;
   margin-bottom: 0;
 }
 
 .match-controls-panel .match-control-actions {
-  grid-column: 3;
   align-self: end;
 }
 
@@ -374,13 +374,13 @@ h1 {
 }
 
 .match-controls-panel .filter-row-controls {
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.95fr);
+  grid-template-columns: minmax(128px, 1.1fr) minmax(108px, 0.85fr) minmax(140px, 1fr);
   align-items: center;
 }
 
 .match-controls-panel .filter-row-controls .filter-value-control,
 .match-controls-panel .filter-value-placeholder {
-  grid-column: 1 / -1;
+  grid-column: auto;
 }
 
 .panel-title {
@@ -576,6 +576,13 @@ h1 {
 .threshold-controls {
   display: grid;
   gap: 10px;
+}
+
+.match-controls-section-title,
+.filter-builder-title strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 900;
 }
 
 .threshold-range-control {
@@ -806,7 +813,7 @@ select:focus {
 .filter-builder {
   display: grid;
   gap: 10px;
-  margin-top: 12px;
+  margin-top: 0;
 }
 
 .filter-builder.is-disabled {
@@ -821,19 +828,13 @@ select:focus {
   color: var(--ink);
 }
 
-.filter-builder-title strong {
-  font-size: 13px;
-  font-weight: 900;
-}
-
 .filter-icon-button {
   flex: 0 0 auto;
   width: 32px;
   height: 32px;
 }
 
-.filter-icon-button svg,
-.filter-empty-add svg {
+.filter-icon-button svg {
   width: 17px;
   height: 17px;
   fill: none;
@@ -842,33 +843,6 @@ select:focus {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2;
-}
-
-.filter-empty-add {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  width: 100%;
-  min-height: 42px;
-  border: 1px solid var(--line-muted);
-  border-radius: 14px;
-  background: var(--surface-input);
-  color: var(--muted);
-  padding: 0 12px;
-  font-size: 13px;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.filter-empty-add:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.filter-empty-add:disabled:hover {
-  border-color: var(--line);
-  color: var(--disabled);
 }
 
 .label-status-filter {
@@ -944,6 +918,14 @@ select:focus {
   align-items: stretch;
 }
 
+.filter-row.is-single {
+  grid-template-columns: minmax(0, 1fr) 32px;
+}
+
+.filter-row.is-draft {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .filter-index {
   display: grid;
   place-items: center;
@@ -956,7 +938,7 @@ select:focus {
 
 .filter-row-controls {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.95fr);
+  grid-template-columns: minmax(140px, 1.12fr) minmax(118px, 0.86fr) minmax(150px, 1fr);
   gap: 8px;
   min-width: 0;
   padding: 8px;
@@ -967,7 +949,7 @@ select:focus {
 
 .filter-row-controls .filter-value-control,
 .filter-value-placeholder {
-  grid-column: 1 / -1;
+  grid-column: auto;
 }
 
 .filter-row-controls select,
@@ -2347,12 +2329,7 @@ select:focus {
 
 @media (max-width: 1180px) {
   .match-controls-grid {
-    grid-template-columns: minmax(240px, 1fr) minmax(180px, 0.75fr);
-  }
-
-  .match-controls-panel .filter-builder,
-  .match-controls-panel .match-control-actions {
-    grid-column: 1 / -1;
+    grid-template-columns: minmax(260px, 0.9fr) minmax(360px, 1.1fr);
   }
 
   .match-controls-panel .match-control-actions {

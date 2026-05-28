@@ -349,6 +349,7 @@ const MAX_HIGH_RECALL_CANDIDATE_PAIRS = 250000;
 const CANDIDATE_ATTEMPT_LIMIT_FACTOR = 5;
 const GROUP_ITEM_ESTIMATED_HEIGHT = 108;
 const GROUP_LIST_OVERSCAN = 8;
+const DRAFT_GROUP_FILTER_ID = "__draft-filter";
 const RECENT_FILE_LIMIT = 4;
 const MAX_RECENT_FILE_CONTENT_BYTES = 20 * 1024 * 1024;
 const REVIEW_STATE_LIMIT = 25;
@@ -769,6 +770,7 @@ const els = {
   thresholdMaxNumber: document.getElementById("thresholdMaxNumber"),
   thresholdValue: document.getElementById("thresholdValue"),
   highRecallMode: document.getElementById("highRecallMode"),
+  labelStatusFilter: document.getElementById("labelStatusFilter"),
   groupFilterBuilder: document.getElementById("groupFilterBuilder"),
   groupSortToggle: document.getElementById("groupSortToggle"),
   hideLabeledGroups: document.getElementById("hideLabeledGroups"),
@@ -871,6 +873,7 @@ els.thresholdMaxNumber.addEventListener("blur", () => syncThresholdInputs("max-n
 els.groupSortToggle.addEventListener("click", toggleGroupSortDirection);
 els.hideLabeledGroups.addEventListener("change", applyHideLabeledGroups);
 els.applyControlsButton.addEventListener("click", applyMatchControls);
+els.labelStatusFilter.addEventListener("change", handleLabelStatusFilterChange);
 els.groupFilterBuilder.addEventListener("click", handleGroupFilterClick);
 els.groupFilterBuilder.addEventListener("change", handleGroupFilterChange);
 els.groupFilterBuilder.addEventListener("input", handleGroupFilterInput);
@@ -4126,6 +4129,7 @@ function renderSource() {
   ].forEach((control) => {
     control.disabled = !datasetLoaded;
   });
+  renderLabelStatusFilterHost();
   renderFilterBuilder();
   els.fileName.textContent = state.loadingFileName || state.fileName || "CSV import";
   els.fileMeta.textContent = sourceMetaText(config);
@@ -4388,13 +4392,13 @@ function renderGroupFilterToolbar() {
 function renderFilterBuilder() {
   if (!els.groupFilterBuilder) return;
 
-  const filtersDisabled = !canUseMatchFilters();
   const recordFiltersDisabled = !canUseRecordFieldFilters();
-  const hasFilters = !recordFiltersDisabled && Boolean(state.filters.length);
+  const displayFilters = state.filters.length ? state.filters : [createGroupFilterDraft()];
+  const hasMultipleFilters = displayFilters.length > 1;
   const filterLogicError = recordFiltersDisabled ? "" : groupFilterLogicError();
   const activeEntries = recordFiltersDisabled ? [] : activeGroupFilterEntries();
-  els.groupFilterBuilder.classList.toggle("is-disabled", filtersDisabled);
-  els.groupFilterBuilder.setAttribute("aria-disabled", filtersDisabled ? "true" : "false");
+  els.groupFilterBuilder.classList.toggle("is-disabled", recordFiltersDisabled);
+  els.groupFilterBuilder.setAttribute("aria-disabled", recordFiltersDisabled ? "true" : "false");
   els.groupFilterBuilder.innerHTML = `
     <div class="filter-builder-title">
       <strong>Filters</strong>
@@ -4402,11 +4406,20 @@ function renderFilterBuilder() {
         ${filterPlusIcon()}
       </button>
     </div>
-    ${renderLabelStatusFilter(filtersDisabled)}
-    ${hasFilters ? renderFilterLogicControl(activeEntries, recordFiltersDisabled) : renderFilterEmptyControl(recordFiltersDisabled)}
-    ${hasFilters ? `<div class="filter-list">${state.filters.map((filter, index) => renderFilterRow(filter, index, recordFiltersDisabled)).join("")}</div>` : ""}
+    ${hasMultipleFilters ? renderFilterLogicControl(activeEntries, recordFiltersDisabled) : ""}
+    <div class="filter-list">${displayFilters.map((filter, index) => {
+      return renderFilterRow(filter, index, recordFiltersDisabled, {
+        showIndex: hasMultipleFilters,
+        showRemove: filter.id !== DRAFT_GROUP_FILTER_ID
+      });
+    }).join("")}</div>
     ${filterLogicError ? `<p class="filter-error">${escapeHtml(filterLogicError)}</p>` : ""}
   `;
+}
+
+function renderLabelStatusFilterHost() {
+  if (!els.labelStatusFilter) return;
+  els.labelStatusFilter.innerHTML = renderLabelStatusFilter(!canUseMatchFilters());
 }
 
 function renderLabelStatusFilter(disabled = false) {
@@ -4430,15 +4443,6 @@ function renderLabelStatusFilter(disabled = false) {
   `;
 }
 
-function renderFilterEmptyControl(disabled = false) {
-  return `
-    <button class="filter-empty-add" type="button" data-filter-add ${disabled ? "disabled" : ""}>
-      <span>Add filter...</span>
-      ${filterSearchIcon()}
-    </button>
-  `;
-}
-
 function renderFilterLogicControl(activeEntries, disabled = false) {
   const defaultLogic = defaultGroupFilterLogic(activeEntries);
   const mode = groupFilterLogicMode();
@@ -4451,7 +4455,6 @@ function renderFilterLogicControl(activeEntries, disabled = false) {
         <label class="visually-hidden" for="filterLogicMode">Filter logic</label>
         <select id="filterLogicMode" class="filter-logic-mode-select" ${disabledAttribute}>
           <option value="and" ${mode === "and" ? "selected" : ""}>All filters (AND)</option>
-          <option value="or" ${mode === "or" ? "selected" : ""}>Any filter (OR)</option>
           <option value="custom" ${mode === "custom" ? "selected" : ""}>Custom logic</option>
         </select>
         ${mode === "custom"
@@ -4471,13 +4474,17 @@ function renderFilterLogicControl(activeEntries, disabled = false) {
   `;
 }
 
-function renderFilterRow(filter, index, disabled = false) {
+function renderFilterRow(filter, index, disabled = false, { showIndex = true, showRemove = true } = {}) {
   const normalized = normalizeGroupFilter(filter);
   const meta = groupFilterMeta(normalized.field);
   const disabledAttribute = disabled ? "disabled" : "";
+  const isDraft = normalized.id === DRAFT_GROUP_FILTER_ID;
+  const rowClasses = ["filter-row"];
+  if (!showIndex) rowClasses.push("is-single");
+  if (isDraft) rowClasses.push("is-draft");
   return `
-    <div class="filter-row" data-filter-id="${escapeHtml(normalized.id)}">
-      <span class="filter-index">${index + 1}</span>
+    <div class="${rowClasses.join(" ")}" data-filter-id="${escapeHtml(normalized.id)}">
+      ${showIndex ? `<span class="filter-index">${index + 1}</span>` : ""}
       <div class="filter-row-controls">
         <label class="visually-hidden" for="filter-field-${escapeHtml(normalized.id)}">Filter field</label>
         <select id="filter-field-${escapeHtml(normalized.id)}" class="filter-field-select" data-filter-control="field" ${disabledAttribute}>
@@ -4489,9 +4496,11 @@ function renderFilterRow(filter, index, disabled = false) {
         </select>
         ${renderFilterValueControl(normalized, meta, disabled)}
       </div>
-      <button class="icon-button filter-icon-button" type="button" data-filter-remove aria-label="Remove filter ${index + 1}" title="Remove filter" ${disabledAttribute}>
-        ${filterTrashIcon()}
-      </button>
+      ${showRemove ? `
+        <button class="icon-button filter-icon-button" type="button" data-filter-remove aria-label="Remove filter ${index + 1}" title="Remove filter" ${disabledAttribute}>
+          ${filterTrashIcon()}
+        </button>
+      ` : ""}
     </div>
   `;
 }
@@ -4577,7 +4586,13 @@ function handleGroupFilterClick(event) {
   if (event.target.closest?.("[data-filter-add]")) {
     const filter = createGroupFilter();
     if (!filter) return;
-    state.filters.push(filter);
+    if (!state.filters.length) {
+      const secondFilter = createGroupFilter();
+      state.filters.push(filter);
+      if (secondFilter) state.filters.push(secondFilter);
+    } else {
+      state.filters.push(filter);
+    }
     visibleGroupsCache = null;
     renderFilterBuilder();
     return;
@@ -4596,17 +4611,16 @@ function handleGroupFilterClick(event) {
   renderFilterBuilder();
 }
 
-function handleGroupFilterChange(event) {
+function handleLabelStatusFilterChange(event) {
   const labelStatusControl = event.target.closest?.("[data-label-status-filter]");
-  if (labelStatusControl) {
-    if (!canUseMatchFilters()) return;
-    updateLabelStatusFilter(labelStatusControl);
-    return;
-  }
+  if (!labelStatusControl || !canUseMatchFilters()) return;
+  updateLabelStatusFilter(labelStatusControl);
+}
 
+function handleGroupFilterChange(event) {
   if (!canUseRecordFieldFilters()) return;
   if (event.target.classList?.contains("filter-logic-mode-select")) {
-    state.filterLogicMode = event.target.value === "custom" || event.target.value === "or" ? event.target.value : "and";
+    state.filterLogicMode = event.target.value === "custom" ? "custom" : "and";
     visibleGroupsCache = null;
     renderFilterBuilder();
     return;
@@ -4643,8 +4657,7 @@ function updateLabelStatusFilter(control) {
 }
 
 function updateGroupFilterFromControl(control, { rerender = false } = {}) {
-  const filterId = control.closest("[data-filter-id]")?.dataset.filterId;
-  const filter = state.filters.find((item) => item.id === filterId);
+  const filter = resolveEditableGroupFilter(control);
   if (!filter) return;
 
   const controlType = control.dataset.filterControl;
@@ -4669,6 +4682,19 @@ function updateGroupFilterFromControl(control, { rerender = false } = {}) {
   if (rerender) renderFilterBuilder();
 }
 
+function resolveEditableGroupFilter(control) {
+  const row = control.closest("[data-filter-id]");
+  const filterId = row?.dataset.filterId;
+  let filter = state.filters.find((item) => item.id === filterId);
+  if (filter || filterId !== DRAFT_GROUP_FILTER_ID) return filter || null;
+
+  filter = createGroupFilter();
+  if (!filter) return null;
+  state.filters.push(filter);
+  row.dataset.filterId = filter.id;
+  return filter;
+}
+
 function createGroupFilter() {
   const field = defaultGroupFilterField();
   if (!field) return null;
@@ -4678,6 +4704,19 @@ function createGroupFilter() {
     field,
     operator,
     value: defaultGroupFilterValue(field, operator),
+    value2: ""
+  };
+}
+
+function createGroupFilterDraft() {
+  const field = defaultGroupFilterField();
+  const type = field ? groupFilterType(field) : "text";
+  const operator = defaultGroupFilterOperator(type);
+  return {
+    id: DRAFT_GROUP_FILTER_ID,
+    field,
+    operator,
+    value: "",
     value2: ""
   };
 }
@@ -4852,13 +4891,12 @@ function groupFilterLogicError() {
 }
 
 function groupFilterLogicMode() {
-  return state.filterLogicMode === "custom" || state.filterLogicMode === "or" ? state.filterLogicMode : "and";
+  return state.filterLogicMode === "custom" ? "custom" : "and";
 }
 
 function filterLogicExpressionForMode(entries = activeGroupFilterEntries()) {
   const mode = groupFilterLogicMode();
   if (mode === "custom") return state.filterLogic || defaultGroupFilterLogic(entries);
-  if (mode === "or") return entries.map(({ number }) => number).join(" OR ");
   return defaultGroupFilterLogic(entries);
 }
 
@@ -5158,10 +5196,6 @@ function startOfFilterYear(date) {
 
 function filterPlusIcon() {
   return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" /></svg>';
-}
-
-function filterSearchIcon() {
-  return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m21 21-4.3-4.3" /><circle cx="11" cy="11" r="7" /></svg>';
 }
 
 function filterTrashIcon() {

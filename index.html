@@ -161,50 +161,56 @@
             </div>
             <div class="panel-body match-controls-body" id="matchControlsPanelBody">
               <div class="match-controls-grid">
-                <div class="threshold-controls">
-                  <div class="threshold-range-control" id="thresholdSlider">
-                    <label class="threshold-bound" for="thresholdMinNumber">
-                      <span>Min</span>
-                      <input id="thresholdMinNumber" type="number" min="70" max="100" step="1" value="86" inputmode="numeric" />
-                    </label>
-                    <div class="threshold-slider">
-                      <div class="threshold-slider-fill" aria-hidden="true"></div>
-                      <input
-                        id="threshold"
-                        class="threshold-slider-input threshold-slider-input-min"
-                        type="range"
-                        min="70"
-                        max="100"
-                        step="1"
-                        value="86"
-                        aria-label="Minimum match score"
-                      />
-                      <input
-                        id="maxThreshold"
-                        class="threshold-slider-input threshold-slider-input-max"
-                        type="range"
-                        min="70"
-                        max="100"
-                        step="1"
-                        value="100"
-                        aria-label="Maximum match score"
-                      />
+                <div class="match-controls-left">
+                  <div class="threshold-controls">
+                    <strong class="match-controls-section-title">Match score</strong>
+                    <div class="threshold-range-control" id="thresholdSlider">
+                      <label class="threshold-bound" for="thresholdMinNumber">
+                        <span>Min</span>
+                        <input id="thresholdMinNumber" type="number" min="70" max="100" step="1" value="86" inputmode="numeric" />
+                      </label>
+                      <div class="threshold-slider">
+                        <div class="threshold-slider-fill" aria-hidden="true"></div>
+                        <input
+                          id="threshold"
+                          class="threshold-slider-input threshold-slider-input-min"
+                          type="range"
+                          min="70"
+                          max="100"
+                          step="1"
+                          value="86"
+                          aria-label="Minimum match score"
+                        />
+                        <input
+                          id="maxThreshold"
+                          class="threshold-slider-input threshold-slider-input-max"
+                          type="range"
+                          min="70"
+                          max="100"
+                          step="1"
+                          value="100"
+                          aria-label="Maximum match score"
+                        />
+                      </div>
+                      <label class="threshold-bound" for="thresholdMaxNumber">
+                        <span>Max</span>
+                        <input id="thresholdMaxNumber" type="number" min="70" max="100" step="1" value="100" inputmode="numeric" />
+                      </label>
                     </div>
-                    <label class="threshold-bound" for="thresholdMaxNumber">
-                      <span>Max</span>
-                      <input id="thresholdMaxNumber" type="number" min="70" max="100" step="1" value="100" inputmode="numeric" />
+                  </div>
+                  <div class="check-row">
+                    <label title="Uses narrower candidate buckets for speed. Leave unchecked to find more possible duplicates.">
+                      <input id="highRecallMode" type="checkbox" />
+                      Fastest search (may miss some results)
                     </label>
                   </div>
+                  <div class="label-status-filter-host" id="labelStatusFilter"></div>
                 </div>
-                <div class="check-row">
-                  <label title="Uses narrower candidate buckets for speed. Leave unchecked to find more possible duplicates.">
-                    <input id="highRecallMode" type="checkbox" />
-                    Fastest search (may miss some results)
-                  </label>
-                </div>
-                <div class="filter-builder" id="groupFilterBuilder" aria-label="Group filters"></div>
-                <div class="match-control-actions">
-                  <button class="button button-primary" type="button" id="applyControlsButton">Apply</button>
+                <div class="match-controls-right">
+                  <div class="filter-builder" id="groupFilterBuilder" aria-label="Group filters"></div>
+                  <div class="match-control-actions">
+                    <button class="button button-primary" type="button" id="applyControlsButton">Apply</button>
+                  </div>
                 </div>
               </div>
             </div>
