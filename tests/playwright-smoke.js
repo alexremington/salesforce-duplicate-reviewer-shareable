@@ -40,12 +40,23 @@ async function run() {
     });
     page.on("pageerror", (error) => messages.push(`pageerror: ${error.message}`));
 
+    await page.emulateMedia({ colorScheme: "light" });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     const latestRecentFiles = await assertLatestRecentFiles(page);
+    const lightTheme = await themeColorState(page);
     await page.screenshot({ path: path.join(outDir, "desktop-empty.png"), fullPage: false });
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.waitForTimeout(100);
+    const darkTheme = await themeColorState(page);
+    await page.screenshot({ path: path.join(outDir, "desktop-empty-dark.png"), fullPage: false });
+    await page.emulateMedia({ colorScheme: "light" });
 
     const emptyChooseVisible = await page.locator('[data-empty-action="choose-csv"]').isVisible();
     const emptyDemoVisible = await page.locator('[data-empty-action="demo-data"]').isVisible();
+    const filterAddDisabledBeforeLoad = await page.locator(".filter-empty-add").isDisabled();
+    const applyDisabledBeforeLoad = await page.locator("#applyControlsButton").isDisabled();
+    const labelStatusDisabledBeforeLoad = await page.locator('[data-label-status-filter][value="unlabeled"]').isDisabled();
+    const hideLabeledDisabledBeforeLoad = await page.locator("#hideLabeledGroups").isDisabled();
     await page.locator("#chooseCsvButton").click();
     await page.getByRole("menuitem", { name: "Contacts" }).waitFor({ state: "visible", timeout: 5000 });
     await page.keyboard.press("Escape");
@@ -71,6 +82,8 @@ async function run() {
     await setNumberValue(page, "#thresholdMinNumber", "80");
     const thresholdTypedState = await thresholdControlState(page);
     const fastestSearchDefaultUnchecked = !(await page.locator("#highRecallMode").isChecked());
+    const labelStatusEnabledAfterLoad = await page.locator('[data-label-status-filter][value="unlabeled"]').isEnabled();
+    const hideLabeledEnabledAfterLoad = await page.locator("#hideLabeledGroups").isEnabled();
     await page.locator("#applyControlsButton").click();
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
     const thresholdFilteredScores = await visibleGroupScores(page);
@@ -117,6 +130,7 @@ async function run() {
     await page.locator(".group-item.is-label-full .label-status-indicator.full").first().waitFor({ state: "visible", timeout: 5000 });
     const fullLabelIndicators = await page.locator(".group-item.is-label-full .label-status-indicator.full").count();
     const trainingExportEnabled = await page.locator("#trainingExportButton").isEnabled();
+    const labelStatusFilterState = await exerciseLabelStatusFilter(page);
 
     await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
     await page.locator(".record-decision-badge.duplicate").first().waitFor({ state: "visible", timeout: 5000 });
@@ -195,6 +209,12 @@ async function run() {
 
     if (!emptyChooseVisible) throw new Error("Expected empty-state Choose CSV action to be visible.");
     if (!emptyDemoVisible) throw new Error("Expected empty-state Load Demo action to be visible.");
+    if (!lightTheme.colorScheme.includes("light") || !darkTheme.colorScheme.includes("dark") || lightTheme.bodyBg === darkTheme.bodyBg) {
+      throw new Error(`Expected the UI theme to follow system light/dark mode: ${JSON.stringify({ lightTheme, darkTheme })}`);
+    }
+    if (!filterAddDisabledBeforeLoad || !applyDisabledBeforeLoad || !labelStatusDisabledBeforeLoad || !hideLabeledDisabledBeforeLoad) {
+      throw new Error("Expected match filters and Apply to be disabled before a dataset is loaded.");
+    }
     if (!latestRecentFiles.contacts || !latestRecentFiles.accounts) {
       throw new Error(`Expected latest Contact and Account exports in Recent files: ${JSON.stringify(latestRecentFiles)}`);
     }
@@ -213,11 +233,22 @@ async function run() {
     if (!fastestSearchDefaultUnchecked) {
       throw new Error("Expected fastest search to be opt-in so broader candidate search is the default.");
     }
+    if (!labelStatusEnabledAfterLoad) throw new Error("Expected label status filters to enable after loading a dataset.");
+    if (!hideLabeledEnabledAfterLoad) throw new Error("Expected Match Groups filters to enable after loading a dataset.");
     if (!thresholdFilteredScores.length || thresholdFilteredScores.some((score) => score < 80 || score > 99)) {
       throw new Error(`Expected max threshold to limit visible scores to 80-99: ${JSON.stringify(thresholdFilteredScores)}`);
     }
+    if (customFilterState.defaultLogicMode !== "and" || customFilterState.logicMode !== "custom") {
+      throw new Error(`Expected filter logic to default to AND and expose custom logic by choice: ${JSON.stringify(customFilterState)}`);
+    }
     if (customFilterState.filteredCount !== 2 || customFilterState.logicValue !== "1 OR 2") {
       throw new Error(`Expected custom boolean filters to narrow the group list: ${JSON.stringify(customFilterState)}`);
+    }
+    if (customFilterState.fieldOptions.some((label) => ["Label Status", "Review Status", "Match Score", "Match Type"].includes(label))) {
+      throw new Error(`Expected custom filter fields to be record fields only: ${JSON.stringify(customFilterState.fieldOptions)}`);
+    }
+    if (!customFilterState.fieldOptions.includes("Email")) {
+      throw new Error(`Expected record field filters to include Email: ${JSON.stringify(customFilterState.fieldOptions)}`);
     }
     if (!customFilterState.dateOperators.includes("relative date")) {
       throw new Error(`Expected date filters to expose Salesforce-compatible relative dates: ${JSON.stringify(customFilterState)}`);
@@ -230,6 +261,9 @@ async function run() {
     if (!fieldResolutionSelectable) throw new Error("Expected visible field-resolution selects to contain options.");
     if (!trainingExportEnabled) throw new Error("Expected training label action to enable label export.");
     if (!fullLabelIndicators) throw new Error("Expected fully labeled groups to show a green label indicator.");
+    if (!labelStatusFilterState.filteredCount || !labelStatusFilterState.visibleFullCount) {
+      throw new Error(`Expected label status checkboxes to filter fully labeled groups: ${JSON.stringify(labelStatusFilterState)}`);
+    }
     if (!duplicateBadges) throw new Error("Expected at least one Duplicate decision badge.");
     if (!notDuplicateBadges) throw new Error("Expected at least one Not Duplicate decision badge.");
     if (!mergeMasterRadios) throw new Error("Expected Contact merge master radios.");
@@ -275,6 +309,8 @@ async function run() {
       thresholdControl,
       thresholdClampState,
       thresholdTypedState,
+      lightTheme,
+      darkTheme,
       fastestSearchDefaultUnchecked,
       thresholdFilteredScores,
       customFilterState,
@@ -435,11 +471,31 @@ async function setRangeValue(page, selector, value) {
   }, value);
 }
 
+async function themeColorState(page) {
+  return page.evaluate(() => {
+    const root = getComputedStyle(document.documentElement);
+    const body = getComputedStyle(document.body);
+    const topbar = getComputedStyle(document.querySelector(".topbar"));
+    return {
+      colorScheme: root.colorScheme,
+      bodyBg: body.backgroundColor,
+      bodyColor: body.color,
+      topbarBg: topbar.backgroundColor,
+      accent: root.getPropertyValue("--accent").trim()
+    };
+  });
+}
+
 async function exerciseCustomFilters(page) {
   await addFilter(page, 1);
+  const fieldOptions = await page.locator(".filter-row").first().locator(".filter-field-select option").evaluateAll((options) => {
+    return options.map((option) => option.textContent?.trim() || "");
+  });
   await configureFilter(page, 0, "email", "contains", "contact1@example.com");
   await addFilter(page, 2);
   await configureFilter(page, 1, "email", "contains", "contact2@example.com");
+  const defaultLogicMode = await page.locator(".filter-logic-mode-select").inputValue();
+  await page.locator(".filter-logic-mode-select").selectOption("custom");
   await page.locator(".filter-logic-input").fill("1 OR 2");
 
   await addFilter(page, 3);
@@ -449,11 +505,13 @@ async function exerciseCustomFilters(page) {
     return options.map((option) => option.textContent?.trim() || "");
   });
   await page.locator("[data-filter-remove]").nth(2).click();
+  await page.locator(".filter-logic-mode-select").selectOption("custom");
   await page.locator(".filter-logic-input").fill("1 OR 2");
 
   await page.locator("#applyControlsButton").click();
   await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
   const filteredCount = await page.locator("#groupCount").evaluate((node) => Number(node.textContent?.replace(/,/g, "") || 0));
+  const logicMode = await page.locator(".filter-logic-mode-select").inputValue();
   const logicValue = await page.locator(".filter-logic-input").inputValue();
 
   while (await page.locator("[data-filter-remove]").count()) {
@@ -464,9 +522,25 @@ async function exerciseCustomFilters(page) {
 
   return {
     filteredCount,
+    defaultLogicMode,
+    logicMode,
     logicValue,
+    fieldOptions,
     dateOperators
   };
+}
+
+async function exerciseLabelStatusFilter(page) {
+  const fullCheckbox = page.locator('[data-label-status-filter][value="full"]');
+  await fullCheckbox.check();
+  await page.locator("#applyControlsButton").click();
+  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+  const filteredCount = await page.locator("#groupCount").evaluate((node) => Number(node.textContent?.replace(/,/g, "") || 0));
+  const visibleFullCount = await page.locator(".group-item.is-label-full").count();
+  await fullCheckbox.uncheck();
+  await page.locator("#applyControlsButton").click();
+  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+  return { filteredCount, visibleFullCount };
 }
 
 async function addFilter(page, expectedCount) {

@@ -49,71 +49,6 @@
         </div>
       </header>
 
-      <section class="panel match-controls-panel collapsible-panel" data-collapsible-panel data-default-expanded="true">
-        <div class="panel-title">
-          <button
-            class="panel-toggle"
-            type="button"
-            aria-expanded="true"
-            aria-controls="matchControlsPanelBody"
-            data-collapse-toggle
-          >
-            <span class="collapse-icon" aria-hidden="true"></span>
-            <span>Match Controls</span>
-          </button>
-          <span class="score-readout" id="thresholdValue">86</span>
-        </div>
-        <div class="panel-body match-controls-body" id="matchControlsPanelBody">
-          <div class="match-controls-grid">
-            <div class="threshold-controls">
-              <div class="threshold-range-control" id="thresholdSlider">
-                <label class="threshold-bound" for="thresholdMinNumber">
-                  <span>Min</span>
-                  <input id="thresholdMinNumber" type="number" min="70" max="100" step="1" value="86" inputmode="numeric" />
-                </label>
-                <div class="threshold-slider">
-                  <div class="threshold-slider-fill" aria-hidden="true"></div>
-                  <input
-                    id="threshold"
-                    class="threshold-slider-input threshold-slider-input-min"
-                    type="range"
-                    min="70"
-                    max="100"
-                    step="1"
-                    value="86"
-                    aria-label="Minimum match score"
-                  />
-                  <input
-                    id="maxThreshold"
-                    class="threshold-slider-input threshold-slider-input-max"
-                    type="range"
-                    min="70"
-                    max="100"
-                    step="1"
-                    value="100"
-                    aria-label="Maximum match score"
-                  />
-                </div>
-                <label class="threshold-bound" for="thresholdMaxNumber">
-                  <span>Max</span>
-                  <input id="thresholdMaxNumber" type="number" min="70" max="100" step="1" value="100" inputmode="numeric" />
-                </label>
-              </div>
-            </div>
-            <div class="check-row">
-              <label title="Uses narrower candidate buckets for speed. Leave unchecked to find more possible duplicates.">
-                <input id="highRecallMode" type="checkbox" />
-                Fastest search (may miss some results)
-              </label>
-            </div>
-            <div class="filter-builder" id="groupFilterBuilder" aria-label="Group filters"></div>
-            <div class="match-control-actions">
-              <button class="button button-primary" type="button" id="applyControlsButton">Apply</button>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <main class="main-grid">
         <aside class="control-pane" aria-label="Duplicate controls">
           <section class="panel import-panel collapsible-panel" data-collapsible-panel data-default-expanded="true">
@@ -209,7 +144,73 @@
           </section>
         </aside>
 
-        <section class="review-pane" aria-label="Duplicate review workspace">
+        <div class="workspace-column">
+          <section class="panel match-controls-panel collapsible-panel" data-collapsible-panel data-default-expanded="true">
+            <div class="panel-title">
+              <button
+                class="panel-toggle"
+                type="button"
+                aria-expanded="true"
+                aria-controls="matchControlsPanelBody"
+                data-collapse-toggle
+              >
+                <span class="collapse-icon" aria-hidden="true"></span>
+                <span>Match Controls</span>
+              </button>
+              <span class="score-readout" id="thresholdValue">86</span>
+            </div>
+            <div class="panel-body match-controls-body" id="matchControlsPanelBody">
+              <div class="match-controls-grid">
+                <div class="threshold-controls">
+                  <div class="threshold-range-control" id="thresholdSlider">
+                    <label class="threshold-bound" for="thresholdMinNumber">
+                      <span>Min</span>
+                      <input id="thresholdMinNumber" type="number" min="70" max="100" step="1" value="86" inputmode="numeric" />
+                    </label>
+                    <div class="threshold-slider">
+                      <div class="threshold-slider-fill" aria-hidden="true"></div>
+                      <input
+                        id="threshold"
+                        class="threshold-slider-input threshold-slider-input-min"
+                        type="range"
+                        min="70"
+                        max="100"
+                        step="1"
+                        value="86"
+                        aria-label="Minimum match score"
+                      />
+                      <input
+                        id="maxThreshold"
+                        class="threshold-slider-input threshold-slider-input-max"
+                        type="range"
+                        min="70"
+                        max="100"
+                        step="1"
+                        value="100"
+                        aria-label="Maximum match score"
+                      />
+                    </div>
+                    <label class="threshold-bound" for="thresholdMaxNumber">
+                      <span>Max</span>
+                      <input id="thresholdMaxNumber" type="number" min="70" max="100" step="1" value="100" inputmode="numeric" />
+                    </label>
+                  </div>
+                </div>
+                <div class="check-row">
+                  <label title="Uses narrower candidate buckets for speed. Leave unchecked to find more possible duplicates.">
+                    <input id="highRecallMode" type="checkbox" />
+                    Fastest search (may miss some results)
+                  </label>
+                </div>
+                <div class="filter-builder" id="groupFilterBuilder" aria-label="Group filters"></div>
+                <div class="match-control-actions">
+                  <button class="button button-primary" type="button" id="applyControlsButton">Apply</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="review-pane" aria-label="Duplicate review workspace">
           <div class="metric-strip" id="metrics">
             <div class="metric">
               <span>Records</span>
@@ -267,7 +268,8 @@
             <span class="record-navigation-status" id="groupNavigationStatus">0 of 0</span>
             <button class="button button-secondary" type="button" id="nextGroupButton" disabled>Next</button>
           </div>
-        </section>
+          </section>
+        </div>
       </main>
     </div>
 
