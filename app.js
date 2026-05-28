@@ -13,7 +13,18 @@ const OBJECT_CONFIG = {
   contact: {
     label: "Contacts",
     singular: "Contact",
-    displayFields: ["fullName", "firstName", "lastName", "company", "email", "ziPersonLinkedInUrl", "phone", "ziPhone", "mobile"],
+    displayFields: [
+      "fullName",
+      "firstName",
+      "lastName",
+      "company",
+      "email",
+      "leadSource",
+      "ziPersonLinkedInUrl",
+      "phone",
+      "ziPhone",
+      "mobile"
+    ],
     fields: {
       recordId: ["id", "contact id", "salesforce id", "sf id"],
       fullName: ["full name", "fullname", "full_name", "contact name", "contactname", "name"],
@@ -21,6 +32,8 @@ const OBJECT_CONFIG = {
       lastName: ["last name", "lastname", "last_name", "surname", "family name"],
       company: ["company", "account name", "account", "organization", "org"],
       email: ["email", "email address", "emailaddress", "e-mail"],
+      leadSource: ["lead source", "leadsource", "lead_source", "source"],
+      createdDate: ["created date", "createddate", "created", "created at", "created on", "create date"],
       ziPersonLinkedInUrl: [
         "zi person linkedin url",
         "zi person linkedin",
@@ -103,6 +116,8 @@ const FIELD_LABELS = {
   lastName: "Last Name",
   company: "Company",
   email: "Email",
+  leadSource: "Lead Source",
+  createdDate: "Created Date",
   ziPersonLinkedInUrl: "ZI Person LinkedIn URL",
   phone: "Phone",
   ziPhone: "ZI Phone",
@@ -117,6 +132,95 @@ const FIELD_LABELS = {
   accountCurrency: "Account Currency",
   ultimateParentAccount: "Ultimate Parent Account"
 };
+const CONTACT_LEAD_SOURCE_FIELD = "leadSource";
+const CONTACT_CREATED_DATE_FIELD = "createdDate";
+const MERGE_FIELD_API_NAMES = {
+  leadSource: "LeadSource"
+};
+const GROUP_FILTER_FIELD_TYPES = {
+  recordId: "text",
+  fullName: "text",
+  firstName: "text",
+  lastName: "text",
+  company: "text",
+  email: "text",
+  leadSource: "text",
+  createdDate: "date",
+  ziPersonLinkedInUrl: "text",
+  phone: "text",
+  ziPhone: "text",
+  mobile: "text",
+  name: "text",
+  website: "text",
+  billingStreet: "text",
+  billingCity: "text",
+  billingState: "text",
+  billingPostalCode: "text",
+  billingCountry: "text",
+  accountCurrency: "text",
+  ultimateParentAccount: "text"
+};
+const GROUP_FILTER_OPERATORS = {
+  text: [
+    ["contains", "contains"],
+    ["not_contains", "does not contain"],
+    ["equals", "equals"],
+    ["not_equals", "does not equal"],
+    ["starts_with", "starts with"],
+    ["ends_with", "ends with"],
+    ["blank", "is blank"],
+    ["not_blank", "is not blank"]
+  ],
+  number: [
+    ["equals", "equals"],
+    ["not_equals", "does not equal"],
+    ["greater_or_equal", "at least"],
+    ["less_or_equal", "at most"],
+    ["greater_than", "greater than"],
+    ["less_than", "less than"],
+    ["between", "between"],
+    ["blank", "is blank"],
+    ["not_blank", "is not blank"]
+  ],
+  date: [
+    ["equals", "on"],
+    ["before", "before"],
+    ["after", "after"],
+    ["on_or_before", "on or before"],
+    ["on_or_after", "on or after"],
+    ["relative", "relative date"],
+    ["blank", "is blank"],
+    ["not_blank", "is not blank"]
+  ],
+  enum: [
+    ["equals", "equals"],
+    ["not_equals", "does not equal"]
+  ]
+};
+const GROUP_FILTER_VALUELESS_OPERATORS = new Set(["blank", "not_blank"]);
+const GROUP_FILTER_RELATIVE_DATES = [
+  ["TODAY", "Today"],
+  ["YESTERDAY", "Yesterday"],
+  ["TOMORROW", "Tomorrow"],
+  ["LAST_N_DAYS:7", "Last 7 days"],
+  ["LAST_N_DAYS:30", "Last 30 days"],
+  ["LAST_N_DAYS:60", "Last 60 days"],
+  ["LAST_N_DAYS:90", "Last 90 days"],
+  ["NEXT_N_DAYS:7", "Next 7 days"],
+  ["NEXT_N_DAYS:30", "Next 30 days"],
+  ["THIS_WEEK", "This week"],
+  ["LAST_WEEK", "Last week"],
+  ["NEXT_WEEK", "Next week"],
+  ["THIS_MONTH", "This month"],
+  ["LAST_MONTH", "Last month"],
+  ["NEXT_MONTH", "Next month"],
+  ["THIS_QUARTER", "This quarter"],
+  ["LAST_QUARTER", "Last quarter"],
+  ["NEXT_QUARTER", "Next quarter"],
+  ["THIS_YEAR", "This year"],
+  ["LAST_YEAR", "Last year"],
+  ["NEXT_YEAR", "Next year"]
+];
 
 const CONTACT_NAME_PREFIXES = new Set([
   "mr",
@@ -304,7 +408,7 @@ const TRAINING_LABELS = {
 };
 const TRAINING_CONFIDENCE_LEVELS = ["high", "medium", "low"];
 const TRAINING_PAIR_FIELDS = {
-  contact: ["fullName", "company", "email", "ziPersonLinkedInUrl", "phone", "ziPhone", "mobile"],
+  contact: ["fullName", "company", "email", "leadSource", "ziPersonLinkedInUrl", "phone", "ziPhone", "mobile"],
   account: [
     "name",
     "accountCurrency",
@@ -621,7 +725,8 @@ const state = {
   hideLabeledGroups: false,
   reviewMode: "evaluate",
   trainingConfidence: "high",
-  search: "",
+  filters: [],
+  filterLogic: "",
   recentFiles: []
 };
 
@@ -629,6 +734,7 @@ let pendingCsvObjectType = "";
 let scoringContextCache = null;
 let reviewStateSaveTimer = 0;
 let pendingReviewStateRecord = null;
+let nextGroupFilterId = 1;
 const mergeMasterSelections = new Map();
 const mergeConfirmations = new Map();
 const mergeInFlightGroupKeys = new Set();
@@ -655,7 +761,7 @@ const els = {
   thresholdMaxNumber: document.getElementById("thresholdMaxNumber"),
   thresholdValue: document.getElementById("thresholdValue"),
   highRecallMode: document.getElementById("highRecallMode"),
-  groupSearch: document.getElementById("groupSearch"),
+  groupFilterBuilder: document.getElementById("groupFilterBuilder"),
   groupSortToggle: document.getElementById("groupSortToggle"),
   hideLabeledGroups: document.getElementById("hideLabeledGroups"),
   applyControlsButton: document.getElementById("applyControlsButton"),
@@ -757,6 +863,9 @@ els.thresholdMaxNumber.addEventListener("blur", () => syncThresholdInputs("max-n
 els.groupSortToggle.addEventListener("click", toggleGroupSortDirection);
 els.hideLabeledGroups.addEventListener("change", applyHideLabeledGroups);
 els.applyControlsButton.addEventListener("click", applyMatchControls);
+els.groupFilterBuilder.addEventListener("click", handleGroupFilterClick);
+els.groupFilterBuilder.addEventListener("change", handleGroupFilterChange);
+els.groupFilterBuilder.addEventListener("input", handleGroupFilterInput);
 
 els.rerunButton.addEventListener("click", () => {
   state.mapping = readMappingFromControls();
@@ -1808,6 +1917,7 @@ function ingestRows(rows, fileName, fromObjects, knownHeaders) {
   });
   state.headers = knownHeaders || inferHeaders(rows);
   state.mapping = autoMapHeaders(state.headers, OBJECT_CONFIG[state.objectType].fields);
+  pruneGroupFiltersForCurrentFields();
   state.datasetKey = fromObjects ? "" : buildDatasetKey();
   state.reviewStateStatus = state.datasetKey && isFileHistoryAvailable() ? "Checking saved review state..." : "";
   state.selectedGroupKey = "";
@@ -1849,7 +1959,6 @@ function applyMatchControls() {
   state.threshold = nextThreshold;
   state.maxThreshold = nextMaxThreshold;
   state.highRecallMode = nextHighRecallMode;
-  state.search = els.groupSearch.value.trim().toLowerCase();
   if (shouldRecompute) {
     recompute();
   } else {
@@ -3993,7 +4102,7 @@ function renderSource() {
   syncThresholdSliderFill(state.threshold, state.maxThreshold);
   els.thresholdValue.textContent = thresholdRangeLabel();
   els.highRecallMode.checked = state.highRecallMode;
-  els.groupSearch.value = state.search;
+  renderFilterBuilder();
   els.fileName.textContent = state.loadingFileName || state.fileName || "CSV import";
   els.fileMeta.textContent = sourceMetaText(config);
   els.sourcePill.textContent = state.isLoadingFile ? "Loading" : state.rows.length ? "Loaded" : "No file";
@@ -4251,6 +4360,726 @@ function renderGroupFilterToolbar() {
   els.hideLabeledGroups.checked = state.hideLabeledGroups;
 }
 
+function renderFilterBuilder() {
+  if (!els.groupFilterBuilder) return;
+
+  const filterLogicError = groupFilterLogicError();
+  const activeEntries = activeGroupFilterEntries();
+  els.groupFilterBuilder.innerHTML = `
+    <div class="filter-builder-title">
+      <strong>Filters</strong>
+      <button class="icon-button filter-icon-button" type="button" data-filter-add aria-label="Add filter" title="Add filter">
+        ${filterPlusIcon()}
+      </button>
+    </div>
+    ${state.filters.length ? renderFilterLogicControl(activeEntries) : renderFilterEmptyControl()}
+    ${state.filters.length ? `<div class="filter-list">${state.filters.map((filter, index) => renderFilterRow(filter, index)).join("")}</div>` : ""}
+    ${filterLogicError ? `<p class="filter-error">${escapeHtml(filterLogicError)}</p>` : ""}
+  `;
+}
+
+function renderFilterEmptyControl() {
+  return `
+    <button class="filter-empty-add" type="button" data-filter-add>
+      <span>Add filter...</span>
+      ${filterSearchIcon()}
+    </button>
+  `;
+}
+
+function renderFilterLogicControl(activeEntries) {
+  const defaultLogic = defaultGroupFilterLogic(activeEntries);
+  const value = state.filterLogic || defaultLogic;
+  return `
+    <label class="filter-logic-control">
+      <span>Include records matching</span>
+      <input
+        class="filter-logic-input"
+        type="text"
+        value="${escapeHtml(value)}"
+        placeholder="${escapeHtml(defaultLogic || "1 AND 2")}"
+        spellcheck="false"
+        autocomplete="off"
+      />
+    </label>
+  `;
+}
+
+function renderFilterRow(filter, index) {
+  const normalized = normalizeGroupFilter(filter);
+  const meta = groupFilterMeta(normalized.field);
+  return `
+    <div class="filter-row" data-filter-id="${escapeHtml(normalized.id)}">
+      <span class="filter-index">${index + 1}</span>
+      <div class="filter-row-controls">
+        <label class="visually-hidden" for="filter-field-${escapeHtml(normalized.id)}">Filter field</label>
+        <select id="filter-field-${escapeHtml(normalized.id)}" class="filter-field-select" data-filter-control="field">
+          ${renderFilterFieldOptions(normalized.field)}
+        </select>
+        <label class="visually-hidden" for="filter-operator-${escapeHtml(normalized.id)}">Filter operator</label>
+        <select id="filter-operator-${escapeHtml(normalized.id)}" class="filter-operator-select" data-filter-control="operator">
+          ${renderFilterOperatorOptions(meta.type, normalized.operator)}
+        </select>
+        ${renderFilterValueControl(normalized, meta)}
+      </div>
+      <button class="icon-button filter-icon-button" type="button" data-filter-remove aria-label="Remove filter ${index + 1}" title="Remove filter">
+        ${filterTrashIcon()}
+      </button>
+    </div>
+  `;
+}
+
+function renderFilterFieldOptions(selectedField) {
+  return filterFieldOptions()
+    .map((option) => {
+      return `<option value="${escapeHtml(option.value)}" ${option.value === selectedField ? "selected" : ""}>${escapeHtml(option.label)}</option>`;
+    })
+    .join("");
+}
+
+function renderFilterOperatorOptions(type, selectedOperator) {
+  return groupFilterOperatorsForType(type)
+    .map(([value, label]) => {
+      return `<option value="${escapeHtml(value)}" ${value === selectedOperator ? "selected" : ""}>${escapeHtml(label)}</option>`;
+    })
+    .join("");
+}
+
+function renderFilterValueControl(filter, meta) {
+  if (GROUP_FILTER_VALUELESS_OPERATORS.has(filter.operator)) {
+    return '<span class="filter-value-placeholder" aria-hidden="true"></span>';
+  }
+
+  if (meta.type === "enum") {
+    const values = meta.values || [];
+    return `
+      <label class="visually-hidden" for="filter-value-${escapeHtml(filter.id)}">Filter value</label>
+      <select id="filter-value-${escapeHtml(filter.id)}" class="filter-value-control" data-filter-control="value">
+        ${values
+          .map(([value, label]) => `<option value="${escapeHtml(value)}" ${value === filter.value ? "selected" : ""}>${escapeHtml(label)}</option>`)
+          .join("")}
+      </select>
+    `;
+  }
+
+  if (meta.type === "date" && filter.operator === "relative") {
+    const selectedValue = filter.value || "TODAY";
+    return `
+      <label class="visually-hidden" for="filter-value-${escapeHtml(filter.id)}">Relative date</label>
+      <select id="filter-value-${escapeHtml(filter.id)}" class="filter-value-control" data-filter-control="value">
+        ${GROUP_FILTER_RELATIVE_DATES
+          .map(([value, label]) => `<option value="${escapeHtml(value)}" ${value === selectedValue ? "selected" : ""}>${escapeHtml(label)}</option>`)
+          .join("")}
+      </select>
+    `;
+  }
+
+  const inputType = meta.type === "number" ? "number" : meta.type === "date" ? "date" : "text";
+  const value2 = filter.operator === "between"
+    ? `
+      <label class="visually-hidden" for="filter-value2-${escapeHtml(filter.id)}">Second filter value</label>
+      <input
+        id="filter-value2-${escapeHtml(filter.id)}"
+        class="filter-value-control"
+        data-filter-control="value2"
+        type="${inputType}"
+        value="${escapeHtml(filter.value2 || "")}"
+        placeholder="Max"
+      />
+    `
+    : "";
+  return `
+    <label class="visually-hidden" for="filter-value-${escapeHtml(filter.id)}">Filter value</label>
+    <input
+      id="filter-value-${escapeHtml(filter.id)}"
+      class="filter-value-control"
+      data-filter-control="value"
+      type="${inputType}"
+      value="${escapeHtml(filter.value || "")}"
+      placeholder="${filter.operator === "between" ? "Min" : "Value"}"
+    />
+    ${value2}
+  `;
+}
+
+function handleGroupFilterClick(event) {
+  if (event.target.closest?.("[data-filter-add]")) {
+    state.filters.push(createGroupFilter());
+    visibleGroupsCache = null;
+    renderFilterBuilder();
+    return;
+  }
+
+  const removeButton = event.target.closest?.("[data-filter-remove]");
+  if (!removeButton) return;
+
+  const filterId = removeButton.closest("[data-filter-id]")?.dataset.filterId;
+  state.filters = state.filters.filter((filter) => filter.id !== filterId);
+  state.filterLogic = "";
+  visibleGroupsCache = null;
+  renderFilterBuilder();
+}
+
+function handleGroupFilterChange(event) {
+  const control = event.target.closest?.("[data-filter-control]");
+  if (!control) return;
+  const controlType = control.dataset.filterControl;
+  updateGroupFilterFromControl(control, { rerender: controlType === "field" || controlType === "operator" });
+}
+
+function handleGroupFilterInput(event) {
+  if (event.target.classList?.contains("filter-logic-input")) {
+    state.filterLogic = event.target.value.trim();
+    visibleGroupsCache = null;
+    return;
+  }
+
+  const control = event.target.closest?.("[data-filter-control]");
+  if (!control) return;
+  updateGroupFilterFromControl(control, { rerender: false });
+}
+
+function updateGroupFilterFromControl(control, { rerender = false } = {}) {
+  const filterId = control.closest("[data-filter-id]")?.dataset.filterId;
+  const filter = state.filters.find((item) => item.id === filterId);
+  if (!filter) return;
+
+  const controlType = control.dataset.filterControl;
+  if (controlType === "field") {
+    filter.field = control.value;
+    filter.operator = defaultGroupFilterOperator(groupFilterType(filter.field));
+    filter.value = defaultGroupFilterValue(filter.field, filter.operator);
+    filter.value2 = "";
+    rerender = true;
+  } else if (controlType === "operator") {
+    filter.operator = control.value;
+    filter.value = defaultGroupFilterValue(filter.field, filter.operator);
+    filter.value2 = "";
+    rerender = true;
+  } else if (controlType === "value") {
+    filter.value = control.value;
+  } else if (controlType === "value2") {
+    filter.value2 = control.value;
+  }
+
+  visibleGroupsCache = null;
+  if (rerender) renderFilterBuilder();
+}
+
+function createGroupFilter() {
+  const field = defaultGroupFilterField();
+  const operator = defaultGroupFilterOperator(groupFilterType(field));
+  return {
+    id: String(nextGroupFilterId++),
+    field,
+    operator,
+    value: defaultGroupFilterValue(field, operator),
+    value2: ""
+  };
+}
+
+function normalizeGroupFilter(filter) {
+  const field = filter.field || defaultGroupFilterField();
+  const operator = groupFilterOperatorIsValid(field, filter.operator)
+    ? filter.operator
+    : defaultGroupFilterOperator(groupFilterType(field));
+  return {
+    id: String(filter.id || nextGroupFilterId++),
+    field,
+    operator,
+    value: String(filter.value ?? defaultGroupFilterValue(field, operator)),
+    value2: String(filter.value2 ?? "")
+  };
+}
+
+function pruneGroupFiltersForCurrentFields() {
+  if (!state.filters.length) return;
+
+  const validFields = new Set(filterFieldOptions().map((option) => option.value));
+  const originalCount = state.filters.length;
+  state.filters = state.filters
+    .filter((filter) => validFields.has(filter.field))
+    .map((filter) => normalizeGroupFilter(filter));
+  if (state.filters.length !== originalCount) state.filterLogic = "";
+}
+
+function filterFieldOptions() {
+  const specialFields = [
+    {
+      value: "score",
+      label: "Match Score",
+      type: "number",
+      scope: "group"
+    },
+    {
+      value: "matchType",
+      label: "Match Type",
+      type: "enum",
+      scope: "group",
+      values: [
+        ["exact", "Exact"],
+        ["near", "Near"]
+      ]
+    },
+    {
+      value: "decision",
+      label: "Review Status",
+      type: "enum",
+      scope: "group",
+      values: [
+        ["unreviewed", "Unreviewed"],
+        ["duplicate", "Duplicate"],
+        ["not-duplicate", "Not Duplicate"]
+      ]
+    },
+    {
+      value: "labelStatus",
+      label: "Label Status",
+      type: "enum",
+      scope: "group",
+      values: [
+        ["unlabeled", "Unlabeled"],
+        ["partial", "Partially labeled"],
+        ["full", "Fully labeled"]
+      ]
+    }
+  ];
+
+  const mappedFields = Object.keys(OBJECT_CONFIG[state.objectType].fields)
+    .filter(fieldAvailableForFiltering)
+    .map((field) => ({
+      value: field,
+      label: FIELD_LABELS[field] || field,
+      type: GROUP_FILTER_FIELD_TYPES[field] || "text",
+      scope: "record"
+    }));
+
+  return [...specialFields, ...mappedFields, ...rawHeaderFilterOptions()];
+}
+
+function rawHeaderFilterOptions() {
+  const mappedHeaders = new Set(Object.values(state.mapping || {}).filter(Boolean));
+  return state.headers
+    .filter((header) => !mappedHeaders.has(header))
+    .map((header) => ({
+      value: rawHeaderFilterField(header),
+      label: header,
+      type: inferRawHeaderFilterType(header),
+      scope: "record",
+      header
+    }));
+}
+
+function fieldAvailableForFiltering(field) {
+  if (field === "fullName") return Boolean(state.mapping.fullName || state.mapping.firstName || state.mapping.lastName);
+  return Boolean(state.mapping[field]);
+}
+
+function defaultGroupFilterField() {
+  return filterFieldOptions()[0]?.value || "score";
+}
+
+function groupFilterMeta(field) {
+  return filterFieldOptions().find((option) => option.value === field) || filterFieldOptions()[0] || {
+    value: "score",
+    label: "Match Score",
+    type: "number",
+    scope: "group"
+  };
+}
+
+function groupFilterType(field) {
+  return groupFilterMeta(field).type || "text";
+}
+
+function groupFilterOperatorsForType(type) {
+  return GROUP_FILTER_OPERATORS[type] || GROUP_FILTER_OPERATORS.text;
+}
+
+function defaultGroupFilterOperator(type) {
+  return groupFilterOperatorsForType(type)[0][0];
+}
+
+function groupFilterOperatorIsValid(field, operator) {
+  return groupFilterOperatorsForType(groupFilterType(field)).some(([value]) => value === operator);
+}
+
+function defaultGroupFilterValue(field, operator) {
+  const meta = groupFilterMeta(field);
+  if (GROUP_FILTER_VALUELESS_OPERATORS.has(operator)) return "";
+  if (meta.type === "enum") return meta.values?.[0]?.[0] || "";
+  if (meta.type === "date" && operator === "relative") return "TODAY";
+  return "";
+}
+
+function rawHeaderFilterField(header) {
+  return `raw:${encodeURIComponent(header)}`;
+}
+
+function rawHeaderFromFilterField(field) {
+  return decodeURIComponent(String(field || "").slice(4));
+}
+
+function inferRawHeaderFilterType(header) {
+  const normalizedHeader = normalizeHeader(header);
+  if (/\b(date|time|created|updated|modified)\b/.test(normalizedHeader)) return "date";
+
+  const values = state.rows
+    .slice(0, 80)
+    .map((row) => String(getValue(row, header) || "").trim())
+    .filter(Boolean);
+  if (!values.length) return "text";
+
+  const dateCount = values.filter(isLikelyDateFilterValue).length;
+  if (dateCount >= Math.max(3, values.length * 0.7)) return "date";
+
+  const numberCount = values.filter((value) => Number.isFinite(parseFilterNumber(value))).length;
+  return numberCount >= Math.max(3, values.length * 0.8) ? "number" : "text";
+}
+
+function isLikelyDateFilterValue(value) {
+  const text = String(value || "").trim();
+  if (!text || !/[/-]|\d{4}/.test(text)) return false;
+  return Number.isFinite(Date.parse(text));
+}
+
+function groupFiltersSignature() {
+  return JSON.stringify({
+    filters: state.filters.map((filter) => normalizeGroupFilter(filter)),
+    logic: state.filterLogic
+  });
+}
+
+function activeGroupFilterEntries() {
+  return state.filters
+    .map((filter, index) => ({
+      filter: normalizeGroupFilter(filter),
+      number: index + 1
+    }))
+    .filter(({ filter }) => groupFilterIsComplete(filter));
+}
+
+function groupFilterIsComplete(filter) {
+  if (GROUP_FILTER_VALUELESS_OPERATORS.has(filter.operator)) return true;
+  if (groupFilterMeta(filter.field).type === "enum") return Boolean(filter.value);
+  if (filter.operator === "between") return String(filter.value || "").trim() && String(filter.value2 || "").trim();
+  return Boolean(String(filter.value || "").trim());
+}
+
+function defaultGroupFilterLogic(entries = activeGroupFilterEntries()) {
+  return entries.map(({ number }) => number).join(" AND ");
+}
+
+function groupFilterLogicError() {
+  if (!String(state.filterLogic || "").trim()) return "";
+  return compileGroupFilterLogic(state.filterLogic, state.filters.length, activeGroupFilterEntries().map(({ number }) => number)).error;
+}
+
+function compileGroupFilterLogic(logicText, filterCount, defaultNumbers = []) {
+  const expression = String(logicText || "").trim() || defaultNumbers.join(" AND ");
+  if (!expression) return { error: "", evaluate: () => true };
+
+  const tokens = tokenizeGroupFilterLogic(expression);
+  if (tokens.error) return { error: tokens.error, evaluate: () => false };
+
+  let index = 0;
+  const parseExpression = () => {
+    let node = parseTerm();
+    while (!node.error && tokens[index]?.type === "OR") {
+      index += 1;
+      const right = parseTerm();
+      node = right.error ? right : { type: "OR", left: node, right };
+    }
+    return node;
+  };
+  const parseTerm = () => {
+    let node = parseFactor();
+    while (!node.error && tokens[index]?.type === "AND") {
+      index += 1;
+      const right = parseFactor();
+      node = right.error ? right : { type: "AND", left: node, right };
+    }
+    return node;
+  };
+  const parseFactor = () => {
+    const token = tokens[index];
+    if (!token) return { error: "Filter logic is incomplete." };
+    if (token.type === "NUMBER") {
+      index += 1;
+      if (token.value < 1 || token.value > filterCount) return { error: `Filter ${token.value} does not exist.` };
+      return { type: "FILTER", value: token.value };
+    }
+    if (token.type === "(") {
+      index += 1;
+      const node = parseExpression();
+      if (node.error) return node;
+      if (tokens[index]?.type !== ")") return { error: "Filter logic is missing a closing parenthesis." };
+      index += 1;
+      return node;
+    }
+    return { error: "Filter logic needs filter numbers, AND, OR, and parentheses." };
+  };
+
+  const ast = parseExpression();
+  if (ast.error) return { error: ast.error, evaluate: () => false };
+  if (index < tokens.length) {
+    return { error: "Filter logic has extra text after the expression.", evaluate: () => false };
+  }
+
+  return {
+    error: "",
+    evaluate: (lookup) => evaluateGroupFilterAst(ast, lookup)
+  };
+}
+
+function tokenizeGroupFilterLogic(expression) {
+  const tokens = [];
+  let position = 0;
+  while (position < expression.length) {
+    const remainder = expression.slice(position);
+    const whitespace = /^\s+/.exec(remainder);
+    if (whitespace) {
+      position += whitespace[0].length;
+      continue;
+    }
+
+    const match = /^(AND|OR|\d+|\(|\))/i.exec(remainder);
+    if (!match) return { error: "Filter logic needs filter numbers, AND, OR, and parentheses." };
+
+    const raw = match[1].toUpperCase();
+    if (raw === "AND" || raw === "OR" || raw === "(" || raw === ")") {
+      tokens.push({ type: raw });
+    } else {
+      tokens.push({ type: "NUMBER", value: Number(raw) });
+    }
+    position += match[0].length;
+  }
+  return tokens;
+}
+
+function evaluateGroupFilterAst(node, lookup) {
+  if (node.type === "FILTER") return Boolean(lookup(node.value));
+  if (node.type === "AND") return evaluateGroupFilterAst(node.left, lookup) && evaluateGroupFilterAst(node.right, lookup);
+  if (node.type === "OR") return evaluateGroupFilterAst(node.left, lookup) || evaluateGroupFilterAst(node.right, lookup);
+  return false;
+}
+
+function groupMatchesFilters(group, activeEntries, logic) {
+  if (!activeEntries.length) return true;
+  return group.records.some((record) => {
+    const results = new Map(
+      state.filters.map((filter, index) => {
+        const active = activeEntries.find((entry) => entry.number === index + 1);
+        return [index + 1, active ? groupFilterMatchesRecord(group, record, active.filter) : false];
+      })
+    );
+    return logic.evaluate((number) => results.get(number));
+  });
+}
+
+function groupFilterMatchesRecord(group, record, filter) {
+  const meta = groupFilterMeta(filter.field);
+  const rawValue = groupFilterRawValue(group, record, filter.field, meta);
+  return filterValueMatches(rawValue, filter, meta);
+}
+
+function groupFilterRawValue(group, record, field, meta) {
+  if (field === "score") return group.score;
+  if (field === "matchType") return group.type;
+  if (field === "decision") return state.decisions.get(group.key) || "unreviewed";
+  if (field === "labelStatus") return groupTrainingLabelStatus(group).status;
+  if (String(field || "").startsWith("raw:")) return getValue(record, rawHeaderFromFilterField(field));
+  if (meta.scope === "record") return getDisplayFieldValue(record, field);
+  return "";
+}
+
+function filterValueMatches(rawValue, filter, meta) {
+  const text = String(rawValue ?? "").trim();
+  const operator = filter.operator;
+  if (operator === "blank") return !text;
+  if (operator === "not_blank") return Boolean(text);
+
+  if (meta.type === "number") return numberFilterMatches(text, filter);
+  if (meta.type === "date") return dateFilterMatches(text, filter);
+  return textFilterMatches(text, filter, meta.type);
+}
+
+function textFilterMatches(text, filter) {
+  const left = normalizeText(text);
+  const right = normalizeText(filter.value);
+  if (!right && filter.operator !== "not_equals") return false;
+
+  if (filter.operator === "contains") return left.includes(right);
+  if (filter.operator === "not_contains") return !left.includes(right);
+  if (filter.operator === "equals") return left === right;
+  if (filter.operator === "not_equals") return left !== right;
+  if (filter.operator === "starts_with") return left.startsWith(right);
+  if (filter.operator === "ends_with") return left.endsWith(right);
+  return false;
+}
+
+function numberFilterMatches(text, filter) {
+  const left = parseFilterNumber(text);
+  const right = parseFilterNumber(filter.value);
+  const right2 = parseFilterNumber(filter.value2);
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
+
+  if (filter.operator === "equals") return left === right;
+  if (filter.operator === "not_equals") return left !== right;
+  if (filter.operator === "greater_or_equal") return left >= right;
+  if (filter.operator === "less_or_equal") return left <= right;
+  if (filter.operator === "greater_than") return left > right;
+  if (filter.operator === "less_than") return left < right;
+  if (filter.operator === "between") {
+    if (!Number.isFinite(right2)) return false;
+    return left >= Math.min(right, right2) && left <= Math.max(right, right2);
+  }
+  return false;
+}
+
+function parseFilterNumber(value) {
+  const text = String(value ?? "").replace(/[$,%]/g, "").replace(/,/g, "").trim();
+  if (!text) return NaN;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function dateFilterMatches(text, filter) {
+  const left = parseFilterDate(text);
+  if (!Number.isFinite(left)) return false;
+
+  if (filter.operator === "relative") {
+    const range = salesforceRelativeDateRange(filter.value || "TODAY");
+    return range ? left >= range.start && left <= range.end : false;
+  }
+
+  const right = parseFilterDate(filter.value);
+  if (!Number.isFinite(right)) return false;
+  if (filter.operator === "equals") return left === right;
+  if (filter.operator === "before") return left < right;
+  if (filter.operator === "after") return left > right;
+  if (filter.operator === "on_or_before") return left <= right;
+  if (filter.operator === "on_or_after") return left >= right;
+  return false;
+}
+
+function parseFilterDate(value) {
+  const text = String(value || "").trim();
+  if (!text) return NaN;
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (dateOnly) {
+    return startOfFilterDay(new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3])));
+  }
+  const parsed = Date.parse(text);
+  if (!Number.isFinite(parsed)) return NaN;
+  return startOfFilterDay(new Date(parsed));
+}
+
+function salesforceRelativeDateRange(literal) {
+  const value = String(literal || "").trim().toUpperCase();
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  if (value === "TODAY") return dayRange(today);
+  if (value === "YESTERDAY") return dayRange(addFilterDays(today, -1));
+  if (value === "TOMORROW") return dayRange(addFilterDays(today, 1));
+
+  const lastDays = /^LAST_N_DAYS:(\d+)$/.exec(value);
+  if (lastDays) {
+    return {
+      start: startOfFilterDay(addFilterDays(today, -Number(lastDays[1]))),
+      end: endOfFilterDay(today)
+    };
+  }
+
+  const nextDays = /^NEXT_N_DAYS:(\d+)$/.exec(value);
+  if (nextDays) {
+    return {
+      start: startOfFilterDay(today),
+      end: endOfFilterDay(addFilterDays(today, Number(nextDays[1])))
+    };
+  }
+
+  if (value.endsWith("_WEEK")) return relativePeriodRange(today, value, startOfFilterWeek, addFilterWeeks);
+  if (value.endsWith("_MONTH")) return relativePeriodRange(today, value, startOfFilterMonth, addFilterMonths);
+  if (value.endsWith("_QUARTER")) return relativePeriodRange(today, value, startOfFilterQuarter, addFilterQuarters);
+  if (value.endsWith("_YEAR")) return relativePeriodRange(today, value, startOfFilterYear, addFilterYears);
+  return null;
+}
+
+function relativePeriodRange(today, literal, startFn, addFn) {
+  const offset = literal.startsWith("LAST_") ? -1 : literal.startsWith("NEXT_") ? 1 : 0;
+  const start = addFn(startFn(today), offset);
+  const nextStart = addFn(start, 1);
+  return {
+    start: startOfFilterDay(start),
+    end: endOfFilterDay(addFilterDays(nextStart, -1))
+  };
+}
+
+function dayRange(date) {
+  return {
+    start: startOfFilterDay(date),
+    end: endOfFilterDay(date)
+  };
+}
+
+function startOfFilterDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+function endOfFilterDay(date) {
+  return startOfFilterDay(date) + 24 * 60 * 60 * 1000 - 1;
+}
+
+function addFilterDays(date, days) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+}
+
+function addFilterWeeks(date, weeks) {
+  return addFilterDays(date, weeks * 7);
+}
+
+function addFilterMonths(date, months) {
+  return new Date(date.getFullYear(), date.getMonth() + months, 1);
+}
+
+function addFilterQuarters(date, quarters) {
+  return new Date(date.getFullYear(), date.getMonth() + quarters * 3, 1);
+}
+
+function addFilterYears(date, years) {
+  return new Date(date.getFullYear() + years, 0, 1);
+}
+
+function startOfFilterWeek(date) {
+  return addFilterDays(date, -date.getDay());
+}
+
+function startOfFilterMonth(date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function startOfFilterQuarter(date) {
+  return new Date(date.getFullYear(), Math.floor(date.getMonth() / 3) * 3, 1);
+}
+
+function startOfFilterYear(date) {
+  return new Date(date.getFullYear(), 0, 1);
+}
+
+function filterPlusIcon() {
+  return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" /></svg>';
+}
+
+function filterSearchIcon() {
+  return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m21 21-4.3-4.3" /><circle cx="11" cy="11" r="7" /></svg>';
+}
+
+function filterTrashIcon() {
+  return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h16" /><path d="M10 11v6M14 11v6" /><path d="M6 7l1 14h10l1-14" /><path d="M9 7V4h6v3" /></svg>';
+}
+
 function navigateGroup(direction) {
   const groups = filteredGroups();
   if (!groups.length) return;
@@ -4297,7 +5126,7 @@ function filteredGroups() {
   if (
     visibleGroupsCache &&
     visibleGroupsCache.groups === state.groups &&
-    visibleGroupsCache.search === state.search &&
+    visibleGroupsCache.filterSignature === groupFiltersSignature() &&
     visibleGroupsCache.sortDirection === state.sortDirection &&
     visibleGroupsCache.maxThreshold === state.maxThreshold &&
     visibleGroupsCache.hideLabeledGroups === state.hideLabeledGroups &&
@@ -4312,7 +5141,7 @@ function filteredGroups() {
   const value = getFilteredGroups();
   visibleGroupsCache = {
     groups: state.groups,
-    search: state.search,
+    filterSignature: groupFiltersSignature(),
     sortDirection: state.sortDirection,
     maxThreshold: state.maxThreshold,
     hideLabeledGroups: state.hideLabeledGroups,
@@ -4326,11 +5155,18 @@ function filteredGroups() {
 }
 
 function getFilteredGroups() {
+  const activeEntries = activeGroupFilterEntries();
+  const filterLogic = compileGroupFilterLogic(
+    state.filterLogic,
+    state.filters.length,
+    activeEntries.map(({ number }) => number)
+  );
   const filtered = state.groups.filter((group) => {
     if (group.score > state.maxThreshold) return false;
     if (state.hideLabeledGroups && isGroupLabeled(group)) return false;
-    if (!state.search) return true;
-    return groupSearchText(group).includes(state.search);
+    if (!activeEntries.length) return true;
+    if (filterLogic.error) return false;
+    return groupMatchesFilters(group, activeEntries, filterLogic);
   });
   return state.sortDirection === "asc" ? [...filtered].reverse() : filtered;
 }
@@ -4339,16 +5175,6 @@ function isGroupLabeled(group) {
   if (state.decisions.has(group.key)) return true;
   const pairs = getActiveGroupRecordPairs(group);
   return Boolean(pairs.length) && pairs.every((pair) => state.trainingLabels.has(pair.key));
-}
-
-function groupSearchText(group) {
-  if (!group.searchText) {
-    group.searchText = group.records
-      .flatMap((record) => [displayName(record), displaySubtitle(record), recordKey(record)])
-      .join(" ")
-      .toLowerCase();
-  }
-  return group.searchText;
 }
 
 function findGroupByKey(groupKey) {
@@ -4388,8 +5214,8 @@ function renderDetail() {
   els.exportButton.classList.toggle("is-active", exportableCount > 0);
   els.decisionStatus.textContent = hasGroup
     ? currentDecision
-      ? `Judged: ${decisionLabel(currentDecision)}`
-      : "Not judged"
+      ? `Duplicate decision: ${decisionLabel(currentDecision)}`
+      : "Duplicate decision not set"
     : "No judgment selected";
   els.decisionStatus.className = `decision-status ${currentDecision}`;
 
@@ -4657,7 +5483,7 @@ function renderSalesforceMergePanel(group, activeRecords, currentDecision) {
       </div>
       <p class="merge-warning">
         Salesforce merge keeps the selected master Contact and reparents related records from duplicate Contacts.
-        Field choices here document controlling values for review/export; this merge action does not write field updates before merging.
+        Enforced merge rules are sent with the Salesforce merge request; other field choices document controlling values for review/export.
       </p>
       ${result ? renderMergeResult(result) : ""}
       <div class="merge-actions">
@@ -4732,7 +5558,7 @@ function getMergeState(group, activeRecords, currentDecision) {
     buttonLabel: inFlight ? "Merging..." : alreadyMerged ? "Merged" : "Merge in Salesforce",
     title: alreadyMerged
       ? `Merged into ${result.masterId || selectedId}`
-      : `Merge ${formatNumber(Math.max(0, activeRecords.length - 1))} duplicate ${activeRecords.length === 2 ? "Contact" : "Contacts"}`,
+      : `${formatNumber(activeRecords.length)} ${activeRecords.length === 1 ? "Contact" : "Contacts"}: 1 master, ${formatNumber(mergeRecords.length)} ${mergeRecords.length === 1 ? "duplicate" : "duplicates"}`,
     description: blockedReason || "Mark this group Duplicate, choose a master Contact, review field overrides, then type MERGE.",
     statusClass: mergeStatusClass(result, blockedReason, inFlight),
     statusLabel: mergeStatusLabel(result, blockedReason, inFlight)
@@ -4762,7 +5588,7 @@ function mergeStatusLabel(result, blockedReason, inFlight) {
   if (inFlight) return "Merging";
   if (result?.status === "success") return "Merged";
   if (result?.status === "failed") return "Failed";
-  return blockedReason ? "Blocked" : "Ready";
+  return blockedReason ? "Needs setup" : "Ready";
 }
 
 function renderMergeRecordChip({ record, id }) {
@@ -4823,10 +5649,11 @@ function renderMergeMatrixRow(group, field, records, mergeState, resolutionConte
   const masterValue = mergeState.selectedRecord ? getDisplayFieldValue(mergeState.selectedRecord, field) : "";
   const selectedIndex = selectedMergeFieldRecordIndex(records, field, resolution.acceptedValue);
   const explicit = hasExplicitFieldResolution(group.key, field);
-  const overridden = explicit && normalizeResolutionValue(resolution.acceptedValue) !== normalizeResolutionValue(masterValue);
+  const overridden = isMergeFieldOverride({ resolution, explicit, masterValue });
   const rowClass = [
     resolution.hasDiscrepancy ? "has-discrepancy" : "",
-    overridden ? "has-override" : ""
+    overridden ? "has-override" : "",
+    resolution.hardRule ? "has-hard-rule" : ""
   ].filter(Boolean).join(" ");
 
   return `
@@ -4843,7 +5670,7 @@ function renderMergeMatrixRow(group, field, records, mergeState, resolutionConte
 function renderMergeFieldCell(group, field, record, index, selectedIndex, mergeState, resolution) {
   const value = String(getDisplayFieldValue(record, field) || "").trim();
   const checked = selectedIndex === index ? "checked" : "";
-  const disabled = mergeState.locked || !resolution.hasValues ? "disabled" : "";
+  const disabled = mergeState.locked || resolution.hardRule || !resolution.hasValues ? "disabled" : "";
   const isBlank = value ? "" : "is-blank";
   const isSelected = checked ? "is-selected" : "";
   return `
@@ -4871,6 +5698,7 @@ function selectedMergeFieldRecordIndex(records, field, acceptedValue) {
 }
 
 function mergeFieldStatusLabel({ resolution, explicit, overridden, masterValue }) {
+  if (resolution.hardRule) return resolution.hardRule.label;
   if (!resolution.hasValues) return "No value";
   if (!resolution.hasDiscrepancy) return "Same value";
   if (overridden) return "Override";
@@ -4882,11 +5710,19 @@ function mergeFieldStatusLabel({ resolution, explicit, overridden, masterValue }
 function countMergeFieldOverrides(group, records, mergeState, resolutionContext) {
   if (!mergeState.selectedRecord) return 0;
   return OBJECT_CONFIG[state.objectType].displayFields.filter((field) => {
-    if (!hasExplicitFieldResolution(group.key, field)) return false;
     const resolution = getFieldResolution(group, field, resolutionContext);
     const masterValue = getDisplayFieldValue(mergeState.selectedRecord, field);
-    return normalizeResolutionValue(resolution.acceptedValue) !== normalizeResolutionValue(masterValue);
+    return isMergeFieldOverride({
+      resolution,
+      explicit: hasExplicitFieldResolution(group.key, field),
+      masterValue
+    });
   }).length;
+}
+
+function isMergeFieldOverride({ resolution, explicit, masterValue }) {
+  if (!explicit && !resolution.hardRule) return false;
+  return normalizeResolutionValue(resolution.acceptedValue) !== normalizeResolutionValue(masterValue);
 }
 
 function renderMergeResult(result) {
@@ -5130,9 +5966,9 @@ function renderRecordCard(record, group, isSeparated = false, activeCount = 0) {
 }
 
 function renderDecisionBadge(decision, className = "decision-badge") {
-  const status = decision || "unjudged";
-  const label = decision ? decisionLabel(decision) : "Unjudged";
-  return `<span class="${className} ${status}" aria-label="Review decision: ${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+  const status = decision || "no-decision";
+  const label = decision ? decisionLabel(decision) : "No decision";
+  return `<span class="${className} ${status}" aria-label="Duplicate decision: ${escapeHtml(label)}">${escapeHtml(label)}</span>`;
 }
 
 function renderComparisonTable(group, bestPair) {
@@ -5295,6 +6131,7 @@ async function handleMergeAction(button) {
   }
 
   const mergeIds = mergeState.mergeRecords.map(({ id }) => id);
+  const masterFieldPayload = buildSalesforceMergeMasterFieldPayload(group, mergeState);
   const confirmed = window.confirm(
     `Merge ${mergeIds.length} ${mergeIds.length === 1 ? "record" : "records"} into ${mergeState.selectedId} in Salesforce?\n\nThis deletes the duplicate records and reparents related records to the master.`
   );
@@ -5312,6 +6149,7 @@ async function handleMergeAction(button) {
         groupKey,
         masterId: mergeState.selectedId,
         mergeIds,
+        ...masterFieldPayload,
         confirmation: "MERGE"
       })
     });
@@ -5340,6 +6178,23 @@ async function handleMergeAction(button) {
   }
 }
 
+function buildSalesforceMergeMasterFieldPayload(group, mergeState) {
+  if (state.objectType !== "contact" || !mergeState.selectedRecord) return {};
+
+  const resolutionContext = createFieldResolutionContext(group);
+  const resolution = getFieldResolution(group, CONTACT_LEAD_SOURCE_FIELD, resolutionContext);
+  if (!resolution.hardRule) return {};
+
+  const apiName = MERGE_FIELD_API_NAMES[CONTACT_LEAD_SOURCE_FIELD];
+  const acceptedValue = String(resolution.acceptedValue || "").trim();
+  const masterValue = String(getDisplayFieldValue(mergeState.selectedRecord, CONTACT_LEAD_SOURCE_FIELD) || "").trim();
+  if (normalizeResolutionValue(acceptedValue) === normalizeResolutionValue(masterValue)) return {};
+
+  return acceptedValue
+    ? { masterFields: { [apiName]: acceptedValue } }
+    : { masterFieldsToNull: [apiName] };
+}
+
 async function readApiJson(response) {
   try {
     return await response.json();
@@ -5360,9 +6215,12 @@ function getFieldResolution(group, field, resolutionContext = null) {
   const hasSelectedValue = Object.prototype.hasOwnProperty.call(selectedValues, field);
   const selectedValue = selectedValues[field];
   const optionValues = new Set(options.map((option) => option.value));
+  const hardRule = getMergeFieldHardRule(group, field, context.activeRecords, optionValues);
   const masterDefaultValue = getExplicitMergeMasterFieldValue(group, field, context.activeRecords, optionValues);
   const acceptedValue =
-    hasSelectedValue && optionValues.has(selectedValue)
+    hardRule
+      ? hardRule.acceptedValue
+      : hasSelectedValue && optionValues.has(selectedValue)
       ? selectedValue
       : masterDefaultValue != null
         ? masterDefaultValue
@@ -5374,15 +6232,16 @@ function getFieldResolution(group, field, resolutionContext = null) {
     hasDiscrepancy,
     suggestedValue,
     acceptedValue,
-    hasExplicitResolution: hasSelectedValue && optionValues.has(selectedValue),
-    masterDefaultValue
+    hasExplicitResolution: !hardRule && hasSelectedValue && optionValues.has(selectedValue),
+    masterDefaultValue,
+    hardRule
   };
 }
 
 function createFieldResolutionContext(group, activeRecords = getActiveGroupRecords(group)) {
   const fields = OBJECT_CONFIG[state.objectType].displayFields;
   const optionsByField = new Map(fields.map((field) => [field, uniqueFieldOptions(activeRecords, field)]));
-  const baselineValues = buildBaselineAcceptedValues(group, fields, optionsByField);
+  const baselineValues = buildBaselineAcceptedValues(group, fields, optionsByField, activeRecords);
   const recordScoresByField = new Map(
     fields.map((field) => [field, buildResolutionRecordScores(activeRecords, fields, baselineValues, field)])
   );
@@ -5426,7 +6285,7 @@ function uniqueFieldOptions(records, field) {
   return [...seen.values()];
 }
 
-function buildBaselineAcceptedValues(group, fields, optionsByField) {
+function buildBaselineAcceptedValues(group, fields, optionsByField, activeRecords) {
   const baselineValues = new Map();
   const selectedValues = state.fieldResolutions.get(group.key) || {};
 
@@ -5434,12 +6293,70 @@ function buildBaselineAcceptedValues(group, fields, optionsByField) {
     const options = optionsByField.get(field) || [];
     const optionValues = new Set(options.map((option) => option.value));
     const selectedValue = selectedValues[field];
+    const hardRule = getMergeFieldHardRule(group, field, activeRecords, optionValues);
     const acceptedValue =
-      selectedValue != null && optionValues.has(selectedValue) ? selectedValue : suggestAcceptedValue(options, field);
+      hardRule
+        ? hardRule.acceptedValue
+        : selectedValue != null && optionValues.has(selectedValue)
+          ? selectedValue
+          : suggestAcceptedValue(options, field);
     baselineValues.set(field, acceptedValue);
   });
 
   return baselineValues;
+}
+
+function getMergeFieldHardRule(group, field, activeRecords, optionValues) {
+  if (state.objectType !== "contact" || field !== CONTACT_LEAD_SOURCE_FIELD) return null;
+  if (!state.mapping[CONTACT_LEAD_SOURCE_FIELD] || !state.mapping[CONTACT_CREATED_DATE_FIELD]) return null;
+
+  const oldestRecord = oldestCreatedRecord(activeRecords);
+  if (!oldestRecord) return null;
+
+  const acceptedValue = String(getDisplayFieldValue(oldestRecord, CONTACT_LEAD_SOURCE_FIELD) || "").trim();
+  if (!optionValues.has(acceptedValue)) return null;
+
+  const dateValue = getDisplayFieldValue(oldestRecord, CONTACT_CREATED_DATE_FIELD);
+  const dateLabel = formatCreatedDateForRule(dateValue);
+  return {
+    type: "oldest-created-lead-source",
+    field,
+    acceptedValue,
+    record: oldestRecord,
+    recordKey: recordKey(oldestRecord),
+    label: "Oldest record rule",
+    description: `Lead Source is locked to the oldest created Contact${dateLabel ? ` (${dateLabel})` : ""}.`
+  };
+}
+
+function oldestCreatedRecord(records) {
+  const candidates = records
+    .map((record) => ({
+      record,
+      createdTime: parseCreatedTime(getDisplayFieldValue(record, CONTACT_CREATED_DATE_FIELD))
+    }))
+    .filter((candidate) => Number.isFinite(candidate.createdTime));
+
+  if (!candidates.length) return null;
+
+  return candidates.sort((left, right) => {
+    const timeDiff = left.createdTime - right.createdTime;
+    if (timeDiff !== 0) return timeDiff;
+    return (left.record.__rowIndex ?? 0) - (right.record.__rowIndex ?? 0);
+  })[0].record;
+}
+
+function parseCreatedTime(value) {
+  const text = String(value || "").trim();
+  if (!text) return NaN;
+  const parsed = Date.parse(text);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function formatCreatedDateForRule(value) {
+  const parsed = parseCreatedTime(value);
+  if (!Number.isFinite(parsed)) return "";
+  return new Date(parsed).toLocaleDateString();
 }
 
 function buildResolutionRecordScores(records, fields, baselineValues, targetField) {
@@ -5515,6 +6432,12 @@ function setMergeFieldResolution(groupKey, field, value) {
   if (!groupKey || !field) return;
 
   const group = findGroupByKey(groupKey);
+  const resolution = group ? getFieldResolution(group, field) : null;
+  if (resolution?.hardRule) {
+    renderDetail();
+    return;
+  }
+
   const masterRecord = group ? getExplicitMergeMasterRecord(group) : null;
   const masterValue = masterRecord ? String(getDisplayFieldValue(masterRecord, field) || "").trim() : null;
 
