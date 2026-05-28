@@ -62,6 +62,11 @@ async function run() {
     await setRangeValue(page, "#threshold", "80");
     await setRangeValue(page, "#maxThreshold", "99");
     const thresholdReadout = await page.locator("#thresholdValue").textContent();
+    const thresholdControl = await thresholdControlState(page);
+    await setNumberValue(page, "#thresholdMinNumber", "105");
+    const thresholdClampState = await thresholdControlState(page);
+    await setNumberValue(page, "#thresholdMinNumber", "80");
+    const thresholdTypedState = await thresholdControlState(page);
     await page.locator("#highRecallMode").check();
     await page.locator("#applyControlsButton").click();
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
@@ -82,10 +87,6 @@ async function run() {
       return list && firstGroup && list.scrollTop <= 1 && firstGroup.classList.contains("is-selected");
     }, null, { timeout: 5000 });
     const sortTopState = await groupListTopState(page);
-    await page.locator(".group-select").first().check();
-    const batchDuplicateEnabled = await page.locator("#batchDuplicateButton").isEnabled();
-    await page.locator("#clearSelectionButton").click();
-    const selectedCountCleared = (await page.locator("#selectedCount").textContent()) === "0 selected";
     await page.locator(".group-item-main").first().click();
 
     await page.locator('[data-record-action="separate"]').first().click();
@@ -109,6 +110,8 @@ async function run() {
     if (await trainingMatchButton.isVisible()) {
       await trainingMatchButton.click();
     }
+    await page.locator(".group-item.is-label-full .label-status-indicator.full").first().waitFor({ state: "visible", timeout: 5000 });
+    const fullLabelIndicators = await page.locator(".group-item.is-label-full .label-status-indicator.full").count();
     const trainingExportEnabled = await page.locator("#trainingExportButton").isEnabled();
 
     await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
@@ -192,6 +195,15 @@ async function run() {
     if (!csvMenuClosed) throw new Error("Expected CSV object menu to close with Escape.");
     if (matchControlsExpanded !== "true") throw new Error("Expected Match Controls panel to expand.");
     if (thresholdReadout !== "80-99") throw new Error(`Expected threshold readout to update to 80-99, got ${thresholdReadout}.`);
+    if (thresholdControl.minRange !== "80" || thresholdControl.maxRange !== "99" || thresholdControl.minNumber !== "80" || thresholdControl.maxNumber !== "99") {
+      throw new Error(`Expected dual threshold control to sync sliders and number inputs: ${JSON.stringify(thresholdControl)}`);
+    }
+    if (thresholdClampState.minRange !== "99" || thresholdClampState.maxRange !== "99") {
+      throw new Error(`Expected min threshold typing to stop at the max handle: ${JSON.stringify(thresholdClampState)}`);
+    }
+    if (thresholdTypedState.minRange !== "80" || thresholdTypedState.maxRange !== "99") {
+      throw new Error(`Expected typed min threshold to update the slider: ${JSON.stringify(thresholdTypedState)}`);
+    }
     if (!thresholdFilteredScores.length || thresholdFilteredScores.some((score) => score < 80 || score > 99)) {
       throw new Error(`Expected max threshold to limit visible scores to 80-99: ${JSON.stringify(thresholdFilteredScores)}`);
     }
@@ -199,11 +211,10 @@ async function run() {
     if (!sortTopState.firstSelected || sortTopState.scrollTop > 1 || !sortTopState.scoresAscending) {
       throw new Error(`Expected sorting ascending to keep the first visible group selected at the top: ${JSON.stringify(sortTopState)}`);
     }
-    if (!batchDuplicateEnabled) throw new Error("Expected batch buttons to enable after selecting a visible group.");
-    if (!selectedCountCleared) throw new Error("Expected Clear selection to reset selected count.");
     if (!separatedBadgeVisible) throw new Error("Expected Separate action to show a separated-record badge.");
     if (!fieldResolutionSelectable) throw new Error("Expected visible field-resolution selects to contain options.");
     if (!trainingExportEnabled) throw new Error("Expected training label action to enable label export.");
+    if (!fullLabelIndicators) throw new Error("Expected fully labeled groups to show a green label indicator.");
     if (!duplicateBadges) throw new Error("Expected at least one Duplicate decision badge.");
     if (!notDuplicateBadges) throw new Error("Expected at least one Not Duplicate decision badge.");
     if (!mergeMasterRadios) throw new Error("Expected Contact merge master radios.");
@@ -237,14 +248,16 @@ async function run() {
       csvMenuClosed,
       matchControlsExpanded,
       thresholdReadout,
+      thresholdControl,
+      thresholdClampState,
+      thresholdTypedState,
       thresholdFilteredScores,
       sortPressed,
       sortTopState,
-      batchDuplicateEnabled,
-      selectedCountCleared,
       separatedBadgeVisible,
       fieldResolutionSelects,
       trainingExportEnabled,
+      fullLabelIndicators,
       duplicateBadges,
       notDuplicateBadges,
       mergeMasterRadios,
@@ -344,6 +357,27 @@ async function setRangeValue(page, selector, value) {
     input.value = nextValue;
     input.dispatchEvent(new Event("input", { bubbles: true }));
   }, value);
+}
+
+async function setNumberValue(page, selector, value) {
+  await page.locator(selector).evaluate((input, nextValue) => {
+    input.value = nextValue;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, value);
+}
+
+async function thresholdControlState(page) {
+  return page.evaluate(() => {
+    const slider = document.querySelector("#thresholdSlider");
+    return {
+      minRange: document.querySelector("#threshold")?.value || "",
+      maxRange: document.querySelector("#maxThreshold")?.value || "",
+      minNumber: document.querySelector("#thresholdMinNumber")?.value || "",
+      maxNumber: document.querySelector("#thresholdMaxNumber")?.value || "",
+      minFill: slider?.style.getPropertyValue("--threshold-min-pct") || "",
+      maxFill: slider?.style.getPropertyValue("--threshold-max-pct") || ""
+    };
+  });
 }
 
 async function visibleGroupScores(page) {
@@ -467,7 +501,8 @@ async function visibleInteractiveReachability(page) {
       .filter((element) => {
         const style = getComputedStyle(element);
         const rect = element.getBoundingClientRect();
-        return style.pointerEvents === "none" || rect.width < 8 || rect.height < 8;
+        const pointerEventsHandledByThumb = element.classList.contains("threshold-slider-input");
+        return (style.pointerEvents === "none" && !pointerEventsHandledByThumb) || rect.width < 8 || rect.height < 8;
       })
       .map((element) => ({
         tag: element.tagName.toLowerCase(),

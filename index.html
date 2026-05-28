@@ -92,14 +92,39 @@
             </div>
             <div class="panel-body" id="matchControlsPanelBody" hidden>
               <div class="threshold-controls">
-                <label class="range-label" for="threshold">
-                  Minimum score
-                  <input id="threshold" type="range" min="70" max="100" value="86" />
-                </label>
-                <label class="range-label" for="maxThreshold">
-                  Maximum score
-                  <input id="maxThreshold" type="range" min="70" max="100" value="100" />
-                </label>
+                <div class="threshold-range-control" id="thresholdSlider">
+                  <label class="threshold-bound" for="thresholdMinNumber">
+                    <span>Min</span>
+                    <input id="thresholdMinNumber" type="number" min="70" max="100" step="1" value="86" inputmode="numeric" />
+                  </label>
+                  <div class="threshold-slider">
+                    <div class="threshold-slider-fill" aria-hidden="true"></div>
+                    <input
+                      id="threshold"
+                      class="threshold-slider-input threshold-slider-input-min"
+                      type="range"
+                      min="70"
+                      max="100"
+                      step="1"
+                      value="86"
+                      aria-label="Minimum match score"
+                    />
+                    <input
+                      id="maxThreshold"
+                      class="threshold-slider-input threshold-slider-input-max"
+                      type="range"
+                      min="70"
+                      max="100"
+                      step="1"
+                      value="100"
+                      aria-label="Maximum match score"
+                    />
+                  </div>
+                  <label class="threshold-bound" for="thresholdMaxNumber">
+                    <span>Max</span>
+                    <input id="thresholdMaxNumber" type="number" min="70" max="100" step="1" value="100" inputmode="numeric" />
+                  </label>
+                </div>
               </div>
               <div class="check-row">
                 <label><input id="highRecallMode" type="checkbox" /> High recall</label>
@@ -168,21 +193,11 @@
               </div>
             </div>
             <div class="panel-body group-panel-body" id="matchGroupsPanelBody">
-              <div class="batch-toolbar" id="batchToolbar">
-                <label class="select-visible">
-                  <input id="selectVisibleGroups" type="checkbox" />
-                  Select visible
-                </label>
+              <div class="group-filter-toolbar" id="groupFilterToolbar">
                 <label class="hide-labeled-control">
                   <input id="hideLabeledGroups" type="checkbox" />
                   Hide labeled
                 </label>
-                <span class="selected-count" id="selectedCount">0 selected</span>
-                <div class="batch-actions">
-                  <button class="mini-button" type="button" id="batchDuplicateButton" disabled>Duplicate</button>
-                  <button class="mini-button" type="button" id="batchNotDuplicateButton" disabled>Not Duplicate</button>
-                  <button class="mini-button" type="button" id="clearSelectionButton" disabled>Clear</button>
-                </div>
               </div>
               <div class="group-list" id="groupList"></div>
             </div>
