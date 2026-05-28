@@ -105,7 +105,7 @@ async function handleRequest(request, response) {
       salesforceMergeObjectTypes: ["Contact"],
       pid: process.pid,
       port: PORT
-    });
+    }, 200, fileModeCorsHeaders(request));
     return;
   }
 
@@ -738,12 +738,22 @@ function appleScriptString(value) {
   return `"${String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
 
-function sendJson(response, value, status = 200) {
+function sendJson(response, value, status = 200, extraHeaders = {}) {
   response.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store"
+    "Cache-Control": "no-store",
+    ...extraHeaders
   });
   response.end(`${JSON.stringify(value)}\n`);
+}
+
+function fileModeCorsHeaders(request) {
+  return request.headers.origin === "null"
+    ? {
+        "Access-Control-Allow-Origin": "null",
+        Vary: "Origin"
+      }
+    : {};
 }
 
 function sendError(response, error) {

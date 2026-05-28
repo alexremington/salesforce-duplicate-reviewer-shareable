@@ -992,7 +992,7 @@ async function loadCsvText(csvText, { fileName, objectType = state.objectType, s
 
 async function loadFromUrlIfRequested() {
   const params = new URLSearchParams(window.location.search);
-  const autoload = params.get("autoload");
+  const autoload = params.get("autoload") || params.get("source");
   const sources = {
     "staging-contacts": {
       endpoint: "/api/staging-contacts/latest.csv",

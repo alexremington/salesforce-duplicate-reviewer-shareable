@@ -170,6 +170,8 @@ http://127.0.0.1:5180
 
 It then opens the app with the latest staging compatibility CSV auto-loaded. The app sends a macOS Notification Center alert after it finishes loading and matching the CSV, so the alert means the file is ready to review. The staging wrappers use a 60-second Bulk API polling interval by default to reduce Salesforce API calls for large exports.
 
+Opening `index.html` directly remains supported for manual CSV uploads. If it is opened from disk while the local server is already running, the page redirects itself to the server-backed URL so the latest Scheduler exports and staging auto-load URLs keep working. If the server is not running, the static page stays open as a manual-upload fallback.
+
 The staging auto-load URL includes `sticky=1`, so the local server also opens a small macOS alert dialog after the CSV is ready. That dialog stays onscreen until dismissed. Notification Center itself controls whether the notification is a temporary banner or a persistent alert in macOS System Settings.
 
 The local server can also be started manually:
