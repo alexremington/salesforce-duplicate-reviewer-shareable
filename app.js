@@ -720,7 +720,7 @@ const state = {
   separatedRecords: new Map(),
   threshold: 86,
   maxThreshold: 100,
-  highRecallMode: false,
+  highRecallMode: true,
   sortDirection: "desc",
   hideLabeledGroups: false,
   reviewMode: "evaluate",
@@ -1953,7 +1953,7 @@ function applyMatchControls() {
   syncThresholdInputs();
   const nextThreshold = Number(els.threshold.value);
   const nextMaxThreshold = Number(els.maxThreshold.value);
-  const nextHighRecallMode = els.highRecallMode.checked;
+  const nextHighRecallMode = !els.highRecallMode.checked;
   const shouldRecompute = nextThreshold !== state.threshold || nextHighRecallMode !== state.highRecallMode;
 
   state.threshold = nextThreshold;
@@ -4101,7 +4101,7 @@ function renderSource() {
   els.thresholdMaxNumber.value = state.maxThreshold;
   syncThresholdSliderFill(state.threshold, state.maxThreshold);
   els.thresholdValue.textContent = thresholdRangeLabel();
-  els.highRecallMode.checked = state.highRecallMode;
+  els.highRecallMode.checked = !state.highRecallMode;
   renderFilterBuilder();
   els.fileName.textContent = state.loadingFileName || state.fileName || "CSV import";
   els.fileMeta.textContent = sourceMetaText(config);

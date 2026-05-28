@@ -70,7 +70,7 @@ async function run() {
     const thresholdClampState = await thresholdControlState(page);
     await setNumberValue(page, "#thresholdMinNumber", "80");
     const thresholdTypedState = await thresholdControlState(page);
-    await page.locator("#highRecallMode").check();
+    const fastestSearchDefaultUnchecked = !(await page.locator("#highRecallMode").isChecked());
     await page.locator("#applyControlsButton").click();
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
     const thresholdFilteredScores = await visibleGroupScores(page);
@@ -210,6 +210,9 @@ async function run() {
     if (thresholdTypedState.minRange !== "80" || thresholdTypedState.maxRange !== "99") {
       throw new Error(`Expected typed min threshold to update the slider: ${JSON.stringify(thresholdTypedState)}`);
     }
+    if (!fastestSearchDefaultUnchecked) {
+      throw new Error("Expected fastest search to be opt-in so broader candidate search is the default.");
+    }
     if (!thresholdFilteredScores.length || thresholdFilteredScores.some((score) => score < 80 || score > 99)) {
       throw new Error(`Expected max threshold to limit visible scores to 80-99: ${JSON.stringify(thresholdFilteredScores)}`);
     }
@@ -272,6 +275,7 @@ async function run() {
       thresholdControl,
       thresholdClampState,
       thresholdTypedState,
+      fastestSearchDefaultUnchecked,
       thresholdFilteredScores,
       customFilterState,
       sortPressed,
