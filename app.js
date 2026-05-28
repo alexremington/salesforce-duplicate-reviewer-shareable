@@ -221,6 +221,12 @@ const GROUP_FILTER_RELATIVE_DATES = [
   ["LAST_YEAR", "Last year"],
   ["NEXT_YEAR", "Next year"]
 ];
+const GROUP_LABEL_STATUS_FILTERS = [
+  ["unlabeled", "Unlabeled"],
+  ["partial", "Partially labeled"],
+  ["full", "Fully labeled"]
+];
+const GROUP_LABEL_STATUS_FILTER_VALUES = new Set(GROUP_LABEL_STATUS_FILTERS.map(([value]) => value));
 
 const CONTACT_NAME_PREFIXES = new Set([
   "mr",
@@ -726,7 +732,9 @@ const state = {
   reviewMode: "evaluate",
   trainingConfidence: "high",
   filters: [],
+  filterLogicMode: "and",
   filterLogic: "",
+  labelStatusFilters: new Set(),
   recentFiles: []
 };
 
@@ -1174,6 +1182,10 @@ function clearLoadedDatasetForPendingLoad() {
   state.mapping = {};
   state.groups = [];
   state.selectedGroupKey = "";
+  state.filters = [];
+  state.filterLogic = "";
+  state.filterLogicMode = "and";
+  state.labelStatusFilters.clear();
   state.decisions.clear();
   state.mergeResults.clear();
   state.trainingLabels.clear();
@@ -1950,6 +1962,7 @@ function recompute() {
 }
 
 function applyMatchControls() {
+  if (!state.rows.length) return;
   syncThresholdInputs();
   const nextThreshold = Number(els.threshold.value);
   const nextMaxThreshold = Number(els.maxThreshold.value);
@@ -4102,6 +4115,17 @@ function renderSource() {
   syncThresholdSliderFill(state.threshold, state.maxThreshold);
   els.thresholdValue.textContent = thresholdRangeLabel();
   els.highRecallMode.checked = !state.highRecallMode;
+  const datasetLoaded = Boolean(state.rows.length);
+  [
+    els.threshold,
+    els.maxThreshold,
+    els.thresholdMinNumber,
+    els.thresholdMaxNumber,
+    els.highRecallMode,
+    els.applyControlsButton
+  ].forEach((control) => {
+    control.disabled = !datasetLoaded;
+  });
   renderFilterBuilder();
   els.fileName.textContent = state.loadingFileName || state.fileName || "CSV import";
   els.fileMeta.textContent = sourceMetaText(config);
@@ -4358,71 +4382,114 @@ function renderGroupSelection() {
 
 function renderGroupFilterToolbar() {
   els.hideLabeledGroups.checked = state.hideLabeledGroups;
+  els.hideLabeledGroups.disabled = !state.rows.length;
 }
 
 function renderFilterBuilder() {
   if (!els.groupFilterBuilder) return;
 
-  const filterLogicError = groupFilterLogicError();
-  const activeEntries = activeGroupFilterEntries();
+  const filtersDisabled = !canUseMatchFilters();
+  const recordFiltersDisabled = !canUseRecordFieldFilters();
+  const hasFilters = !recordFiltersDisabled && Boolean(state.filters.length);
+  const filterLogicError = recordFiltersDisabled ? "" : groupFilterLogicError();
+  const activeEntries = recordFiltersDisabled ? [] : activeGroupFilterEntries();
+  els.groupFilterBuilder.classList.toggle("is-disabled", filtersDisabled);
+  els.groupFilterBuilder.setAttribute("aria-disabled", filtersDisabled ? "true" : "false");
   els.groupFilterBuilder.innerHTML = `
     <div class="filter-builder-title">
       <strong>Filters</strong>
-      <button class="icon-button filter-icon-button" type="button" data-filter-add aria-label="Add filter" title="Add filter">
+      <button class="icon-button filter-icon-button" type="button" data-filter-add aria-label="Add filter" title="Add filter" ${recordFiltersDisabled ? "disabled" : ""}>
         ${filterPlusIcon()}
       </button>
     </div>
-    ${state.filters.length ? renderFilterLogicControl(activeEntries) : renderFilterEmptyControl()}
-    ${state.filters.length ? `<div class="filter-list">${state.filters.map((filter, index) => renderFilterRow(filter, index)).join("")}</div>` : ""}
+    ${renderLabelStatusFilter(filtersDisabled)}
+    ${hasFilters ? renderFilterLogicControl(activeEntries, recordFiltersDisabled) : renderFilterEmptyControl(recordFiltersDisabled)}
+    ${hasFilters ? `<div class="filter-list">${state.filters.map((filter, index) => renderFilterRow(filter, index, recordFiltersDisabled)).join("")}</div>` : ""}
     ${filterLogicError ? `<p class="filter-error">${escapeHtml(filterLogicError)}</p>` : ""}
   `;
 }
 
-function renderFilterEmptyControl() {
+function renderLabelStatusFilter(disabled = false) {
   return `
-    <button class="filter-empty-add" type="button" data-filter-add>
+    <fieldset class="label-status-filter" ${disabled ? "disabled" : ""}>
+      <legend>Label status</legend>
+      ${GROUP_LABEL_STATUS_FILTERS
+        .map(([value, label]) => `
+          <label class="label-status-option">
+            <input
+              type="checkbox"
+              value="${escapeHtml(value)}"
+              data-label-status-filter
+              ${state.labelStatusFilters.has(value) ? "checked" : ""}
+            />
+            <span>${escapeHtml(label)}</span>
+          </label>
+        `)
+        .join("")}
+    </fieldset>
+  `;
+}
+
+function renderFilterEmptyControl(disabled = false) {
+  return `
+    <button class="filter-empty-add" type="button" data-filter-add ${disabled ? "disabled" : ""}>
       <span>Add filter...</span>
       ${filterSearchIcon()}
     </button>
   `;
 }
 
-function renderFilterLogicControl(activeEntries) {
+function renderFilterLogicControl(activeEntries, disabled = false) {
   const defaultLogic = defaultGroupFilterLogic(activeEntries);
-  const value = state.filterLogic || defaultLogic;
+  const mode = groupFilterLogicMode();
+  const customValue = state.filterLogic || defaultLogic;
+  const disabledAttribute = disabled ? "disabled" : "";
   return `
-    <label class="filter-logic-control">
+    <div class="filter-logic-control">
       <span>Include records matching</span>
-      <input
-        class="filter-logic-input"
-        type="text"
-        value="${escapeHtml(value)}"
-        placeholder="${escapeHtml(defaultLogic || "1 AND 2")}"
-        spellcheck="false"
-        autocomplete="off"
-      />
-    </label>
+      <div class="filter-logic-row">
+        <label class="visually-hidden" for="filterLogicMode">Filter logic</label>
+        <select id="filterLogicMode" class="filter-logic-mode-select" ${disabledAttribute}>
+          <option value="and" ${mode === "and" ? "selected" : ""}>All filters (AND)</option>
+          <option value="or" ${mode === "or" ? "selected" : ""}>Any filter (OR)</option>
+          <option value="custom" ${mode === "custom" ? "selected" : ""}>Custom logic</option>
+        </select>
+        ${mode === "custom"
+          ? `<input
+              class="filter-logic-input"
+              type="text"
+              value="${escapeHtml(customValue)}"
+              placeholder="${escapeHtml(defaultLogic || "1 AND 2")}"
+              spellcheck="false"
+              autocomplete="off"
+              aria-label="Custom filter logic"
+              ${disabledAttribute}
+            />`
+          : ""}
+      </div>
+    </div>
   `;
 }
 
-function renderFilterRow(filter, index) {
+function renderFilterRow(filter, index, disabled = false) {
   const normalized = normalizeGroupFilter(filter);
   const meta = groupFilterMeta(normalized.field);
+  const disabledAttribute = disabled ? "disabled" : "";
   return `
     <div class="filter-row" data-filter-id="${escapeHtml(normalized.id)}">
       <span class="filter-index">${index + 1}</span>
       <div class="filter-row-controls">
         <label class="visually-hidden" for="filter-field-${escapeHtml(normalized.id)}">Filter field</label>
-        <select id="filter-field-${escapeHtml(normalized.id)}" class="filter-field-select" data-filter-control="field">
+        <select id="filter-field-${escapeHtml(normalized.id)}" class="filter-field-select" data-filter-control="field" ${disabledAttribute}>
           ${renderFilterFieldOptions(normalized.field)}
         </select>
         <label class="visually-hidden" for="filter-operator-${escapeHtml(normalized.id)}">Filter operator</label>
-        <select id="filter-operator-${escapeHtml(normalized.id)}" class="filter-operator-select" data-filter-control="operator">
+        <select id="filter-operator-${escapeHtml(normalized.id)}" class="filter-operator-select" data-filter-control="operator" ${disabledAttribute}>
           ${renderFilterOperatorOptions(meta.type, normalized.operator)}
         </select>
-        ${renderFilterValueControl(normalized, meta)}
+        ${renderFilterValueControl(normalized, meta, disabled)}
       </div>
-      <button class="icon-button filter-icon-button" type="button" data-filter-remove aria-label="Remove filter ${index + 1}" title="Remove filter">
+      <button class="icon-button filter-icon-button" type="button" data-filter-remove aria-label="Remove filter ${index + 1}" title="Remove filter" ${disabledAttribute}>
         ${filterTrashIcon()}
       </button>
     </div>
@@ -4445,7 +4512,8 @@ function renderFilterOperatorOptions(type, selectedOperator) {
     .join("");
 }
 
-function renderFilterValueControl(filter, meta) {
+function renderFilterValueControl(filter, meta, disabled = false) {
+  const disabledAttribute = disabled ? "disabled" : "";
   if (GROUP_FILTER_VALUELESS_OPERATORS.has(filter.operator)) {
     return '<span class="filter-value-placeholder" aria-hidden="true"></span>';
   }
@@ -4454,7 +4522,7 @@ function renderFilterValueControl(filter, meta) {
     const values = meta.values || [];
     return `
       <label class="visually-hidden" for="filter-value-${escapeHtml(filter.id)}">Filter value</label>
-      <select id="filter-value-${escapeHtml(filter.id)}" class="filter-value-control" data-filter-control="value">
+      <select id="filter-value-${escapeHtml(filter.id)}" class="filter-value-control" data-filter-control="value" ${disabledAttribute}>
         ${values
           .map(([value, label]) => `<option value="${escapeHtml(value)}" ${value === filter.value ? "selected" : ""}>${escapeHtml(label)}</option>`)
           .join("")}
@@ -4466,7 +4534,7 @@ function renderFilterValueControl(filter, meta) {
     const selectedValue = filter.value || "TODAY";
     return `
       <label class="visually-hidden" for="filter-value-${escapeHtml(filter.id)}">Relative date</label>
-      <select id="filter-value-${escapeHtml(filter.id)}" class="filter-value-control" data-filter-control="value">
+      <select id="filter-value-${escapeHtml(filter.id)}" class="filter-value-control" data-filter-control="value" ${disabledAttribute}>
         ${GROUP_FILTER_RELATIVE_DATES
           .map(([value, label]) => `<option value="${escapeHtml(value)}" ${value === selectedValue ? "selected" : ""}>${escapeHtml(label)}</option>`)
           .join("")}
@@ -4485,6 +4553,7 @@ function renderFilterValueControl(filter, meta) {
         type="${inputType}"
         value="${escapeHtml(filter.value2 || "")}"
         placeholder="Max"
+        ${disabledAttribute}
       />
     `
     : "";
@@ -4497,14 +4566,18 @@ function renderFilterValueControl(filter, meta) {
       type="${inputType}"
       value="${escapeHtml(filter.value || "")}"
       placeholder="${filter.operator === "between" ? "Min" : "Value"}"
+      ${disabledAttribute}
     />
     ${value2}
   `;
 }
 
 function handleGroupFilterClick(event) {
+  if (!canUseRecordFieldFilters()) return;
   if (event.target.closest?.("[data-filter-add]")) {
-    state.filters.push(createGroupFilter());
+    const filter = createGroupFilter();
+    if (!filter) return;
+    state.filters.push(filter);
     visibleGroupsCache = null;
     renderFilterBuilder();
     return;
@@ -4515,12 +4588,30 @@ function handleGroupFilterClick(event) {
 
   const filterId = removeButton.closest("[data-filter-id]")?.dataset.filterId;
   state.filters = state.filters.filter((filter) => filter.id !== filterId);
-  state.filterLogic = "";
+  if (!state.filters.length) {
+    state.filterLogic = "";
+    state.filterLogicMode = "and";
+  }
   visibleGroupsCache = null;
   renderFilterBuilder();
 }
 
 function handleGroupFilterChange(event) {
+  const labelStatusControl = event.target.closest?.("[data-label-status-filter]");
+  if (labelStatusControl) {
+    if (!canUseMatchFilters()) return;
+    updateLabelStatusFilter(labelStatusControl);
+    return;
+  }
+
+  if (!canUseRecordFieldFilters()) return;
+  if (event.target.classList?.contains("filter-logic-mode-select")) {
+    state.filterLogicMode = event.target.value === "custom" || event.target.value === "or" ? event.target.value : "and";
+    visibleGroupsCache = null;
+    renderFilterBuilder();
+    return;
+  }
+
   const control = event.target.closest?.("[data-filter-control]");
   if (!control) return;
   const controlType = control.dataset.filterControl;
@@ -4528,6 +4619,7 @@ function handleGroupFilterChange(event) {
 }
 
 function handleGroupFilterInput(event) {
+  if (!canUseRecordFieldFilters()) return;
   if (event.target.classList?.contains("filter-logic-input")) {
     state.filterLogic = event.target.value.trim();
     visibleGroupsCache = null;
@@ -4537,6 +4629,17 @@ function handleGroupFilterInput(event) {
   const control = event.target.closest?.("[data-filter-control]");
   if (!control) return;
   updateGroupFilterFromControl(control, { rerender: false });
+}
+
+function updateLabelStatusFilter(control) {
+  const value = control.value;
+  if (!GROUP_LABEL_STATUS_FILTER_VALUES.has(value)) return;
+  if (control.checked) {
+    state.labelStatusFilters.add(value);
+  } else {
+    state.labelStatusFilters.delete(value);
+  }
+  visibleGroupsCache = null;
 }
 
 function updateGroupFilterFromControl(control, { rerender = false } = {}) {
@@ -4568,6 +4671,7 @@ function updateGroupFilterFromControl(control, { rerender = false } = {}) {
 
 function createGroupFilter() {
   const field = defaultGroupFilterField();
+  if (!field) return null;
   const operator = defaultGroupFilterOperator(groupFilterType(field));
   return {
     id: String(nextGroupFilterId++),
@@ -4600,51 +4704,13 @@ function pruneGroupFiltersForCurrentFields() {
   state.filters = state.filters
     .filter((filter) => validFields.has(filter.field))
     .map((filter) => normalizeGroupFilter(filter));
-  if (state.filters.length !== originalCount) state.filterLogic = "";
+  if (state.filters.length !== originalCount && !state.filters.length) {
+    state.filterLogic = "";
+    state.filterLogicMode = "and";
+  }
 }
 
 function filterFieldOptions() {
-  const specialFields = [
-    {
-      value: "score",
-      label: "Match Score",
-      type: "number",
-      scope: "group"
-    },
-    {
-      value: "matchType",
-      label: "Match Type",
-      type: "enum",
-      scope: "group",
-      values: [
-        ["exact", "Exact"],
-        ["near", "Near"]
-      ]
-    },
-    {
-      value: "decision",
-      label: "Review Status",
-      type: "enum",
-      scope: "group",
-      values: [
-        ["unreviewed", "Unreviewed"],
-        ["duplicate", "Duplicate"],
-        ["not-duplicate", "Not Duplicate"]
-      ]
-    },
-    {
-      value: "labelStatus",
-      label: "Label Status",
-      type: "enum",
-      scope: "group",
-      values: [
-        ["unlabeled", "Unlabeled"],
-        ["partial", "Partially labeled"],
-        ["full", "Fully labeled"]
-      ]
-    }
-  ];
-
   const mappedFields = Object.keys(OBJECT_CONFIG[state.objectType].fields)
     .filter(fieldAvailableForFiltering)
     .map((field) => ({
@@ -4654,7 +4720,7 @@ function filterFieldOptions() {
       scope: "record"
     }));
 
-  return [...specialFields, ...mappedFields, ...rawHeaderFilterOptions()];
+  return [...mappedFields, ...rawHeaderFilterOptions()];
 }
 
 function rawHeaderFilterOptions() {
@@ -4676,16 +4742,24 @@ function fieldAvailableForFiltering(field) {
 }
 
 function defaultGroupFilterField() {
-  return filterFieldOptions()[0]?.value || "score";
+  return filterFieldOptions()[0]?.value || "";
 }
 
 function groupFilterMeta(field) {
   return filterFieldOptions().find((option) => option.value === field) || filterFieldOptions()[0] || {
-    value: "score",
-    label: "Match Score",
-    type: "number",
-    scope: "group"
+    value: "",
+    label: "Record field",
+    type: "text",
+    scope: "record"
   };
+}
+
+function canUseMatchFilters() {
+  return Boolean(state.rows.length);
+}
+
+function canUseRecordFieldFilters() {
+  return Boolean(canUseMatchFilters() && filterFieldOptions().length);
 }
 
 function groupFilterType(field) {
@@ -4746,7 +4820,9 @@ function isLikelyDateFilterValue(value) {
 function groupFiltersSignature() {
   return JSON.stringify({
     filters: state.filters.map((filter) => normalizeGroupFilter(filter)),
-    logic: state.filterLogic
+    logicMode: groupFilterLogicMode(),
+    logic: state.filterLogic,
+    labelStatus: [...state.labelStatusFilters].sort()
   });
 }
 
@@ -4771,8 +4847,24 @@ function defaultGroupFilterLogic(entries = activeGroupFilterEntries()) {
 }
 
 function groupFilterLogicError() {
-  if (!String(state.filterLogic || "").trim()) return "";
-  return compileGroupFilterLogic(state.filterLogic, state.filters.length, activeGroupFilterEntries().map(({ number }) => number)).error;
+  if (groupFilterLogicMode() !== "custom") return "";
+  return compileGroupFilterLogic(filterLogicExpressionForMode(activeGroupFilterEntries()), state.filters.length).error;
+}
+
+function groupFilterLogicMode() {
+  return state.filterLogicMode === "custom" || state.filterLogicMode === "or" ? state.filterLogicMode : "and";
+}
+
+function filterLogicExpressionForMode(entries = activeGroupFilterEntries()) {
+  const mode = groupFilterLogicMode();
+  if (mode === "custom") return state.filterLogic || defaultGroupFilterLogic(entries);
+  if (mode === "or") return entries.map(({ number }) => number).join(" OR ");
+  return defaultGroupFilterLogic(entries);
+}
+
+function activeLabelStatusFilters() {
+  const selected = new Set([...state.labelStatusFilters].filter((value) => GROUP_LABEL_STATUS_FILTER_VALUES.has(value)));
+  return selected.size && selected.size < GROUP_LABEL_STATUS_FILTERS.length ? selected : new Set();
 }
 
 function compileGroupFilterLogic(logicText, filterCount, defaultNumbers = []) {
@@ -4884,10 +4976,6 @@ function groupFilterMatchesRecord(group, record, filter) {
 }
 
 function groupFilterRawValue(group, record, field, meta) {
-  if (field === "score") return group.score;
-  if (field === "matchType") return group.type;
-  if (field === "decision") return state.decisions.get(group.key) || "unreviewed";
-  if (field === "labelStatus") return groupTrainingLabelStatus(group).status;
   if (String(field || "").startsWith("raw:")) return getValue(record, rawHeaderFromFilterField(field));
   if (meta.scope === "record") return getDisplayFieldValue(record, field);
   return "";
@@ -5156,14 +5244,12 @@ function filteredGroups() {
 
 function getFilteredGroups() {
   const activeEntries = activeGroupFilterEntries();
-  const filterLogic = compileGroupFilterLogic(
-    state.filterLogic,
-    state.filters.length,
-    activeEntries.map(({ number }) => number)
-  );
+  const filterLogic = compileGroupFilterLogic(filterLogicExpressionForMode(activeEntries), state.filters.length);
+  const labelStatusFilters = activeLabelStatusFilters();
   const filtered = state.groups.filter((group) => {
     if (group.score > state.maxThreshold) return false;
     if (state.hideLabeledGroups && isGroupLabeled(group)) return false;
+    if (labelStatusFilters.size && !labelStatusFilters.has(groupTrainingLabelStatus(group).status)) return false;
     if (!activeEntries.length) return true;
     if (filterLogic.error) return false;
     return groupMatchesFilters(group, activeEntries, filterLogic);
