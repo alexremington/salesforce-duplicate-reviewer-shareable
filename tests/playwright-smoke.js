@@ -55,7 +55,7 @@ async function run() {
 
     const emptyChooseVisible = await page.locator('[data-empty-action="choose-csv"]').isVisible();
     const emptyDemoVisible = await page.locator('[data-empty-action="demo-data"]').isVisible();
-    const filterAddDisabledBeforeLoad = await page.locator(".filter-empty-add").isDisabled();
+    const filterFieldDisabledBeforeLoad = await page.locator(".filter-row .filter-field-select").first().isDisabled();
     const applyDisabledBeforeLoad = await page.locator("#applyControlsButton").isDisabled();
     const labelStatusDisabledBeforeLoad = await page.locator('[data-label-status-filter][value="unlabeled"]').isDisabled();
     const hideLabeledDisabledBeforeLoad = await page.locator("#hideLabeledGroups").isDisabled();
@@ -217,7 +217,7 @@ async function run() {
     if (!lightPaneSurfaces.standardized || !darkPaneSurfaces.standardized) {
       throw new Error(`Expected layout panes to share one canvas background: ${JSON.stringify({ lightPaneSurfaces, darkPaneSurfaces })}`);
     }
-    if (!filterAddDisabledBeforeLoad || !applyDisabledBeforeLoad || !labelStatusDisabledBeforeLoad || !hideLabeledDisabledBeforeLoad) {
+    if (!filterFieldDisabledBeforeLoad || !applyDisabledBeforeLoad || !labelStatusDisabledBeforeLoad || !hideLabeledDisabledBeforeLoad) {
       throw new Error("Expected match filters and Apply to be disabled before a dataset is loaded.");
     }
     if (!latestRecentFiles.contacts || !latestRecentFiles.accounts) {
@@ -245,6 +245,15 @@ async function run() {
     }
     if (customFilterState.defaultLogicMode !== "and" || customFilterState.logicMode !== "custom") {
       throw new Error(`Expected filter logic to default to AND and expose custom logic by choice: ${JSON.stringify(customFilterState)}`);
+    }
+    if (JSON.stringify(customFilterState.logicOptions.map((option) => option.value)) !== JSON.stringify(["and", "custom"])) {
+      throw new Error(`Expected filter logic dropdown to include only AND and custom options: ${JSON.stringify(customFilterState.logicOptions)}`);
+    }
+    if (customFilterState.singleFilterIndexCount !== 0 || customFilterState.multipleFilterIndexCount < 2) {
+      throw new Error(`Expected filter row numbers only when there is more than one filter: ${JSON.stringify(customFilterState)}`);
+    }
+    if (!customFilterState.singleFilterLayout.sameLine) {
+      throw new Error(`Expected field, operator, and value to stay on one desktop line: ${JSON.stringify(customFilterState.singleFilterLayout)}`);
     }
     if (customFilterState.filteredCount !== 2 || customFilterState.logicValue !== "1 OR 2") {
       throw new Error(`Expected custom boolean filters to narrow the group list: ${JSON.stringify(customFilterState)}`);
@@ -517,13 +526,19 @@ async function paneSurfaceState(page) {
 
 async function exerciseCustomFilters(page) {
   await addFilter(page, 1);
+  const singleFilterIndexCount = await page.locator(".filter-row .filter-index").count();
   const fieldOptions = await page.locator(".filter-row").first().locator(".filter-field-select option").evaluateAll((options) => {
     return options.map((option) => option.textContent?.trim() || "");
   });
   await configureFilter(page, 0, "email", "contains", "contact1@example.com");
+  const singleFilterLayout = await filterRowLayoutState(page, 0);
   await addFilter(page, 2);
+  const multipleFilterIndexCount = await page.locator(".filter-row .filter-index").count();
   await configureFilter(page, 1, "email", "contains", "contact2@example.com");
   const defaultLogicMode = await page.locator(".filter-logic-mode-select").inputValue();
+  const logicOptions = await page.locator(".filter-logic-mode-select option").evaluateAll((options) => {
+    return options.map((option) => ({ value: option.value, label: option.textContent?.trim() || "" }));
+  });
   await page.locator(".filter-logic-mode-select").selectOption("custom");
   await page.locator(".filter-logic-input").fill("1 OR 2");
 
@@ -554,6 +569,10 @@ async function exerciseCustomFilters(page) {
     defaultLogicMode,
     logicMode,
     logicValue,
+    logicOptions,
+    singleFilterIndexCount,
+    multipleFilterIndexCount,
+    singleFilterLayout,
     fieldOptions,
     dateOperators
   };
@@ -573,8 +592,27 @@ async function exerciseLabelStatusFilter(page) {
 }
 
 async function addFilter(page, expectedCount) {
-  await page.locator(".filter-builder-title [data-filter-add], .filter-empty-add").first().click();
+  const currentCount = await page.locator(".filter-row").count();
+  if (currentCount < expectedCount) {
+    await page.locator(".filter-builder-title [data-filter-add]").first().click();
+  }
   await page.locator(".filter-row").nth(expectedCount - 1).waitFor({ state: "visible", timeout: 5000 });
+}
+
+async function filterRowLayoutState(page, index) {
+  return page.locator(".filter-row").nth(index).evaluate((row) => {
+    const controls = [
+      row.querySelector(".filter-field-select"),
+      row.querySelector(".filter-operator-select"),
+      row.querySelector(".filter-value-control")
+    ].filter(Boolean);
+    const tops = controls.map((control) => Math.round(control.getBoundingClientRect().top));
+    return {
+      controlCount: controls.length,
+      tops,
+      sameLine: tops.length >= 3 && Math.max(...tops) - Math.min(...tops) <= 2
+    };
+  });
 }
 
 async function configureFilter(page, index, field, operator, value) {
