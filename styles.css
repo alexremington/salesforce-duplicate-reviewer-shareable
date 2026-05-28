@@ -883,6 +883,12 @@ select:focus {
   min-width: 0;
 }
 
+.label-status-filter-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
 .filter-logic-control {
   display: grid;
   gap: 5px;
