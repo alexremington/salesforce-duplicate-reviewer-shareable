@@ -8,7 +8,7 @@ source "${SCRIPT_DIR}/load-env.sh"
 load_project_env "${PROJECT_DIR}/.env"
 
 export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-export PORT="${PORT:-${DUPLICATE_REVIEWER_PORT:-5180}}"
+export PORT="${DUPLICATE_REVIEWER_PORT:-${PORT:-5180}}"
 export SF_USE_GENERIC_UNIX_KEYCHAIN="${SF_USE_GENERIC_UNIX_KEYCHAIN:-true}"
 export SF_ORG_ALIAS="${SF_ORG_ALIAS:-your-org-alias}"
 export SF_INSTANCE_URL="${SF_INSTANCE_URL:-https://your-domain.my.salesforce.com}"
