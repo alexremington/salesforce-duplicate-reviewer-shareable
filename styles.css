@@ -1454,6 +1454,15 @@ select:focus {
   transition: width 160ms ease;
 }
 
+.loading-spline-status {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
 .has-open-modal {
   overflow: hidden;
 }

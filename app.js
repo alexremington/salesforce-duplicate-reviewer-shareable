@@ -809,6 +809,7 @@ const els = {
   loadingModal: document.getElementById("loadingModal"),
   loadingModalTitle: document.getElementById("loadingModalTitle"),
   loadingModalMessage: document.getElementById("loadingModalMessage"),
+  loadingSplineStatus: document.getElementById("loadingSplineStatus"),
   loadingProgress: document.getElementById("loadingProgress"),
   loadingProgressBar: document.getElementById("loadingProgressBar")
 };
@@ -4614,12 +4615,22 @@ function renderLoadingModal() {
   const progressValue = clampProgress(progress);
   els.loadingProgress?.setAttribute("aria-valuenow", String(Math.round(progressValue)));
   els.loadingProgressBar?.style.setProperty("--loading-progress", `${progressValue}%`);
+  if (els.loadingSplineStatus) {
+    els.loadingSplineStatus.textContent = loadingSplineStatusText(progressValue);
+  }
 }
 
 function clampProgress(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return 0;
   return Math.max(0, Math.min(100, number));
+}
+
+function loadingSplineStatusText(progressValue) {
+  const total = 713;
+  const reticulated = Math.min(total, Math.round((progressValue / 100) * total));
+  const sector = 1084 + Math.round(progressValue * 6.17);
+  return `Reticulating splines: ${formatNumber(reticulated)}/${formatNumber(total)} - sector ${formatNumber(sector)}`;
 }
 
 function renderSource() {
