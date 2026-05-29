@@ -120,6 +120,8 @@ async function handleRequest(request, response) {
       stagingAccounts: true,
       latestStagingFiles: true,
       jsonDatasets: true,
+      staticAssetRoot: Boolean(process.env.DUPLICATE_REVIEWER_STATIC_DIR),
+      svgStaticAssets: true,
       salesforceMerge: true,
       salesforceMergeObjectTypes: ["Contact"],
       pid: process.pid,

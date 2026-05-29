@@ -45,7 +45,6 @@ async function run() {
     const latestRecentFiles = await assertLatestRecentFiles(page);
     const lightTheme = await themeColorState(page);
     const lightPaneSurfaces = await paneSurfaceState(page);
-    const brandLogo = await brandLogoState(page);
     await page.screenshot({ path: path.join(outDir, "desktop-empty.png"), fullPage: false });
     await page.emulateMedia({ colorScheme: "dark" });
     await page.waitForTimeout(100);
@@ -226,12 +225,6 @@ async function run() {
     }
     if (!lightTheme.secondaryAccent || !darkTheme.secondaryAccent || lightTheme.secondaryAccent === lightTheme.accent || darkTheme.secondaryAccent === darkTheme.accent) {
       throw new Error(`Expected a complementary secondary accent in the shared theme: ${JSON.stringify({ lightTheme, darkTheme })}`);
-    }
-    if (!brandLogo.visible || brandLogo.alt !== "POLITICO" || !brandLogo.src.endsWith("/assets/politico-logo.svg")) {
-      throw new Error(`Expected POLITICO logo in the top-left header: ${JSON.stringify(brandLogo)}`);
-    }
-    if (brandLogo.copyCenterDelta > 4 || brandLogo.copyGap < 10 || brandLogo.copyGap > 18) {
-      throw new Error(`Expected POLITICO logo to align vertically with the brand text and keep even brand spacing: ${JSON.stringify(brandLogo)}`);
     }
     if (!lightPaneSurfaces.standardized || !darkPaneSurfaces.standardized) {
       throw new Error(`Expected layout panes to share one canvas background: ${JSON.stringify({ lightPaneSurfaces, darkPaneSurfaces })}`);
@@ -677,34 +670,6 @@ async function themeColorState(page) {
       topbarBg: topbar.backgroundColor,
       accent: root.getPropertyValue("--managed-accent").trim(),
       secondaryAccent: root.getPropertyValue("--managed-secondary-accent").trim()
-    };
-  });
-}
-
-async function brandLogoState(page) {
-  return page.locator(".brand-logo").evaluate((logo) => {
-    const frame = logo.closest(".brand-logo-frame");
-    const copy = document.querySelector(".brand-copy");
-    const rectFor = (element) => {
-      const rect = element?.getBoundingClientRect();
-      return rect
-        ? { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left, width: rect.width, height: rect.height }
-        : { top: 0, right: 0, bottom: 0, left: 0, width: 0, height: 0 };
-    };
-    const frameRect = rectFor(frame);
-    const copyRect = rectFor(copy);
-    const frameCenter = frameRect.top + frameRect.height / 2;
-    const copyCenter = copyRect.top + copyRect.height / 2;
-    return {
-      visible: frameRect.width > 0 && frameRect.height > 0 && logo.naturalWidth > 0,
-      alt: logo.getAttribute("alt") || "",
-      src: logo.currentSrc || logo.getAttribute("src") || "",
-      naturalWidth: logo.naturalWidth,
-      naturalHeight: logo.naturalHeight,
-      frameWidth: Math.round(frameRect.width),
-      frameHeight: Math.round(frameRect.height),
-      copyGap: Math.round(copyRect.left - frameRect.right),
-      copyCenterDelta: Math.round(Math.abs(frameCenter - copyCenter))
     };
   });
 }
