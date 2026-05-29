@@ -45,6 +45,7 @@ async function run() {
     const latestRecentFiles = await assertLatestRecentFiles(page);
     const lightTheme = await themeColorState(page);
     const lightPaneSurfaces = await paneSurfaceState(page);
+    const brandLogo = await brandLogoState(page);
     await page.screenshot({ path: path.join(outDir, "desktop-empty.png"), fullPage: false });
     await page.emulateMedia({ colorScheme: "dark" });
     await page.waitForTimeout(100);
@@ -223,6 +224,15 @@ async function run() {
     if (!lightTheme.colorScheme.includes("light") || !darkTheme.colorScheme.includes("dark") || lightTheme.bodyBg === darkTheme.bodyBg) {
       throw new Error(`Expected the UI theme to follow system light/dark mode: ${JSON.stringify({ lightTheme, darkTheme })}`);
     }
+    if (!lightTheme.secondaryAccent || !darkTheme.secondaryAccent || lightTheme.secondaryAccent === lightTheme.accent || darkTheme.secondaryAccent === darkTheme.accent) {
+      throw new Error(`Expected a complementary secondary accent in the shared theme: ${JSON.stringify({ lightTheme, darkTheme })}`);
+    }
+    if (!brandLogo.visible || brandLogo.alt !== "POLITICO" || !brandLogo.src.endsWith("/assets/politico-logo.svg")) {
+      throw new Error(`Expected POLITICO logo in the top-left header: ${JSON.stringify(brandLogo)}`);
+    }
+    if (brandLogo.copyCenterDelta > 4 || brandLogo.copyGap < 10 || brandLogo.copyGap > 18) {
+      throw new Error(`Expected POLITICO logo to align vertically with the brand text and keep even brand spacing: ${JSON.stringify(brandLogo)}`);
+    }
     if (!lightPaneSurfaces.standardized || !darkPaneSurfaces.standardized) {
       throw new Error(`Expected layout panes to share one canvas background: ${JSON.stringify({ lightPaneSurfaces, darkPaneSurfaces })}`);
     }
@@ -237,6 +247,9 @@ async function run() {
     }
     if (!/^Reticulating splines: [\d,]+\/[\d,]+ - sector [\d,]+$/.test(loadingProgressbar.splineText)) {
       throw new Error(`Expected the loading modal to include the Maxis-style spline status: ${JSON.stringify(loadingProgressbar)}`);
+    }
+    if (loadingProgressbar.splineColor !== loadingProgressbar.secondaryAccentStrong) {
+      throw new Error(`Expected the spline status to use the secondary accent: ${JSON.stringify(loadingProgressbar)}`);
     }
     if (latestJsonLoad.fileName !== "salesforce-report-latest.json" || latestJsonLoad.rowCount !== 2 || latestJsonLoad.groupCount !== 1 || latestJsonLoad.processingMode !== "worker") {
       throw new Error(`Expected latest JSON dataset to load through Recent files: ${JSON.stringify(latestJsonLoad)}`);
@@ -500,12 +513,27 @@ async function loadingProgressbarState(page) {
   const locator = page.locator("#loadingProgress");
   if (await locator.count() !== 1) return { exists: false, role: "", min: "", max: "", now: "" };
   return locator.evaluate((element) => ({
-    exists: true,
-    role: element.getAttribute("role") || "",
-    min: element.getAttribute("aria-valuemin") || "",
-    max: element.getAttribute("aria-valuemax") || "",
-    now: element.getAttribute("aria-valuenow") || "",
-    splineText: document.querySelector("#loadingSplineStatus")?.textContent?.trim() || ""
+    ...(() => {
+      const status = document.querySelector("#loadingSplineStatus");
+      const colorToRgb = (value) => {
+        const probe = document.createElement("span");
+        probe.style.color = value;
+        document.body.append(probe);
+        const color = getComputedStyle(probe).color;
+        probe.remove();
+        return color;
+      };
+      return {
+        exists: true,
+        role: element.getAttribute("role") || "",
+        min: element.getAttribute("aria-valuemin") || "",
+        max: element.getAttribute("aria-valuemax") || "",
+        now: element.getAttribute("aria-valuenow") || "",
+        splineText: status?.textContent?.trim() || "",
+        splineColor: status ? getComputedStyle(status).color : "",
+        secondaryAccentStrong: colorToRgb(getComputedStyle(document.documentElement).getPropertyValue("--managed-secondary-accent-strong").trim())
+      };
+    })()
   }));
 }
 
@@ -647,7 +675,36 @@ async function themeColorState(page) {
       bodyBg: body.backgroundColor,
       bodyColor: body.color,
       topbarBg: topbar.backgroundColor,
-      accent: root.getPropertyValue("--accent").trim()
+      accent: root.getPropertyValue("--managed-accent").trim(),
+      secondaryAccent: root.getPropertyValue("--managed-secondary-accent").trim()
+    };
+  });
+}
+
+async function brandLogoState(page) {
+  return page.locator(".brand-logo").evaluate((logo) => {
+    const frame = logo.closest(".brand-logo-frame");
+    const copy = document.querySelector(".brand-copy");
+    const rectFor = (element) => {
+      const rect = element?.getBoundingClientRect();
+      return rect
+        ? { top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left, width: rect.width, height: rect.height }
+        : { top: 0, right: 0, bottom: 0, left: 0, width: 0, height: 0 };
+    };
+    const frameRect = rectFor(frame);
+    const copyRect = rectFor(copy);
+    const frameCenter = frameRect.top + frameRect.height / 2;
+    const copyCenter = copyRect.top + copyRect.height / 2;
+    return {
+      visible: frameRect.width > 0 && frameRect.height > 0 && logo.naturalWidth > 0,
+      alt: logo.getAttribute("alt") || "",
+      src: logo.currentSrc || logo.getAttribute("src") || "",
+      naturalWidth: logo.naturalWidth,
+      naturalHeight: logo.naturalHeight,
+      frameWidth: Math.round(frameRect.width),
+      frameHeight: Math.round(frameRect.height),
+      copyGap: Math.round(copyRect.left - frameRect.right),
+      copyCenterDelta: Math.round(Math.abs(frameCenter - copyCenter))
     };
   });
 }
