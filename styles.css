@@ -21,6 +21,10 @@
   --accent-strong: var(--managed-accent-strong);
   --accent-soft: var(--managed-accent-soft);
   --accent-tint: var(--managed-accent-tint);
+  --secondary-accent: var(--managed-secondary-accent);
+  --secondary-accent-strong: var(--managed-secondary-accent-strong);
+  --secondary-accent-soft: var(--managed-secondary-accent-soft);
+  --secondary-accent-tint: var(--managed-secondary-accent-tint);
   --blue: var(--managed-blue);
   --blue-soft: var(--managed-blue-soft);
   --amber: var(--managed-amber);
@@ -78,18 +82,29 @@ body {
   min-width: 0;
 }
 
-.brand-mark {
+.brand-logo-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 1px 0 var(--inset-highlight) inset, var(--shadow-soft);
+}
+
+.brand-logo {
+  display: block;
+  width: clamp(112px, 10vw, 142px);
+  height: auto;
+}
+
+.brand-copy {
+  min-width: 0;
   display: grid;
-  place-items: center;
-  flex: 0 0 48px;
-  width: 48px;
-  height: 48px;
-  border-radius: 16px;
-  background: var(--brand-start);
-  color: var(--surface);
-  box-shadow: 0 14px 34px rgba(15, 118, 110, 0.28);
-  font-weight: 900;
-  letter-spacing: 0;
+  gap: 2px;
 }
 
 h1,
@@ -1454,9 +1469,9 @@ select:focus {
   transition: width 160ms ease;
 }
 
-.loading-spline-status {
+.loading-modal-card .loading-spline-status {
   margin-top: 7px;
-  color: var(--muted);
+  color: var(--secondary-accent-strong);
   font-size: 11px;
   font-weight: 750;
   font-variant-numeric: tabular-nums;
@@ -2397,10 +2412,9 @@ select:focus {
     grid-template-columns: 1fr;
   }
 
-  .brand-mark {
-    flex-basis: 44px;
-    width: 44px;
-    height: 44px;
+  .brand-logo-frame {
+    min-height: 40px;
+    padding: 0 10px;
   }
 
   .button,
@@ -2464,13 +2478,16 @@ select:focus {
   }
 
   .brand {
-    align-items: flex-start;
+    align-items: center;
   }
 
-  .brand-mark {
-    flex-basis: 38px;
-    width: 38px;
-    height: 38px;
+  .brand-logo-frame {
+    min-height: 38px;
+    padding: 0 9px;
+  }
+
+  .brand-logo {
+    width: 108px;
   }
 
   h1 {
