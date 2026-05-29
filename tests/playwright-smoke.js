@@ -66,6 +66,7 @@ async function run() {
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
     const latestJsonLoad = await datasetLoadState(page);
+    const latestReportSummary = await reportSummaryState(page);
     await page.locator("#chooseCsvButton").click();
     await page.getByRole("menuitem", { name: "Contacts" }).waitFor({ state: "visible", timeout: 5000 });
     await page.keyboard.press("Escape");
@@ -237,6 +238,9 @@ async function run() {
     if (latestJsonLoad.fileName !== "salesforce-report-latest.json" || latestJsonLoad.rowCount !== 2 || latestJsonLoad.groupCount !== 1 || latestJsonLoad.processingMode !== "worker") {
       throw new Error(`Expected latest JSON dataset to load through Recent files: ${JSON.stringify(latestJsonLoad)}`);
     }
+    if (latestReportSummary.labels.join("|") !== "Total Records|Match Groups" || latestReportSummary.values.records !== "2" || latestReportSummary.values.groups !== "1" || /Exact|Near/.test(latestReportSummary.text)) {
+      throw new Error(`Expected compact report summary with records and groups only: ${JSON.stringify(latestReportSummary)}`);
+    }
     if (!latestRecentFiles.contacts || !latestRecentFiles.accounts) {
       throw new Error(`Expected latest Contact and Account exports in Recent files: ${JSON.stringify(latestRecentFiles)}`);
     }
@@ -407,6 +411,21 @@ async function datasetLoadState(page) {
     workerAvailable: typeof Worker !== "undefined",
     processingMode: state.lastProcessingMode
   }));
+}
+
+async function reportSummaryState(page) {
+  return page.locator("#metrics").evaluate((node) => {
+    const stats = [...node.querySelectorAll("[data-summary-metric]")];
+    return {
+      className: node.className,
+      labels: stats.map((stat) => stat.querySelector(".report-stat-label")?.textContent?.trim() || ""),
+      values: Object.fromEntries(stats.map((stat) => [
+        stat.dataset.summaryMetric,
+        stat.querySelector(".report-stat-value")?.textContent?.trim() || ""
+      ])),
+      text: node.textContent?.trim() || ""
+    };
+  });
 }
 
 async function duplicateReviewerDebugState(page) {
