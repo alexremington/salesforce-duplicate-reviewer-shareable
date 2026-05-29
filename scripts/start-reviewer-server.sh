@@ -37,7 +37,7 @@ server_is_duplicate_reviewer() {
 server_supports_required_features() {
   local health
   health="$(server_health)"
-  [[ "${health}" == *'"salesforceMerge":true'* && "${health}" == *'"latestStagingFiles":true'* && "${health}" == *'"jsonDatasets":true'* ]]
+  [[ "${health}" == *'"salesforceMerge":true'* && "${health}" == *'"latestStagingFiles":true'* && "${health}" == *'"jsonDatasets":true'* && "${health}" == *'"staticAssetRoot":true'* && "${health}" == *'"svgStaticAssets":true'* && "${health}" == *'"brandLogoAsset":true'* ]]
 }
 
 write_server_plist() {
