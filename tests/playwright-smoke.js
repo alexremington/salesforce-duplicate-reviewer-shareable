@@ -235,6 +235,9 @@ async function run() {
     if (!loadingProgressbar.exists || loadingProgressbar.min !== "0" || loadingProgressbar.max !== "100") {
       throw new Error(`Expected the loading modal to include a determinate progress bar: ${JSON.stringify(loadingProgressbar)}`);
     }
+    if (!/^Reticulating splines: [\d,]+\/[\d,]+ - sector [\d,]+$/.test(loadingProgressbar.splineText)) {
+      throw new Error(`Expected the loading modal to include the Maxis-style spline status: ${JSON.stringify(loadingProgressbar)}`);
+    }
     if (latestJsonLoad.fileName !== "salesforce-report-latest.json" || latestJsonLoad.rowCount !== 2 || latestJsonLoad.groupCount !== 1 || latestJsonLoad.processingMode !== "worker") {
       throw new Error(`Expected latest JSON dataset to load through Recent files: ${JSON.stringify(latestJsonLoad)}`);
     }
@@ -501,7 +504,8 @@ async function loadingProgressbarState(page) {
     role: element.getAttribute("role") || "",
     min: element.getAttribute("aria-valuemin") || "",
     max: element.getAttribute("aria-valuemax") || "",
-    now: element.getAttribute("aria-valuenow") || ""
+    now: element.getAttribute("aria-valuenow") || "",
+    splineText: document.querySelector("#loadingSplineStatus")?.textContent?.trim() || ""
   }));
 }
 
