@@ -1244,8 +1244,11 @@ select:focus {
   flex-wrap: wrap;
   align-items: flex-start;
   gap: 20px 32px;
-  padding: 0 0 12px;
-  border-bottom: 1px solid var(--line);
+  padding: 10px 14px;
+  background: var(--surface-panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 1px 0 var(--inset-highlight) inset;
 }
 
 .report-stat {
@@ -1257,13 +1260,13 @@ select:focus {
 .report-stat-label {
   color: var(--muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .report-stat-value {
   color: var(--ink);
-  font-size: 28px;
-  font-weight: 750;
+  font-size: 18px;
+  font-weight: 400;
   line-height: 1;
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
@@ -1276,15 +1279,15 @@ select:focus {
   gap: 16px;
   background: var(--surface-panel);
   border: 1px solid var(--line);
-  border-radius: 26px;
-  padding: 20px;
-  box-shadow: var(--shadow-soft);
+  border-radius: 8px;
+  padding: 12px 14px;
+  box-shadow: 0 1px 0 var(--inset-highlight) inset;
   min-width: 0;
 }
 
 .review-header h2 {
-  font-family: "Iowan Old Style", "Palatino", Georgia, serif;
-  font-size: 34px;
+  font-size: 18px;
+  font-weight: 400;
   line-height: 1.2;
   margin-top: 3px;
   letter-spacing: 0;
@@ -2356,12 +2359,17 @@ select:focus {
     overflow: visible;
   }
 
-  .topbar,
-  .review-header {
+  .topbar {
     align-items: stretch;
     flex-direction: column;
     gap: 14px;
     padding: 16px;
+  }
+
+  .review-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
   }
 
   h1 {
@@ -2423,14 +2431,6 @@ select:focus {
 
   .review-pane {
     overflow: visible;
-  }
-
-  .report-stat-value {
-    font-size: 26px;
-  }
-
-  .review-header h2 {
-    font-size: 28px;
   }
 
   .shortcuts-header h2 {
@@ -2620,8 +2620,9 @@ select:focus {
     border-bottom: 0;
   }
 
-  .review-header h2 {
-    font-size: 22px;
+  .review-header h2,
+  .report-stat-value {
+    font-size: 16px;
   }
 
   .detail-surface,
@@ -2697,7 +2698,7 @@ select:focus {
   }
 
   .review-header h2 {
-    font-size: 20px;
+    font-size: 16px;
   }
 
   .review-header,
@@ -2707,11 +2708,11 @@ select:focus {
 
   .report-summary {
     gap: 14px 24px;
-    padding-bottom: 10px;
+    padding: 10px;
   }
 
   .report-stat-value {
-    font-size: 20px;
+    font-size: 16px;
   }
 
   .comparison-table {

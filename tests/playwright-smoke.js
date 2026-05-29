@@ -241,6 +241,12 @@ async function run() {
     if (latestReportSummary.labels.join("|") !== "Total Records|Match Groups" || latestReportSummary.values.records !== "2" || latestReportSummary.values.groups !== "1" || /Exact|Near/.test(latestReportSummary.text)) {
       throw new Error(`Expected compact report summary with records and groups only: ${JSON.stringify(latestReportSummary)}`);
     }
+    if (!latestReportSummary.typography.sizesAligned || fontWeightNumber(latestReportSummary.typography.titleWeight) >= 600 || fontWeightNumber(latestReportSummary.typography.valueWeight) >= 600) {
+      throw new Error(`Expected summary values and group title to match the match-score size without bold weight: ${JSON.stringify(latestReportSummary.typography)}`);
+    }
+    if (latestReportSummary.surface.summaryBackground === latestReportSummary.surface.canvasBackground || latestReportSummary.surface.reviewHeaderBackground === latestReportSummary.surface.canvasBackground) {
+      throw new Error(`Expected summary and group title to sit on a distinct readable surface: ${JSON.stringify(latestReportSummary.surface)}`);
+    }
     if (!latestRecentFiles.contacts || !latestRecentFiles.accounts) {
       throw new Error(`Expected latest Contact and Account exports in Recent files: ${JSON.stringify(latestRecentFiles)}`);
     }
@@ -416,6 +422,28 @@ async function datasetLoadState(page) {
 async function reportSummaryState(page) {
   return page.locator("#metrics").evaluate((node) => {
     const stats = [...node.querySelectorAll("[data-summary-metric]")];
+    const firstValue = stats[0]?.querySelector(".report-stat-value");
+    const detailTitle = document.querySelector("#detailTitle");
+    const matchScore = document.querySelector(".pair-summary strong");
+    const reviewPane = document.querySelector(".review-pane");
+    const reviewHeader = document.querySelector(".review-header");
+    const styleFor = (element) => {
+      const style = element ? getComputedStyle(element) : null;
+      return {
+        fontSize: style?.fontSize || "",
+        fontWeight: style?.fontWeight || "",
+        backgroundColor: style?.backgroundColor || ""
+      };
+    };
+    const valueStyle = styleFor(firstValue);
+    const titleStyle = styleFor(detailTitle);
+    const matchScoreStyle = styleFor(matchScore);
+    const summaryStyle = styleFor(node);
+    const reviewPaneStyle = styleFor(reviewPane);
+    const reviewHeaderStyle = styleFor(reviewHeader);
+    const valueSize = Number.parseFloat(valueStyle.fontSize) || 0;
+    const titleSize = Number.parseFloat(titleStyle.fontSize) || 0;
+    const matchScoreSize = Number.parseFloat(matchScoreStyle.fontSize) || 0;
     return {
       className: node.className,
       labels: stats.map((stat) => stat.querySelector(".report-stat-label")?.textContent?.trim() || ""),
@@ -423,9 +451,28 @@ async function reportSummaryState(page) {
         stat.dataset.summaryMetric,
         stat.querySelector(".report-stat-value")?.textContent?.trim() || ""
       ])),
+      typography: {
+        valueSize,
+        titleSize,
+        matchScoreSize,
+        valueWeight: valueStyle.fontWeight,
+        titleWeight: titleStyle.fontWeight,
+        sizesAligned: Math.abs(valueSize - matchScoreSize) <= 0.5 && Math.abs(titleSize - matchScoreSize) <= 0.5
+      },
+      surface: {
+        summaryBackground: summaryStyle.backgroundColor,
+        reviewHeaderBackground: reviewHeaderStyle.backgroundColor,
+        canvasBackground: reviewPaneStyle.backgroundColor
+      },
       text: node.textContent?.trim() || ""
     };
   });
+}
+
+function fontWeightNumber(value) {
+  if (value === "normal") return 400;
+  if (value === "bold") return 700;
+  return Number.parseFloat(value) || 0;
 }
 
 async function duplicateReviewerDebugState(page) {
