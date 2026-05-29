@@ -6,7 +6,7 @@ This app is a dependency-free browser tool. `index.html` loads `styles.css` and 
 
 - `index.html`: App shell, import controls, collapsible panels, review pane, and static button/section markup.
 - `styles.css`: Layout, panel, group-list, detail-window, batch-action, and responsive styling.
-- `app.js`: JSON/CSV parsing, worker orchestration, field mapping, duplicate detection, review state, rendering, recent-file storage, and export.
+- `app.js`: JSON/CSV parsing, field mapping, duplicate detection, review state, rendering, recent-file storage, and export. Worker lifecycle orchestration is delegated to the shared `ManagedWorkerClient` helper copied under `vendor/managed-app/scripts/`.
 - `matching-worker.js`: Web Worker entry point for parsing datasets and calculating match groups off the UI thread.
 - `scripts/check-account-calibration.js`: Node regression check for exported account or contact label CSVs.
 - `README.md`: User-facing usage notes.

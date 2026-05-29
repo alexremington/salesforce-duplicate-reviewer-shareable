@@ -759,8 +759,7 @@ let shortcutsReturnFocus = null;
 let visibleGroupsCache = null;
 let groupLookupCache = null;
 let groupListRenderFrame = 0;
-let matchingWorkerJob = null;
-let matchingWorkerJobSequence = 0;
+let matchingWorkerRunner = null;
 
 const els = {
   csvInput: document.getElementById("csvInput"),
@@ -2109,63 +2108,34 @@ function applyComputedGroups(groups) {
 
 function processMatchingJob(payload, progress = async () => {}) {
   if (canUseMatchingWorker()) {
-    return processMatchingJobInWorker(payload, progress).catch((error) => {
-      if (isAbortError(error)) throw error;
-      console.warn("Matching worker failed; falling back to main thread.", error);
-      return processMatchingJobOnMain(payload, progress);
-    });
+    return processMatchingJobInWorker(payload, progress);
   }
   return processMatchingJobOnMain(payload, progress);
 }
 
 function canUseMatchingWorker() {
-  return !IS_MATCHING_WORKER && typeof Worker !== "undefined" && isServerBackedApp();
+  return !IS_MATCHING_WORKER &&
+    typeof Worker !== "undefined" &&
+    isServerBackedApp() &&
+    typeof globalThis.ManagedWorkerClient?.createJobRunner === "function";
 }
 
 function processMatchingJobInWorker(payload, progress = async () => {}) {
-  if (matchingWorkerJob) {
-    matchingWorkerJob.reject(createAbortError("Matching job was replaced by a newer request."));
-    matchingWorkerJob.worker.terminate();
+  if (!matchingWorkerRunner) {
+    matchingWorkerRunner = globalThis.ManagedWorkerClient.createJobRunner({
+      workerUrl: "matching-worker.js",
+      resultMode: "worker",
+      canUseWorker: canUseMatchingWorker,
+      fallback: processMatchingJobOnMain,
+      onFallback(error) {
+        if (!isAbortError(error)) {
+          console.warn("Matching worker failed; falling back to main thread.", error);
+        }
+      }
+    });
   }
 
-  const jobId = ++matchingWorkerJobSequence;
-  const worker = new Worker("matching-worker.js");
-
-  return new Promise((resolve, reject) => {
-    matchingWorkerJob = { id: jobId, worker, reject };
-    worker.onmessage = (event) => {
-      const message = event.data || {};
-      if (!matchingWorkerJob || matchingWorkerJob.id !== jobId) return;
-
-      if (message.type === "progress") {
-        progress(message.message, message.progress).catch(() => {});
-        return;
-      }
-
-      if (message.type === "result") {
-        matchingWorkerJob = null;
-        worker.terminate();
-        resolve({
-          ...(message.result || {}),
-          processingMode: "worker"
-        });
-        return;
-      }
-
-      if (message.type === "error") {
-        matchingWorkerJob = null;
-        worker.terminate();
-        reject(new Error(message.message || "Matching worker failed."));
-      }
-    };
-    worker.onerror = (event) => {
-      if (!matchingWorkerJob || matchingWorkerJob.id !== jobId) return;
-      matchingWorkerJob = null;
-      worker.terminate();
-      reject(new Error(event.message || "Matching worker failed."));
-    };
-    worker.postMessage({ jobId, payload });
-  });
+  return matchingWorkerRunner.run(payload, { progress });
 }
 
 async function processMatchingJobOnMain(payload, progress = async () => {}) {
