@@ -4702,21 +4702,17 @@ function renderMapping() {
 }
 
 function renderMetrics() {
-  const exact = state.groups.filter((group) => group.type === "exact").length;
-  const near = state.groups.filter((group) => group.type === "near").length;
   const metrics = [
-    ["Records", state.rows.length],
-    ["Groups", state.groups.length],
-    ["Exact", exact],
-    ["Near", near]
+    ["records", "Total Records", state.rows.length],
+    ["groups", "Match Groups", state.groups.length]
   ];
 
   els.metrics.innerHTML = metrics
     .map(
-      ([label, value]) => `
-        <div class="metric">
-          <span>${escapeHtml(label)}</span>
-          <strong>${formatNumber(value)}</strong>
+      ([key, label, value]) => `
+        <div class="report-stat" data-summary-metric="${escapeHtml(key)}">
+          <span class="report-stat-label">${escapeHtml(label)}</span>
+          <strong class="report-stat-value">${formatNumber(value)}</strong>
         </div>
       `
     )
@@ -4736,7 +4732,7 @@ function renderTrainingExportButton() {
 
 function renderGroups(options = {}) {
   const filtered = filteredGroups();
-  els.groupCount.textContent = filtered.length;
+  els.groupCount.textContent = formatNumber(filtered.length);
   renderGroupSortToggle();
 
   if (!state.rows.length) {
