@@ -66,6 +66,8 @@ write_server_plist() {
     <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>PORT</key>
     <string>${PORT}</string>
+    <key>DUPLICATE_REVIEWER_PORT</key>
+    <string>${PORT}</string>
     <key>DUPLICATE_REVIEWER_STATIC_DIR</key>
     <string>${STATIC_DIR}</string>
     <key>SF_USE_GENERIC_UNIX_KEYCHAIN</key>

@@ -168,6 +168,8 @@ After a successful staging export, the wrapper starts a local Duplicate Reviewer
 http://127.0.0.1:5180
 ```
 
+Use `DUPLICATE_REVIEWER_PORT` in `.env` to choose a different Duplicate Reviewer port. The launcher intentionally uses this app-specific setting so it can run alongside Launch Scheduler.
+
 It then opens the app with the latest staging JSON dataset auto-loaded. The app sends a macOS Notification Center alert after it finishes loading and matching the dataset, so the alert means the file is ready to review. The staging wrappers use a 60-second Bulk API polling interval by default to reduce Salesforce API calls for large exports.
 
 Opening `index.html` directly remains supported for manual JSON or CSV uploads. If it is opened from disk while the local server is already running, the page redirects itself to the server-backed URL so the latest Scheduler exports and staging auto-load URLs keep working. If the server is not running, the static page stays open as a manual-upload fallback.

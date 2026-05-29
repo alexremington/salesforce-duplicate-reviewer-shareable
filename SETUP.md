@@ -40,6 +40,8 @@ Open:
 http://127.0.0.1:5180
 ```
 
+Use `DUPLICATE_REVIEWER_PORT` in `.env` only if you need to move Duplicate Reviewer off its default port.
+
 The browser UI can also load CSV files directly through the file picker.
 
 Use the launcher for normal review work after Scheduler downloads finish. The server-backed app automatically adds the latest Contact and Account exports to `Recent files` when those exports exist.

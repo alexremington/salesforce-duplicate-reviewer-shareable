@@ -26,7 +26,7 @@ function Import-DotEnv {
 
 Import-DotEnv (Join-Path $ProjectDir '.env')
 
-$Port = if ($env:DUPLICATE_REVIEWER_PORT) { $env:DUPLICATE_REVIEWER_PORT } elseif ($env:PORT) { $env:PORT } else { '5180' }
+$Port = if ($env:DUPLICATE_REVIEWER_PORT) { $env:DUPLICATE_REVIEWER_PORT } else { '5180' }
 $Url = "http://127.0.0.1:$Port"
 $LogDir = Join-Path $ProjectDir 'logs'
 $OutLog = Join-Path $LogDir 'duplicate-reviewer.out.log'
@@ -77,7 +77,7 @@ function Start-DuplicateReviewerServer {
   Write-Host 'Starting Salesforce Duplicate Reviewer...'
   Start-Process `
     -FilePath 'cmd.exe' `
-    -ArgumentList "/c set PORT=$Port&& npm start >> `"$OutLog`" 2>> `"$ErrLog`"" `
+    -ArgumentList "/c set `"DUPLICATE_REVIEWER_PORT=$Port`"&& set `"PORT=$Port`"&& npm start >> `"$OutLog`" 2>> `"$ErrLog`"" `
     -WorkingDirectory $ProjectDir `
     -WindowStyle Hidden
 }

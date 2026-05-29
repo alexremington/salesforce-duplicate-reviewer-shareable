@@ -11,7 +11,7 @@ const ROOT_DIR = __dirname;
 loadDotEnv(path.join(ROOT_DIR, ".env"));
 const STATIC_ROOT_DIR = path.resolve(process.env.DUPLICATE_REVIEWER_STATIC_DIR || ROOT_DIR);
 const HOST = process.env.HOST || "127.0.0.1";
-const PORT = Number(process.env.PORT || 5180);
+const PORT = Number(process.env.DUPLICATE_REVIEWER_PORT || process.env.PORT || 5180);
 const OUTPUT_DIR = path.join(ROOT_DIR, "Output");
 const CODEX_BIN = process.env.CODEX_BIN || "codex";
 const CODEX_MODEL = process.env.CODEX_MODEL || "gpt-5.5";

@@ -5,9 +5,10 @@ PROJECT_DIR="${0:A:h}"
 source "${PROJECT_DIR}/scripts/load-env.sh"
 load_project_env "${PROJECT_DIR}/.env"
 
-PORT="${DUPLICATE_REVIEWER_PORT:-${PORT:-5180}}"
+PORT="${DUPLICATE_REVIEWER_PORT:-5180}"
 
 export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export DUPLICATE_REVIEWER_PORT="${PORT}"
 export PORT
 
 cd "${PROJECT_DIR}"
