@@ -12,7 +12,7 @@ if ! git rev-parse --verify "${BRANCH}" >/dev/null 2>&1; then
   exit 2
 fi
 
-PRIVATE_PATTERN='00O[A-Za-z0-9]{12,15}|00D[A-Za-z0-9]{12,15}|/Users/|[A-Za-z]:\\Users\\|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
+PRIVATE_PATTERN='00O[A-Za-z0-9]{12,15}|00D[A-Za-z0-9]{12,15}|OneDrive-POLITICO|/Users/|[A-Za-z]:\\Users\\|politico--staging|politico-staging|politico\.my\.salesforce|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
 GENERATED_PATTERN='(^|/)(Output|logs|incoming|backups|data|dist|node_modules)(/|$)|(^|/)\.DS_Store$'
 
 if git grep -n -E "${PRIVATE_PATTERN}" "${BRANCH}" -- . ':(exclude)scripts/check-shareable.sh'; then

@@ -82,18 +82,29 @@ body {
   min-width: 0;
 }
 
-.brand-mark {
+.brand-logo-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 1px 0 var(--inset-highlight) inset, var(--shadow-soft);
+}
+
+.brand-logo {
+  display: block;
+  width: clamp(112px, 10vw, 142px);
+  height: auto;
+}
+
+.brand-copy {
+  min-width: 0;
   display: grid;
-  place-items: center;
-  flex: 0 0 48px;
-  width: 48px;
-  height: 48px;
-  border-radius: 16px;
-  background: var(--brand-start);
-  color: var(--surface);
-  box-shadow: 0 14px 34px rgba(15, 118, 110, 0.28);
-  font-weight: 900;
-  letter-spacing: 0;
+  gap: 2px;
 }
 
 h1,
@@ -125,6 +136,33 @@ h1 {
   gap: 10px;
   flex-wrap: wrap;
   min-width: 0;
+}
+
+.topbar-support {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 2px;
+  min-width: max-content;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.25;
+  text-align: right;
+}
+
+.topbar-support span,
+.topbar-support a {
+  display: block;
+}
+
+.topbar-support a {
+  color: var(--secondary-accent-strong);
+  text-decoration: none;
+}
+
+.topbar-support a:hover,
+.topbar-support a:focus-visible {
+  text-decoration: underline;
 }
 
 .topbar-utility-actions {
@@ -2401,10 +2439,9 @@ select:focus {
     grid-template-columns: 1fr;
   }
 
-  .brand-mark {
-    flex-basis: 44px;
-    width: 44px;
-    height: 44px;
+  .brand-logo-frame {
+    min-height: 40px;
+    padding: 0 10px;
   }
 
   .button,
@@ -2416,6 +2453,11 @@ select:focus {
   .topbar-actions,
   .review-actions {
     justify-content: flex-start;
+  }
+
+  .topbar-support {
+    min-width: 0;
+    text-align: left;
   }
 
   .merge-readiness-grid {
@@ -2468,13 +2510,16 @@ select:focus {
   }
 
   .brand {
-    align-items: flex-start;
+    align-items: center;
   }
 
-  .brand-mark {
-    flex-basis: 38px;
-    width: 38px;
-    height: 38px;
+  .brand-logo-frame {
+    min-height: 38px;
+    padding: 0 9px;
+  }
+
+  .brand-logo {
+    width: 108px;
   }
 
   h1 {
@@ -2499,6 +2544,10 @@ select:focus {
   }
 
   .topbar-utility-actions {
+    width: 100%;
+  }
+
+  .topbar-support {
     width: 100%;
   }
 
