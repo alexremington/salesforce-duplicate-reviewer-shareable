@@ -233,8 +233,8 @@ async function run() {
     if (!brandLogo.supportContact || brandLogo.supportHref !== "mailto:aremington@politico.com" || !brandLogo.supportRightAligned) {
       throw new Error(`Expected support contact at the right side of the header: ${JSON.stringify(brandLogo)}`);
     }
-    if (!brandLogo.actionsCentered) {
-      throw new Error(`Expected Duplicate Reviewer header buttons to be centered: ${JSON.stringify(brandLogo)}`);
+    if (!brandLogo.actionsCentered || !brandLogo.actionRowsBalanced || !brandLogo.actionsComfortable) {
+      throw new Error(`Expected Duplicate Reviewer header buttons to be centered in balanced, legible rows: ${JSON.stringify(brandLogo)}`);
     }
     if (brandLogo.copyCenterDelta > 4 || brandLogo.copyGap < 10 || brandLogo.copyGap > 18) {
       throw new Error(`Expected POLITICO logo to align vertically with the brand text and keep even brand spacing: ${JSON.stringify(brandLogo)}`);
@@ -710,6 +710,22 @@ async function brandLogoState(page) {
     const copyCenter = copyRect.top + copyRect.height / 2;
     const topbarCenter = topbarRect.left + topbarRect.width / 2;
     const actionsCenter = actionsRect.left + actionsRect.width / 2;
+    const actionButtons = [...actions.querySelectorAll(".button, .icon-button")]
+      .filter((button) => button.getClientRects().length > 0);
+    const rowCounts = [...actionButtons.reduce((rows, button) => {
+      const top = Math.round(button.getBoundingClientRect().top);
+      rows.set(top, (rows.get(top) || 0) + 1);
+      return rows;
+    }, new Map()).values()];
+    const buttonRects = actionButtons.map((button) => {
+      const rect = button.getBoundingClientRect();
+      const style = getComputedStyle(button);
+      return {
+        height: Math.round(rect.height),
+        fontSize: Number.parseFloat(style.fontSize),
+        width: Math.round(rect.width)
+      };
+    });
     return {
       visible: frameRect.width > 0 && frameRect.height > 0 && logo.naturalWidth > 0,
       alt: logo.getAttribute("alt") || "",
@@ -724,7 +740,12 @@ async function brandLogoState(page) {
       supportHref: supportLink?.getAttribute("href") || "",
       supportRightAligned: Math.abs(Math.round(topbarRect.right - supportRect.right) - 24) <= 2,
       actionsCenterDelta: Math.abs(Math.round(actionsCenter - topbarCenter)),
-      actionsCentered: actionsRect.width > 0 && Math.abs(Math.round(actionsCenter - topbarCenter)) <= 16
+      actionsCentered: actionsRect.width > 0 && Math.abs(Math.round(actionsCenter - topbarCenter)) <= 16,
+      actionRowCounts: rowCounts,
+      actionButtonCount: actionButtons.length,
+      actionButtonRects: buttonRects,
+      actionRowsBalanced: rowCounts.length === 2 && rowCounts[0] === 4 && rowCounts[1] === 3,
+      actionsComfortable: buttonRects.every((rect) => rect.height <= 40 && rect.fontSize <= 12)
     };
   });
 }

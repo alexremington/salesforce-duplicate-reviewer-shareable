@@ -130,13 +130,25 @@ h1 {
 }
 
 .topbar-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, max-content);
   align-items: center;
   justify-content: center;
   justify-self: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 8px;
   min-width: 0;
+}
+
+.topbar-actions .button,
+.topbar-actions .icon-button {
+  min-height: 38px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.topbar-actions .icon-button {
+  width: 40px;
+  padding: 0;
 }
 
 .topbar-support {
@@ -168,10 +180,7 @@ h1 {
 }
 
 .topbar-utility-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  flex: 0 0 auto;
+  display: contents;
 }
 
 .button,
@@ -2459,6 +2468,8 @@ select:focus {
 
   .topbar-actions {
     justify-self: stretch;
+    grid-template-columns: repeat(2, max-content);
+    justify-content: flex-start;
   }
 
   .topbar-support {
@@ -2549,7 +2560,12 @@ select:focus {
     flex-direction: column;
   }
 
+  .topbar-actions {
+    display: flex;
+  }
+
   .topbar-utility-actions {
+    display: inline-flex;
     width: 100%;
   }
 
