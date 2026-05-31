@@ -227,8 +227,11 @@ async function run() {
     if (!lightTheme.secondaryAccent || !darkTheme.secondaryAccent || lightTheme.secondaryAccent === lightTheme.accent || darkTheme.secondaryAccent === darkTheme.accent) {
       throw new Error(`Expected a complementary secondary accent in the shared theme: ${JSON.stringify({ lightTheme, darkTheme })}`);
     }
-    if (!brandLogo.visible || brandLogo.alt !== "POLITICO" || !brandLogo.src.endsWith("/assets/politico-logo.svg")) {
+    if (!brandLogo.visible || brandLogo.alt !== "POLITICO" || !brandLogo.src.endsWith("/vendor/managed-app/assets/politico-logo.svg")) {
       throw new Error(`Expected POLITICO logo in the top-left header: ${JSON.stringify(brandLogo)}`);
+    }
+    if (!brandLogo.supportContact || brandLogo.supportHref !== "mailto:aremington@politico.com" || !brandLogo.supportRightAligned) {
+      throw new Error(`Expected support contact at the right side of the header: ${JSON.stringify(brandLogo)}`);
     }
     if (brandLogo.copyCenterDelta > 4 || brandLogo.copyGap < 10 || brandLogo.copyGap > 18) {
       throw new Error(`Expected POLITICO logo to align vertically with the brand text and keep even brand spacing: ${JSON.stringify(brandLogo)}`);
@@ -685,6 +688,9 @@ async function brandLogoState(page) {
   return page.locator(".brand-logo").evaluate((logo) => {
     const frame = logo.closest(".brand-logo-frame");
     const copy = document.querySelector(".brand-copy");
+    const topbar = document.querySelector(".topbar");
+    const support = document.querySelector(".topbar-support");
+    const supportLink = document.querySelector(".topbar-support a");
     const rectFor = (element) => {
       const rect = element?.getBoundingClientRect();
       return rect
@@ -693,6 +699,8 @@ async function brandLogoState(page) {
     };
     const frameRect = rectFor(frame);
     const copyRect = rectFor(copy);
+    const topbarRect = rectFor(topbar);
+    const supportRect = rectFor(support);
     const frameCenter = frameRect.top + frameRect.height / 2;
     const copyCenter = copyRect.top + copyRect.height / 2;
     return {
@@ -704,7 +712,10 @@ async function brandLogoState(page) {
       frameWidth: Math.round(frameRect.width),
       frameHeight: Math.round(frameRect.height),
       copyGap: Math.round(copyRect.left - frameRect.right),
-      copyCenterDelta: Math.round(Math.abs(frameCenter - copyCenter))
+      copyCenterDelta: Math.round(Math.abs(frameCenter - copyCenter)),
+      supportContact: support?.textContent?.replace(/\s+/g, " ").trim() || "",
+      supportHref: supportLink?.getAttribute("href") || "",
+      supportRightAligned: Math.abs(Math.round(topbarRect.right - supportRect.right) - 24) <= 2
     };
   });
 }

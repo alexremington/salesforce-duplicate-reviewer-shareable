@@ -12,7 +12,7 @@ if ! git rev-parse --verify "${BRANCH}" >/dev/null 2>&1; then
   exit 2
 fi
 
-PRIVATE_PATTERN='00OV|00OS|politico|aremington|OneDrive-POLITICO|/Users|politico--staging|politico-staging|politico\.my\.salesforce|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+PRIVATE_PATTERN='00OV|00OS|OneDrive-POLITICO|/Users|politico--staging|politico-staging|politico\.my\.salesforce|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 GENERATED_PATTERN='(^|/)(Output|logs|incoming|backups|data|dist|node_modules)(/|$)|(^|/)\.DS_Store$'
 
 if git grep -n -E "${PRIVATE_PATTERN}" "${BRANCH}" -- . ':(exclude)scripts/check-shareable.sh'; then

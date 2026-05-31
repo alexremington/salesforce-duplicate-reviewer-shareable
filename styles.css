@@ -138,6 +138,33 @@ h1 {
   min-width: 0;
 }
 
+.topbar-support {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 2px;
+  min-width: max-content;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.25;
+  text-align: right;
+}
+
+.topbar-support span,
+.topbar-support a {
+  display: block;
+}
+
+.topbar-support a {
+  color: var(--secondary-accent-strong);
+  text-decoration: none;
+}
+
+.topbar-support a:hover,
+.topbar-support a:focus-visible {
+  text-decoration: underline;
+}
+
 .topbar-utility-actions {
   display: inline-flex;
   align-items: center;
@@ -2428,6 +2455,11 @@ select:focus {
     justify-content: flex-start;
   }
 
+  .topbar-support {
+    min-width: 0;
+    text-align: left;
+  }
+
   .merge-readiness-grid {
     grid-template-columns: 1fr;
   }
@@ -2512,6 +2544,10 @@ select:focus {
   }
 
   .topbar-utility-actions {
+    width: 100%;
+  }
+
+  .topbar-support {
     width: 100%;
   }
 
