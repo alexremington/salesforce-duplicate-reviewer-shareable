@@ -233,6 +233,9 @@ async function run() {
     if (!brandLogo.supportContact || brandLogo.supportHref !== "mailto:aremington@politico.com" || !brandLogo.supportRightAligned) {
       throw new Error(`Expected support contact at the right side of the header: ${JSON.stringify(brandLogo)}`);
     }
+    if (!brandLogo.actionsCentered) {
+      throw new Error(`Expected Duplicate Reviewer header buttons to be centered: ${JSON.stringify(brandLogo)}`);
+    }
     if (brandLogo.copyCenterDelta > 4 || brandLogo.copyGap < 10 || brandLogo.copyGap > 18) {
       throw new Error(`Expected POLITICO logo to align vertically with the brand text and keep even brand spacing: ${JSON.stringify(brandLogo)}`);
     }
@@ -689,6 +692,7 @@ async function brandLogoState(page) {
     const frame = logo.closest(".brand-logo-frame");
     const copy = document.querySelector(".brand-copy");
     const topbar = document.querySelector(".topbar");
+    const actions = document.querySelector(".topbar-actions");
     const support = document.querySelector(".topbar-support");
     const supportLink = document.querySelector(".topbar-support a");
     const rectFor = (element) => {
@@ -700,9 +704,12 @@ async function brandLogoState(page) {
     const frameRect = rectFor(frame);
     const copyRect = rectFor(copy);
     const topbarRect = rectFor(topbar);
+    const actionsRect = rectFor(actions);
     const supportRect = rectFor(support);
     const frameCenter = frameRect.top + frameRect.height / 2;
     const copyCenter = copyRect.top + copyRect.height / 2;
+    const topbarCenter = topbarRect.left + topbarRect.width / 2;
+    const actionsCenter = actionsRect.left + actionsRect.width / 2;
     return {
       visible: frameRect.width > 0 && frameRect.height > 0 && logo.naturalWidth > 0,
       alt: logo.getAttribute("alt") || "",
@@ -715,7 +722,9 @@ async function brandLogoState(page) {
       copyCenterDelta: Math.round(Math.abs(frameCenter - copyCenter)),
       supportContact: support?.textContent?.replace(/\s+/g, " ").trim() || "",
       supportHref: supportLink?.getAttribute("href") || "",
-      supportRightAligned: Math.abs(Math.round(topbarRect.right - supportRect.right) - 24) <= 2
+      supportRightAligned: Math.abs(Math.round(topbarRect.right - supportRect.right) - 24) <= 2,
+      actionsCenterDelta: Math.abs(Math.round(actionsCenter - topbarCenter)),
+      actionsCentered: actionsRect.width > 0 && Math.abs(Math.round(actionsCenter - topbarCenter)) <= 16
     };
   });
 }
