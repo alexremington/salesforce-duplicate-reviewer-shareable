@@ -52,6 +52,7 @@ async function run() {
     const lightPaneSurfaces = await paneSurfaceState(page);
     const brandLogo = await brandLogoState(page);
     await page.screenshot({ path: path.join(outDir, "desktop-empty.png"), fullPage: false });
+    const emptyInteractiveReachability = await visibleInteractiveReachability(page);
     await page.emulateMedia({ colorScheme: "dark" });
     await page.waitForTimeout(100);
     const darkTheme = await themeColorState(page);
@@ -68,11 +69,13 @@ async function run() {
     const labelStatusInMatchControls = await page.locator("#matchControlsPanelBody [data-label-status-filter]").count();
     const hideLabeledRemoved = await page.locator("#hideLabeledGroups").count() === 0;
     const loadingProgressbar = await loadingProgressbarState(page);
+    const loadingStatusSamples = await loadingStatusRotationState(page);
     await page.locator(".recent-file").filter({ hasText: "Latest Contacts" }).first().click();
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
     const latestJsonLoad = await datasetLoadState(page);
     const latestReportSummary = await reportSummaryState(page);
+    const loadedInteractiveReachability = await visibleInteractiveReachability(page);
     await page.locator("#chooseCsvButton").click();
     await page.getByRole("menuitem", { name: "Contacts" }).waitFor({ state: "visible", timeout: 5000 });
     await page.keyboard.press("Escape");
@@ -210,7 +213,7 @@ async function run() {
     const mergePayload = await captureMergePayload(page);
     await page.setViewportSize({ width: 1280, height: 560 });
     const workspaceColumnScroll = await assertVerticalScrollAvailable(page, ".workspace-column", "workspace column");
-    const reviewPaneScroll = await assertVerticalScrollAvailable(page, ".review-pane", "review pane");
+    const rightPaneScrollModel = await assertRightPaneSingleScrollModel(page);
     const rootScrollPolicy = await assertRootScrollPolicy(page);
     const scrollTrapState = await assertNoPrimaryScrollTraps(page);
     const interactiveReachability = await visibleInteractiveReachability(page);
@@ -233,6 +236,7 @@ async function run() {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator(".review-header").scrollIntoViewIfNeeded();
     const mobileScroll = await assertWindowScrollAvailable(page);
+    const mobileInteractiveReachability = await visibleInteractiveReachability(page);
     await page.screenshot({ path: path.join(outDir, "mobile-review.png"), fullPage: false });
 
     const layout = await page.evaluate(() => ({
@@ -290,8 +294,23 @@ async function run() {
     if (!loadingProgressbar.exists || loadingProgressbar.min !== "0" || loadingProgressbar.max !== "100") {
       throw new Error(`Expected the loading modal to include a determinate progress bar: ${JSON.stringify(loadingProgressbar)}`);
     }
-    if (!/^Reticulating splines: [\d,]+\/[\d,]+ - sector [\d,]+$/.test(loadingProgressbar.splineText)) {
-      throw new Error(`Expected the loading modal to include the Maxis-style spline status: ${JSON.stringify(loadingProgressbar)}`);
+    const statusFamilies = new Set(loadingStatusSamples.map((status) => status.split(":")[0]));
+    if (statusFamilies.size < 7) {
+      throw new Error(`Expected the loading bar to cycle across several progress areas: ${JSON.stringify(loadingStatusSamples)}`);
+    }
+    if (loadingStatusSamples.some((status) => /\bstage 0\//.test(status))) {
+      throw new Error(`Expected loading status stages to use 1-based numbering: ${JSON.stringify(loadingStatusSamples)}`);
+    }
+    if (!loadingStatusSamples.some((status) => /^Reticulating splines: [\d,]+\/[\d,]+ - sector [\d,]+$/.test(status))) {
+      throw new Error(`Expected Reticulating splines to remain in the loading status mix: ${JSON.stringify(loadingStatusSamples)}`);
+    }
+    ["Preparing records", "Building candidate buckets", "Finding candidate pairs", "Scoring candidate pairs", "Rendering duplicate groups"].forEach((family) => {
+      if (!statusFamilies.has(family)) {
+        throw new Error(`Expected ${family} in the loading status rotation: ${JSON.stringify(loadingStatusSamples)}`);
+      }
+    });
+    if (!loadingProgressbar.splineText) {
+      throw new Error(`Expected the loading modal to keep a readable progress-bar status: ${JSON.stringify(loadingProgressbar)}`);
     }
     if (loadingProgressbar.splineColor !== loadingProgressbar.secondaryAccentStrong) {
       throw new Error(`Expected the spline status to use the secondary accent: ${JSON.stringify(loadingProgressbar)}`);
@@ -433,15 +452,22 @@ async function run() {
     if (workspaceColumnScroll.hasOverflow && !workspaceColumnScroll.scrolled) {
       throw new Error(`Workspace column has clipped content but did not scroll: ${JSON.stringify(workspaceColumnScroll)}`);
     }
-    if (reviewPaneScroll.hasOverflow && !reviewPaneScroll.scrolled) {
-      throw new Error(`Review pane has clipped content but did not scroll: ${JSON.stringify(reviewPaneScroll)}`);
+    if (!rightPaneScrollModel.ok) {
+      throw new Error(`Expected the right pane to use one continuous vertical scroll path: ${JSON.stringify(rightPaneScrollModel)}`);
     }
     if (mobileScroll.hasOverflow && !mobileScroll.scrolled) {
       throw new Error(`Mobile page has clipped content but did not scroll: ${JSON.stringify(mobileScroll)}`);
     }
-    if (interactiveReachability.broken.length) {
-      throw new Error(`Visible interactive controls are not reachable: ${JSON.stringify(interactiveReachability.broken)}`);
-    }
+    [
+      ["empty state", emptyInteractiveReachability],
+      ["loaded review", loadedInteractiveReachability],
+      ["merge bottom", interactiveReachability],
+      ["mobile", mobileInteractiveReachability]
+    ].forEach(([label, reachability]) => {
+      if (reachability.broken.length) {
+        throw new Error(`Visible interactive controls are not reachable in ${label}: ${JSON.stringify(reachability.broken)}`);
+      }
+    });
     if (layout.pageScrollWidth > layout.viewportWidth || layout.bodyScrollWidth > layout.viewportWidth) {
       throw new Error(`Unexpected horizontal overflow: ${JSON.stringify(layout)}`);
     }
@@ -465,6 +491,7 @@ async function run() {
       lightPaneSurfaces,
       darkPaneSurfaces,
       loadingProgressbar,
+      loadingStatusSamples,
       latestJsonLoad,
       topbarImportState,
       fastestSearchDefaultUnchecked,
@@ -491,9 +518,14 @@ async function run() {
       rootScrollPolicy,
       scrollTrapState,
       workspaceColumnScroll,
-      reviewPaneScroll,
+      rightPaneScrollModel,
       mobileScroll,
-      interactiveCount: interactiveReachability.count,
+      interactiveCounts: {
+        empty: emptyInteractiveReachability.count,
+        loaded: loadedInteractiveReachability.count,
+        merge: interactiveReachability.count,
+        mobile: mobileInteractiveReachability.count
+      },
       layout,
       screenshotsDir: outDir
     }, null, 2));
@@ -509,6 +541,13 @@ async function run() {
 
 async function assertEmptyImportButtonOpensFileChooser(browser, filePath) {
   const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const diagnostics = [];
+  page.on("console", (message) => {
+    if (["error", "warning"].includes(message.type())) {
+      diagnostics.push(`${message.type()}: ${message.text()}`);
+    }
+  });
+  page.on("pageerror", (error) => diagnostics.push(`pageerror: ${error.message}`));
   try {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.locator('[data-empty-action="choose-csv"]').waitFor({ state: "visible", timeout: 5000 });
@@ -516,7 +555,7 @@ async function assertEmptyImportButtonOpensFileChooser(browser, filePath) {
     await page.locator('[data-empty-action="choose-csv"]').click();
     const fileChooser = await fileChooserPromise;
     await fileChooser.setFiles(filePath);
-    await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
+    await waitForLoadingModalHidden(page, "Empty-state Import load", diagnostics);
     await waitForFirstGroup(page, "Empty-state Import load");
     return {
       fileChooserOpened: true,
@@ -527,6 +566,28 @@ async function assertEmptyImportButtonOpensFileChooser(browser, filePath) {
   }
 }
 
+async function waitForLoadingModalHidden(page, context, diagnostics = []) {
+  try {
+    await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
+  } catch (error) {
+    const debugState = await page.evaluate(() => ({
+      loadingModalHidden: document.querySelector("#loadingModal")?.hidden ?? null,
+      loadingTitle: document.querySelector("#loadingModalTitle")?.textContent?.trim() || "",
+      loadingMessage: document.querySelector("#loadingModalMessage")?.textContent?.trim() || "",
+      loadingStatus: document.querySelector("#loadingSplineStatus")?.textContent?.trim() || "",
+      progressNow: document.querySelector("#loadingProgress")?.getAttribute("aria-valuenow") || "",
+      loadError: state.loadError,
+      reviewStateStatus: state.reviewStateStatus,
+      isLoadingFile: state.isLoadingFile,
+      loadingFileName: state.loadingFileName,
+      rowCount: state.rows.length,
+      groupCount: state.groups.length,
+      processingMode: state.lastProcessingMode
+    }));
+    throw new Error(`${context} did not finish hiding the loading modal: ${JSON.stringify({ debugState, diagnostics })}`);
+  }
+}
+
 async function importContactsThroughMenu(page, filePath) {
   await page.locator("#chooseCsvButton").click();
   await page.getByRole("menuitem", { name: "Contacts" }).waitFor({ state: "visible", timeout: 5000 });
@@ -534,7 +595,7 @@ async function importContactsThroughMenu(page, filePath) {
   await page.getByRole("menuitem", { name: "Contacts" }).click();
   const fileChooser = await fileChooserPromise;
   await fileChooser.setFiles(filePath);
-  await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
+  await waitForLoadingModalHidden(page, "Topbar Import Contacts load");
   await waitForFirstGroup(page, "Topbar Import Contacts load");
   return {
     fileChooserOpened: true,
@@ -667,6 +728,25 @@ async function loadingProgressbarState(page) {
       };
     })()
   }));
+}
+
+async function loadingStatusRotationState(page) {
+  return page.evaluate(() => {
+    if (typeof loadingProgressStatusText !== "function") return [];
+    return [
+      ["Parsing CSV.", 4],
+      ["Preparing records.", 8],
+      ["Preparing account field statistics (10 of 100).", 18],
+      ["Building candidate buckets (42 of 100).", 24],
+      ["Finding candidate pairs (12 found).", 34],
+      ["Scoring candidate pairs (250 of 500).", 56],
+      ["Scoring candidate pairs (400 of 500).", 68],
+      ["Sorting scored pairs.", 78],
+      ["Building match groups.", 82],
+      ["Rendering duplicate groups.", 98],
+      ["Restoring saved review state.", 99]
+    ].map(([message, progress]) => loadingProgressStatusText(message, progress));
+  });
 }
 
 async function assertLatestRecentFiles(page) {
@@ -1384,6 +1464,90 @@ async function assertVerticalScrollAvailable(page, selector, label) {
   }, label);
 }
 
+async function assertRightPaneSingleScrollModel(page) {
+  const setup = await page.evaluate(() => {
+    const workspace = document.querySelector(".workspace-column");
+    const reviewPane = document.querySelector(".review-pane");
+    const matchControls = document.querySelector(".match-controls-panel");
+    const detailSurface = document.querySelector("#detailSurface");
+    if (!workspace || !reviewPane || !matchControls || !detailSurface) {
+      return { ready: false };
+    }
+
+    workspace.scrollTop = 0;
+    reviewPane.scrollTop = 0;
+    const detailRect = detailSurface.getBoundingClientRect();
+    const matchRect = matchControls.getBoundingClientRect();
+    return {
+      ready: true,
+      targetX: Math.round(Math.min(Math.max(detailRect.left + detailRect.width / 2, 20), window.innerWidth - 20)),
+      targetY: Math.round(Math.min(Math.max(detailRect.top + 40, 20), window.innerHeight - 20)),
+      workspaceBefore: workspace.scrollTop,
+      reviewBefore: reviewPane.scrollTop,
+      matchTopBefore: Math.round(matchRect.top),
+      reviewOverflowY: getComputedStyle(reviewPane).overflowY,
+      workspaceOverflowY: getComputedStyle(workspace).overflowY,
+      workspaceScrollHeight: workspace.scrollHeight,
+      workspaceClientHeight: workspace.clientHeight,
+      reviewScrollHeight: reviewPane.scrollHeight,
+      reviewClientHeight: reviewPane.clientHeight
+    };
+  });
+
+  if (!setup.ready) return { ok: false, reason: "missing right-pane elements", ...setup };
+
+  await page.mouse.move(setup.targetX, setup.targetY);
+  await page.mouse.wheel(0, 640);
+  await page.waitForTimeout(100);
+
+  return page.evaluate((before) => {
+    const workspace = document.querySelector(".workspace-column");
+    const reviewPane = document.querySelector(".review-pane");
+    const matchControls = document.querySelector(".match-controls-panel");
+    const mergeSubmit = document.querySelector(".merge-submit-button");
+    const workspaceAfterWheel = workspace.scrollTop;
+    const reviewAfterWheel = reviewPane.scrollTop;
+    const matchTopAfterWheel = Math.round(matchControls.getBoundingClientRect().top);
+
+    workspace.scrollTop = workspace.scrollHeight - workspace.clientHeight;
+    const mergeRect = mergeSubmit?.getBoundingClientRect();
+    const mergeSubmitReachable = Boolean(
+      mergeRect &&
+      mergeRect.width > 0 &&
+      mergeRect.height > 0 &&
+      mergeRect.top >= 0 &&
+      mergeRect.bottom <= window.innerHeight + 1
+    );
+
+    const reviewOverflowY = getComputedStyle(reviewPane).overflowY;
+    const reviewOwnsVerticalScroll = ["auto", "scroll"].includes(reviewOverflowY) &&
+      reviewPane.scrollHeight > reviewPane.clientHeight + 1;
+
+    return {
+      ok:
+        workspaceAfterWheel > before.workspaceBefore &&
+        reviewAfterWheel <= before.reviewBefore + 1 &&
+        matchTopAfterWheel < before.matchTopBefore &&
+        !reviewOwnsVerticalScroll &&
+        mergeSubmitReachable,
+      ...before,
+      workspaceAfterWheel,
+      reviewAfterWheel,
+      matchTopAfterWheel,
+      reviewOwnsVerticalScroll,
+      mergeSubmitReachable,
+      workspaceAtBottom: workspace.scrollTop,
+      mergeSubmitRect: mergeRect
+        ? {
+            top: Math.round(mergeRect.top),
+            bottom: Math.round(mergeRect.bottom),
+            height: Math.round(mergeRect.height)
+          }
+        : null
+    };
+  }, setup);
+}
+
 async function assertWindowScrollAvailable(page) {
   return page.evaluate(() => {
     const root = document.scrollingElement || document.documentElement;
@@ -1415,26 +1579,100 @@ async function visibleInteractiveReachability(page) {
   return page.evaluate(() => {
     const intentionallyHidden = new Set(["csvInput", "trainingImportInput"]);
     const controls = [...document.querySelectorAll("button, input, select, textarea, a[href], [role='button'], [role='menuitem']")];
+    const controlLabel = (element) => String(
+      element.textContent ||
+      element.getAttribute("aria-label") ||
+      element.getAttribute("title") ||
+      element.getAttribute("placeholder") ||
+      element.value ||
+      ""
+    ).trim().replace(/\s+/g, " ").slice(0, 80);
+    const elementDescriptor = (element) => ({
+      tag: element.tagName.toLowerCase(),
+      id: element.id || "",
+      className: String(element.className || ""),
+      text: controlLabel(element)
+    });
+    const isCoveredByOwnClickableSurface = (element, hitTarget) => {
+      if (!hitTarget) return false;
+      if (element === hitTarget || element.contains(hitTarget)) return true;
+      if (
+        element.classList.contains("threshold-slider-input") &&
+        hitTarget.classList?.contains("threshold-slider-input") &&
+        element.closest(".threshold-slider") === hitTarget.closest(".threshold-slider")
+      ) {
+        return true;
+      }
+      if (element.id) {
+        const label = hitTarget.closest?.("label");
+        if (label?.htmlFor === element.id || label?.contains(element)) return true;
+      }
+      const parentLabel = element.closest("label");
+      return Boolean(parentLabel && parentLabel.contains(hitTarget));
+    };
+    const hitPointForElement = (element) => {
+      const rects = [...element.getClientRects()].filter((rect) => (
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.bottom > 0 &&
+        rect.right > 0 &&
+        rect.top < window.innerHeight &&
+        rect.left < window.innerWidth
+      ));
+      const rect = rects[0];
+      if (!rect) return null;
+      return {
+        x: Math.min(Math.max(rect.left + rect.width / 2, 1), window.innerWidth - 1),
+        y: Math.min(Math.max(rect.top + rect.height / 2, 1), window.innerHeight - 1)
+      };
+    };
+    const pointIsInsideClippingAncestors = (element, point) => {
+      if (!point) return false;
+      for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        const style = getComputedStyle(ancestor);
+        if (!/(auto|scroll|hidden|clip)/.test(`${style.overflowX} ${style.overflowY}`)) continue;
+        const rect = ancestor.getBoundingClientRect();
+        if (
+          point.x < rect.left ||
+          point.x > rect.right ||
+          point.y < rect.top ||
+          point.y > rect.bottom
+        ) {
+          return false;
+        }
+      }
+      return true;
+    };
     const visibleControls = controls.filter((element) => {
       if (intentionallyHidden.has(element.id)) return false;
       if (element.disabled || element.hidden || element.getAttribute("aria-hidden") === "true") return false;
       const style = getComputedStyle(element);
       const rect = element.getBoundingClientRect();
-      return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+      const hitPoint = hitPointForElement(element);
+      return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0 && pointIsInsideClippingAncestors(element, hitPoint);
     });
     const broken = visibleControls
       .filter((element) => {
         const style = getComputedStyle(element);
         const rect = element.getBoundingClientRect();
         const pointerEventsHandledByThumb = element.classList.contains("threshold-slider-input");
-        return (style.pointerEvents === "none" && !pointerEventsHandledByThumb) || rect.width < 8 || rect.height < 8;
+        if ((style.pointerEvents === "none" && !pointerEventsHandledByThumb) || rect.width < 8 || rect.height < 8) {
+          return true;
+        }
+        const hitPoint = hitPointForElement(element);
+        if (!hitPoint) return false;
+        const hitTarget = document.elementFromPoint(hitPoint.x, hitPoint.y);
+        return !isCoveredByOwnClickableSurface(element, hitTarget);
       })
-      .map((element) => ({
-        tag: element.tagName.toLowerCase(),
-        id: element.id || "",
-        className: String(element.className || ""),
-        text: String(element.textContent || element.getAttribute("aria-label") || "").trim().slice(0, 60)
-      }));
+      .map((element) => {
+        const hitPoint = hitPointForElement(element);
+        const hitTarget = hitPoint ? document.elementFromPoint(hitPoint.x, hitPoint.y) : null;
+        return {
+          ...elementDescriptor(element),
+          hitPoint,
+          hitTarget: hitTarget ? elementDescriptor(hitTarget) : null
+        };
+      });
 
     return {
       count: visibleControls.length,

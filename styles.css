@@ -1221,7 +1221,7 @@ select:focus {
 }
 
 .review-pane {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
   min-height: 0;
   padding: 16px 22px 22px;
@@ -1229,8 +1229,7 @@ select:focus {
   flex-direction: column;
   gap: 16px;
   background: var(--bg);
-  overflow: auto;
-  scrollbar-gutter: stable;
+  overflow: visible;
 }
 
 .report-summary {
