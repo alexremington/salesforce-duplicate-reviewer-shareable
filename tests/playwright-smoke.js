@@ -766,7 +766,7 @@ async function assertLatestRecentFiles(page) {
 
 async function assertFileModeRedirect(browser) {
   const page = await browser.newPage();
-  const indexUrl = new URL(pathToFileURL(path.join(__dirname, "..", "index.html")).href);
+  const indexUrl = new URL(pathToFileURL(path.join(__dirname, "..", "public", "index.html")).href);
   indexUrl.searchParams.set("server", baseUrl);
   indexUrl.searchParams.set("source", "staging-contacts");
 

@@ -8,7 +8,7 @@ For local setup, see [SETUP.md](SETUP.md). For teammate handoff, see [TEAM-HANDO
 
 ## Open The App
 
-Open `index.html` in a browser. No server or package install is required for manual JSON or CSV review.
+Open `public/index.html` in a browser. No server or package install is required for manual JSON or CSV review.
 
 To use server-backed features such as Salesforce merge actions or staging auto-load URLs, start the local server:
 
@@ -27,7 +27,7 @@ Double-click: Launch Duplicate Reviewer - Windows.cmd
 Windows PowerShell fallback:
 
 ```powershell
-.\Launch Duplicate Reviewer - Windows PowerShell.ps1
+.\scripts\launch-duplicate-reviewer-windows.ps1
 ```
 
 Manual start:
@@ -42,7 +42,7 @@ After a file is selected, the Source panel and review pane show a loading state 
 
 A loading modal appears while data is being read, matched, and restored from saved review state. Server-backed loads use a Web Worker so JSON parsing and duplicate matching do not block the UI thread. The same modal appears while exported label CSVs are imported.
 
-For day-to-day review work, use `Launch Duplicate Reviewer - Mac.command` on macOS or `Launch Duplicate Reviewer - Windows.cmd` on Windows. PowerShell users can run `Launch Duplicate Reviewer - Windows PowerShell.ps1` as a fallback. The server-backed app automatically adds the latest configured Contact and Account JSON datasets to `Recent files` when those exports exist, so the launcher is the single entry point for continuing work after downloads finish.
+For day-to-day review work, use `Launch Duplicate Reviewer - Mac.command` on macOS or `Launch Duplicate Reviewer - Windows.cmd` on Windows. PowerShell users can run `scripts\launch-duplicate-reviewer-windows.ps1` as a fallback. The server-backed app automatically adds the latest configured Contact and Account JSON datasets to `Recent files` when those exports exist, so the launcher is the single entry point for continuing work after downloads finish.
 
 On Windows, if OneDrive shows a notice that `Node.js JavaScript Runtime` is downloading `salesforce-report-latest.json`, Node is not being installed. The local app server is reading a cloud-only OneDrive dataset file. Right-click the app folder, `Output` folder, or latest export folder in File Explorer and choose `Always keep on this device` before loading recent datasets.
 
@@ -207,9 +207,9 @@ Use `DUPLICATE_REVIEWER_PORT` in `.env` to choose a different Duplicate Reviewer
 
 It then opens the app with the latest staging JSON dataset auto-loaded. The app sends a macOS Notification Center alert after it finishes loading and matching the dataset, so the alert means the file is ready to review. The staging wrappers use a 60-second Bulk API polling interval by default to reduce Salesforce API calls for large exports.
 
-Opening `index.html` directly remains supported for manual JSON or CSV uploads. If it is opened from disk while the local server is already running, the page redirects itself to the server-backed URL so the latest Scheduler exports and staging auto-load URLs keep working. If the server is not running, the static page stays open as a manual-upload fallback.
+Opening `public/index.html` directly remains supported for manual JSON or CSV uploads. If it is opened from disk while the local server is already running, the page redirects itself to the server-backed URL so the latest Scheduler exports and staging auto-load URLs keep working. If the server is not running, the static page stays open as a manual-upload fallback.
 
-For day-to-day review work, use `Launch Duplicate Reviewer - Mac.command` on macOS or `Launch Duplicate Reviewer - Windows.cmd` on Windows. PowerShell users can run `Launch Duplicate Reviewer - Windows PowerShell.ps1` as a fallback. All three launchers delegate to `scripts/launch-local-app.js`, which chooses an available local port, prepares the per-user static cache, starts the server, checks readiness, and opens the browser. On Windows, the launcher also adds common Node.js and Salesforce CLI install folders to the app process PATH so Explorer-launched sessions can find tools installed outside the inherited PATH. The server-backed app automatically adds the latest staging Contact and Account exports to `Recent files` when those exports exist, so the launcher is the single entry point for continuing work after Scheduler downloads finish.
+For day-to-day review work, use `Launch Duplicate Reviewer - Mac.command` on macOS or `Launch Duplicate Reviewer - Windows.cmd` on Windows. PowerShell users can run `scripts\launch-duplicate-reviewer-windows.ps1` as a fallback. All three launchers delegate to `scripts/launch-local-app.js`, which chooses an available local port, prepares the per-user static cache, starts the server, checks readiness, and opens the browser. On Windows, the launcher also adds common Node.js and Salesforce CLI install folders to the app process PATH so Explorer-launched sessions can find tools installed outside the inherited PATH. The server-backed app automatically adds the latest staging Contact and Account exports to `Recent files` when those exports exist, so the launcher is the single entry point for continuing work after Scheduler downloads finish.
 
 The staging auto-load URL includes `sticky=1`, so the local server also opens a small macOS alert dialog after the JSON dataset is ready. That dialog stays onscreen until dismissed. Notification Center itself controls whether the notification is a temporary banner or a persistent alert in macOS System Settings.
 

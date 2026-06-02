@@ -1,20 +1,20 @@
 # Developer Guide
 
-This app is a dependency-free browser tool. `index.html` loads `styles.css` and `app.js` directly, and server-backed matching uses `matching-worker.js`; there is no bundler, package manager, or build step.
+This app is a dependency-free browser tool. `public/index.html` loads `public/styles.css` and `public/app.js` directly, and server-backed matching uses `public/matching-worker.js`; there is no bundler, package manager, or build step.
 
 ## File Map
 
-- `index.html`: App shell, import controls, collapsible panels, review pane, and static button/section markup.
-- `styles.css`: Layout, panel, group-list, detail-window, batch-action, and responsive styling.
-- `app.js`: JSON/CSV parsing, field mapping, duplicate detection, review state, rendering, recent-file storage, and export. Worker lifecycle orchestration is delegated to the shared `ManagedWorkerClient` helper copied under `vendor/managed-app/scripts/`.
-- `matching-worker.js`: Web Worker entry point for parsing datasets and calculating match groups off the UI thread.
+- `public/index.html`: App shell, import controls, collapsible panels, review pane, and static button/section markup.
+- `public/styles.css`: Layout, panel, group-list, detail-window, batch-action, and responsive styling.
+- `public/app.js`: JSON/CSV parsing, field mapping, duplicate detection, review state, rendering, recent-file storage, and export. Worker lifecycle orchestration is delegated to the shared `ManagedWorkerClient` helper copied under `public/vendor/managed-app/scripts/`.
+- `public/matching-worker.js`: Web Worker entry point for parsing datasets and calculating match groups off the UI thread.
 - `scripts/check-account-calibration.js`: Node regression check for exported account or contact label CSVs.
 - `README.md`: User-facing usage notes.
 
 ## Runtime Flow
 
 1. A JSON or CSV dataset is loaded by file input, drag/drop, recent-file reload, staging auto-load, or demo data.
-2. Server-backed loads route parsing and matching through `matching-worker.js`; file-only loads fall back to the same logic on the main thread.
+2. Server-backed loads route parsing and matching through `public/matching-worker.js`; file-only loads fall back to the same logic on the main thread.
 3. `stageRowsForReview()` stores original row objects in `state.rows`, adds a stable `__rowIndex`, infers headers, and auto-maps fields from `OBJECT_CONFIG`.
 4. `recompute()` calls `buildGroupsAsync()` with the current object type, mapping, threshold, and High Recall mode.
 5. `buildGroupsAsync()` gets a cached scoring context, generates candidate pair keys, scores candidate pairs, unions threshold-passing pairs into connected components, summarizes each group from all pairwise scores, filters groups by the threshold, then sorts them.
@@ -214,7 +214,7 @@ It is still a deterministic browser-side reviewer, not a calibrated probabilisti
 There is no test framework. Minimum checks before committing changes:
 
 ```bash
-node --check app.js
+node --check public/app.js
 node --check scripts/check-account-calibration.js
 node scripts/check-account-calibration.js \
   --labels "/Users/aremington/Downloads/account-training-labels (1).csv" \
@@ -228,7 +228,7 @@ node scripts/check-account-calibration.js \
   --assert-threshold 86
 ```
 
-Then open `index.html` in a browser and verify:
+Then open `public/index.html` in a browser and verify:
 
 - Demo data loads for Contacts and Accounts.
 - Import opens the Contacts/Accounts menu.

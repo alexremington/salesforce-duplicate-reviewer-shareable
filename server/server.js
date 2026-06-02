@@ -8,9 +8,9 @@ const os = require("node:os");
 const path = require("node:path");
 const { URL } = require("node:url");
 
-const ROOT_DIR = __dirname;
+const ROOT_DIR = path.resolve(__dirname, "..");
 loadDotEnv(path.join(ROOT_DIR, ".env"));
-const STATIC_ROOT_DIR = path.resolve(process.env.DUPLICATE_REVIEWER_STATIC_DIR || ROOT_DIR);
+const STATIC_ROOT_DIR = path.resolve(process.env.DUPLICATE_REVIEWER_STATIC_DIR || path.join(ROOT_DIR, "public"));
 const HOST = process.env.HOST || "127.0.0.1";
 const PORT = Number(process.env.DUPLICATE_REVIEWER_PORT || process.env.PORT || 5180);
 const OUTPUT_DIR = path.join(ROOT_DIR, "Output");
@@ -965,11 +965,7 @@ async function getSalesforceAuth() {
   }
 
   const display = await execFileJson(salesforceCliCommand(), ["org", "display", "--target-org", SF_ORG_ALIAS, "--json"], {
-    env: {
-      ...process.env,
-      ...(DEFAULT_PATH ? { PATH: DEFAULT_PATH, Path: process.platform === "win32" ? DEFAULT_PATH : process.env.Path } : {}),
-      ...(process.platform === "win32" ? {} : { SF_USE_GENERIC_UNIX_KEYCHAIN: process.env.SF_USE_GENERIC_UNIX_KEYCHAIN || "true" })
-    }
+    env: salesforceCliEnv()
   });
   const result = display.result || {};
   if (!result.accessToken) throw httpError(500, `Salesforce CLI did not return an access token for ${SF_ORG_ALIAS}.`);
@@ -984,11 +980,24 @@ async function getSalesforceAuth() {
 
 function execFileJson(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    childProcess.execFile(command, args, { maxBuffer: 10 * 1024 * 1024, ...options }, (error, stdout, stderr) => {
-      if (error) {
-        reject(salesforceCliError("Salesforce CLI command failed", error, stdout, stderr));
+    const invocation = salesforceCliInvocation(command, args);
+    childProcess.execFile(invocation.command, invocation.args, { maxBuffer: 10 * 1024 * 1024, ...options }, (error, stdout, stderr) => {
+      const parsed = parseSalesforceCliJson(stdout);
+      if (parsed && isSalesforceCliJsonSuccess(parsed)) {
+        resolve(parsed);
         return;
       }
+
+      if (parsed && isSalesforceCliJsonFailure(parsed)) {
+        reject(salesforceCliError("Salesforce CLI command failed", error, stdout, stderr, parsed));
+        return;
+      }
+
+      if (error) {
+        reject(salesforceCliError("Salesforce CLI command failed", error, stdout, stderr, parsed));
+        return;
+      }
+
       try {
         resolve(JSON.parse(stdout));
       } catch {
@@ -996,6 +1005,64 @@ function execFileJson(command, args, options = {}) {
       }
     });
   });
+}
+
+function salesforceCliEnv() {
+  return {
+    ...process.env,
+    SF_AUTOUPDATE_DISABLE: process.env.SF_AUTOUPDATE_DISABLE || "true",
+    SF_DISABLE_TELEMETRY: process.env.SF_DISABLE_TELEMETRY || "true",
+    SF_HIDE_RELEASE_NOTES: process.env.SF_HIDE_RELEASE_NOTES || "true",
+    SF_LOG_LEVEL: process.env.SF_LOG_LEVEL || "error",
+    ...(DEFAULT_PATH ? { PATH: DEFAULT_PATH, Path: process.platform === "win32" ? DEFAULT_PATH : process.env.Path } : {}),
+    ...(process.platform === "win32" ? {} : { SF_USE_GENERIC_UNIX_KEYCHAIN: process.env.SF_USE_GENERIC_UNIX_KEYCHAIN || "true" })
+  };
+}
+
+function salesforceCliInvocation(command, args) {
+  if (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command)) {
+    const commandLine = [command, ...args].map(cmdQuote).join(" ");
+    return {
+      command: process.env.ComSpec || "cmd.exe",
+      args: ["/d", "/s", "/c", commandLine]
+    };
+  }
+
+  return { command, args };
+}
+
+function cmdQuote(value) {
+  const text = String(value ?? "");
+  if (!text) return '""';
+  return `"${text.replace(/"/g, '\\"')}"`;
+}
+
+function parseSalesforceCliJson(stdout) {
+  const text = String(stdout || "").trim();
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start < 0 || end <= start) return null;
+    try {
+      return JSON.parse(text.slice(start, end + 1));
+    } catch {
+      return null;
+    }
+  }
+}
+
+function isSalesforceCliJsonSuccess(payload) {
+  if (!payload || typeof payload !== "object") return false;
+  if (payload.status === 0 || payload.status === "0") return true;
+  return !Object.prototype.hasOwnProperty.call(payload, "status") && Boolean(payload.result);
+}
+
+function isSalesforceCliJsonFailure(payload) {
+  return payload && typeof payload === "object" && Object.prototype.hasOwnProperty.call(payload, "status");
 }
 
 function salesforceCliCommand() {
@@ -1094,13 +1161,49 @@ function isPathLike(value) {
   return path.isAbsolute(value) || /[\\/]/.test(value);
 }
 
-function salesforceCliError(message, error, stdout = "", stderr = "") {
+function salesforceCliError(message, error, stdout = "", stderr = "", parsed = null) {
   if (error?.code === "ENOENT") {
     return httpError(500, "Salesforce CLI was not found. Install Salesforce CLI or set SF_CLI_BIN in .env to the full path to sf, then restart Duplicate Reviewer.");
   }
 
-  const detail = String(stderr || stdout || error?.message || "").trim();
+  const parsedMessage = salesforceCliJsonErrorMessage(parsed);
+  const stderrDetail = nonWarningSalesforceCliOutput(stderr);
+  const stdoutDetail = parsedMessage ? "" : nonWarningSalesforceCliOutput(stdout);
+  const detail = [parsedMessage, stderrDetail, stdoutDetail, error?.message]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)[0] || "";
   return httpError(500, detail ? `${message}: ${detail}` : message);
+}
+
+function salesforceCliJsonErrorMessage(payload) {
+  if (!payload || typeof payload !== "object") return "";
+  const messages = [
+    payload.message,
+    payload.name,
+    payload.errorCode,
+    payload.error,
+    payload.result?.message
+  ].filter(Boolean);
+  return messages.join(": ");
+}
+
+function nonWarningSalesforceCliOutput(value) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !isSalesforceCliWarningLine(line))
+    .join("\n")
+    .trim();
+}
+
+function isSalesforceCliWarningLine(line) {
+  return (
+    /^›?\s*Warning:/i.test(line) ||
+    /^\(node:\d+\)\s+Warning:/i.test(line) ||
+    /@salesforce\/cli update available/i.test(line) ||
+    /org-api-version configuration overridden/i.test(line) ||
+    /Use `node --trace-warnings/i.test(line)
+  );
 }
 
 function normalizeInstanceUrl(value) {

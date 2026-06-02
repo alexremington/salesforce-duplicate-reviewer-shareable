@@ -99,7 +99,7 @@ Remove-Item $outLog, $errLog -ErrorAction SilentlyContinue
 
 $process = Start-Process `
   -FilePath 'node' `
-  -ArgumentList 'server.js' `
+  -ArgumentList 'server/server.js' `
   -WorkingDirectory $ProjectRoot `
   -RedirectStandardOutput $outLog `
   -RedirectStandardError $errLog `

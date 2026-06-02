@@ -91,17 +91,17 @@ PLIST
 
 sync_static_assets() {
   /bin/mkdir -p "${STATIC_DIR}"
-  copy_static_asset "${PROJECT_DIR}/index.html" "${STATIC_DIR}/index.html"
-  copy_static_asset "${PROJECT_DIR}/redirect-file-mode.js" "${STATIC_DIR}/redirect-file-mode.js"
-  copy_static_asset "${PROJECT_DIR}/app.js" "${STATIC_DIR}/app.js"
-  copy_static_asset "${PROJECT_DIR}/matching-worker.js" "${STATIC_DIR}/matching-worker.js"
-  copy_static_asset "${PROJECT_DIR}/styles.css" "${STATIC_DIR}/styles.css"
+  copy_static_asset "${PROJECT_DIR}/public/index.html" "${STATIC_DIR}/index.html"
+  copy_static_asset "${PROJECT_DIR}/public/redirect-file-mode.js" "${STATIC_DIR}/redirect-file-mode.js"
+  copy_static_asset "${PROJECT_DIR}/public/app.js" "${STATIC_DIR}/app.js"
+  copy_static_asset "${PROJECT_DIR}/public/matching-worker.js" "${STATIC_DIR}/matching-worker.js"
+  copy_static_asset "${PROJECT_DIR}/public/styles.css" "${STATIC_DIR}/styles.css"
   /bin/mkdir -p "${STATIC_DIR}/vendor/managed-app/assets"
   /bin/mkdir -p "${STATIC_DIR}/vendor/managed-app/css"
   /bin/mkdir -p "${STATIC_DIR}/vendor/managed-app/scripts"
-  copy_static_asset "${PROJECT_DIR}/vendor/managed-app/assets/politico-logo.svg" "${STATIC_DIR}/vendor/managed-app/assets/politico-logo.svg"
-  copy_static_asset "${PROJECT_DIR}/vendor/managed-app/css/managed-app-base.css" "${STATIC_DIR}/vendor/managed-app/css/managed-app-base.css"
-  copy_static_asset "${PROJECT_DIR}/vendor/managed-app/scripts/managed-worker-client.js" "${STATIC_DIR}/vendor/managed-app/scripts/managed-worker-client.js"
+  copy_static_asset "${PROJECT_DIR}/public/vendor/managed-app/assets/politico-logo.svg" "${STATIC_DIR}/vendor/managed-app/assets/politico-logo.svg"
+  copy_static_asset "${PROJECT_DIR}/public/vendor/managed-app/css/managed-app-base.css" "${STATIC_DIR}/vendor/managed-app/css/managed-app-base.css"
+  copy_static_asset "${PROJECT_DIR}/public/vendor/managed-app/scripts/managed-worker-client.js" "${STATIC_DIR}/vendor/managed-app/scripts/managed-worker-client.js"
 }
 
 copy_static_asset() {

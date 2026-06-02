@@ -15,4 +15,4 @@ export SF_INSTANCE_URL="${SF_INSTANCE_URL:-https://politico--staging.sandbox.my.
 export SF_API_VERSION="${SF_API_VERSION:-v67.0}"
 
 cd "${PROJECT_DIR}"
-exec node server.js
+exec node server/server.js

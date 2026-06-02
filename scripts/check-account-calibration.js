@@ -122,7 +122,7 @@ function loadAppApi() {
   context.globalThis = context;
   vm.createContext(context);
 
-  const appCode = fs.readFileSync("app.js", "utf8");
+  const appCode = fs.readFileSync("public/app.js", "utf8");
   vm.runInContext(
     `${appCode}
 globalThis.__api = {
