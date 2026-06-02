@@ -17,11 +17,13 @@ const EXPECTED_FEATURE_VERSION = readServerFeatureVersion();
 const REQUIRED_HEALTH = {
   brandHeaderVersion: "shared-logo-contact-v1",
   featureVersion: EXPECTED_FEATURE_VERSION,
-  apiContractVersion: "duplicate-reviewer-api-contract-v1",
+  apiContractVersion: "duplicate-reviewer-api-contract-v2",
   latestStagingFiles: true,
   jsonDatasets: true,
   salesforceMerge: true,
   salesforcePreMergeCheck: true,
+  salesforceCliWarningSafe: true,
+  salesforceCliApiVersionEnvIsolated: true,
   staticAssetRoot: true,
   svgStaticAssets: true
 };
@@ -163,6 +165,8 @@ async function reviewerReady(port) {
     health.jsonDatasets === REQUIRED_HEALTH.jsonDatasets &&
     health.salesforceMerge === REQUIRED_HEALTH.salesforceMerge &&
     health.salesforcePreMergeCheck === REQUIRED_HEALTH.salesforcePreMergeCheck &&
+    health.salesforceCliWarningSafe === REQUIRED_HEALTH.salesforceCliWarningSafe &&
+    health.salesforceCliApiVersionEnvIsolated === REQUIRED_HEALTH.salesforceCliApiVersionEnvIsolated &&
     health.staticAssetRoot === REQUIRED_HEALTH.staticAssetRoot &&
     health.svgStaticAssets === REQUIRED_HEALTH.svgStaticAssets
   );

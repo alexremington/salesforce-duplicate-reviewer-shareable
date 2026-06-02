@@ -11,7 +11,7 @@ const PROJECT_DIR = path.resolve(__dirname, "..");
 const SERVER_SCRIPT = path.join("server", "server.js");
 const PUBLIC_DIR = path.join(PROJECT_DIR, "public");
 const APP_ID = "salesforce-duplicate-reviewer";
-const API_CONTRACT_VERSION = "duplicate-reviewer-api-contract-v1";
+const API_CONTRACT_VERSION = "duplicate-reviewer-api-contract-v2";
 
 let serverProcess = null;
 let fakeSalesforceServer = null;
@@ -58,6 +58,8 @@ async function main() {
     assertEqual(health.apiContractVersion, API_CONTRACT_VERSION, "health apiContractVersion");
     assertEqual(health.salesforceMerge, true, "health salesforceMerge");
     assertEqual(health.salesforcePreMergeCheck, true, "health salesforcePreMergeCheck");
+    assertEqual(health.salesforceCliWarningSafe, true, "health salesforceCliWarningSafe");
+    assertEqual(health.salesforceCliApiVersionEnvIsolated, true, "health salesforceCliApiVersionEnvIsolated");
     assertEqual(health.latestStagingFiles, true, "health latestStagingFiles");
     assertEqual(health.jsonDatasets, true, "health jsonDatasets");
 
@@ -263,6 +265,9 @@ async function writeFakeSalesforceCli(directory, instanceUrl) {
   if (process.platform === "win32") {
     await fs.writeFile(cliPath, [
       "@echo off",
+      "if defined SF_API_VERSION echo SF_API_VERSION leaked to sf org display 1>&2 && exit /b 2",
+      "if defined SF_ORG_API_VERSION echo SF_ORG_API_VERSION leaked to sf org display 1>&2 && exit /b 2",
+      "if defined SFDX_API_VERSION echo SFDX_API_VERSION leaked to sf org display 1>&2 && exit /b 2",
       ...warningLines.map((line) => `echo ${line} 1>&2`),
       `echo ${payload}`,
       "exit /b 1",
@@ -273,6 +278,10 @@ async function writeFakeSalesforceCli(directory, instanceUrl) {
 
   await fs.writeFile(cliPath, [
     "#!/bin/sh",
+    "if [ -n \"${SF_API_VERSION:-}\" ] || [ -n \"${SF_ORG_API_VERSION:-}\" ] || [ -n \"${SFDX_API_VERSION:-}\" ]; then",
+    "  printf '%s\\n' 'Salesforce API version env leaked to sf org display' >&2",
+    "  exit 2",
+    "fi",
     ...warningLines.map((line) => `printf '%s\\n' '${line}' >&2`),
     `printf '%s\\n' '${payload}'`,
     "exit 1",
