@@ -22,7 +22,13 @@ macOS:
 Double-click: Launch Duplicate Reviewer.command
 ```
 
-Windows PowerShell:
+Windows:
+
+```text
+Double-click: Launch Duplicate Reviewer.cmd
+```
+
+Windows PowerShell fallback:
 
 ```powershell
 .\Launch Duplicate Reviewer.ps1

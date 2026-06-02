@@ -19,7 +19,9 @@ async function run() {
   await fs.mkdir(outDir, { recursive: true });
   const csvPath = path.join(outDir, "contacts-smoke.csv");
   const accountCsvPath = path.join(outDir, "accounts-smoke.csv");
-  await fs.writeFile(csvPath, contactSmokeCsv());
+  const contactCsv = contactSmokeCsv();
+  const contactSmokeRowCount = csvDataRowCount(contactCsv);
+  await fs.writeFile(csvPath, contactCsv);
   await fs.writeFile(accountCsvPath, [
     "Id,Name,Website,Billing Street,Billing City,Billing State,Billing Postal Code,Billing Country",
     "001T00000000001,Northstar Analytics Inc.,northstar.example,125 Market St,San Francisco,CA,94105,United States",
@@ -31,6 +33,7 @@ async function run() {
 
   try {
     const fileModeRedirect = await assertFileModeRedirect(browser);
+    const emptyImportButtonState = await assertEmptyImportButtonOpensFileChooser(browser, csvPath);
 
     const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
     page.on("console", (message) => {
@@ -80,7 +83,7 @@ async function run() {
     await page.locator("#demoButton").click();
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
 
-    await page.locator("#csvInput").setInputFiles(csvPath);
+    const topbarImportState = await importContactsThroughMenu(page, csvPath);
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
     await page.locator(".group-item-main").first().click();
@@ -235,6 +238,9 @@ async function run() {
 
     if (!emptyChooseVisible) throw new Error("Expected empty-state Import action to be visible.");
     if (!emptyDemoVisible) throw new Error("Expected empty-state Load Demo action to be visible.");
+    if (!emptyImportButtonState.fileChooserOpened || emptyImportButtonState.rowCount !== contactSmokeRowCount || !emptyImportButtonState.groupCount) {
+      throw new Error(`Expected empty-state Import to open a file picker and load a dataset: ${JSON.stringify(emptyImportButtonState)}`);
+    }
     if (!lightTheme.colorScheme.includes("light") || !darkTheme.colorScheme.includes("dark") || lightTheme.bodyBg === darkTheme.bodyBg) {
       throw new Error(`Expected the UI theme to follow system light/dark mode: ${JSON.stringify({ lightTheme, darkTheme })}`);
     }
@@ -303,6 +309,9 @@ async function run() {
     if (!csvMenuClosed) throw new Error("Expected Import menu to close with Escape.");
     if (!exportMenuClosed || exportMenuState.options.join("|") !== "Decisions|Labels") {
       throw new Error(`Expected Export menu to show Decisions and Labels and close with Escape: ${JSON.stringify({ exportMenuClosed, exportMenuState })}`);
+    }
+    if (!topbarImportState.fileChooserOpened || topbarImportState.rowCount !== contactSmokeRowCount || !topbarImportState.groupCount) {
+      throw new Error(`Expected topbar Import > Contacts to open a file picker and load a dataset: ${JSON.stringify(topbarImportState)}`);
     }
     if (matchControlsExpanded !== "true") throw new Error("Expected Match Controls panel to expand.");
     if (thresholdReadout !== "80-99") throw new Error(`Expected threshold readout to update to 80-99, got ${thresholdReadout}.`);
@@ -421,6 +430,7 @@ async function run() {
       baseUrl,
       emptyChooseVisible,
       emptyDemoVisible,
+      emptyImportButtonState,
       latestRecentFiles,
       csvMenuClosed,
       matchControlsExpanded,
@@ -434,6 +444,7 @@ async function run() {
       darkPaneSurfaces,
       loadingProgressbar,
       latestJsonLoad,
+      topbarImportState,
       fastestSearchDefaultUnchecked,
       thresholdFilteredScores,
       customFilterState,
@@ -469,6 +480,45 @@ async function run() {
   } finally {
     await browser.close();
   }
+}
+
+async function assertEmptyImportButtonOpensFileChooser(browser, filePath) {
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('[data-empty-action="choose-csv"]').waitFor({ state: "visible", timeout: 5000 });
+    const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
+    await page.locator('[data-empty-action="choose-csv"]').click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles(filePath);
+    await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
+    await waitForFirstGroup(page, "Empty-state Import load");
+    return {
+      fileChooserOpened: true,
+      ...(await datasetLoadState(page))
+    };
+  } finally {
+    await page.close();
+  }
+}
+
+async function importContactsThroughMenu(page, filePath) {
+  await page.locator("#chooseCsvButton").click();
+  await page.getByRole("menuitem", { name: "Contacts" }).waitFor({ state: "visible", timeout: 5000 });
+  const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
+  await page.getByRole("menuitem", { name: "Contacts" }).click();
+  const fileChooser = await fileChooserPromise;
+  await fileChooser.setFiles(filePath);
+  await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
+  await waitForFirstGroup(page, "Topbar Import Contacts load");
+  return {
+    fileChooserOpened: true,
+    ...(await datasetLoadState(page))
+  };
+}
+
+function csvDataRowCount(csvText) {
+  return csvText.trim().split(/\r?\n/).length - 1;
 }
 
 async function waitForFirstGroup(page, label) {

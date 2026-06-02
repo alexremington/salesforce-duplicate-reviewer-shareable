@@ -22,7 +22,7 @@ find . \
   -path './incoming' -prune -o \
   -path './logs' -prune -o \
   -path './node_modules' -prune -o \
-  -type f -name '*.sh' -exec zsh -n {} \;
+  -type f \( -name '*.sh' -o -name '*.command' \) -exec zsh -n {} \;
 
 echo "Checking package metadata..."
 node -e 'JSON.parse(require("node:fs").readFileSync("package.json", "utf8"))'
