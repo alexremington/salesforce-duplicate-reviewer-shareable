@@ -19,19 +19,19 @@ Edit `.env` for your own Salesforce org alias and instance URL. Do not commit `.
 macOS:
 
 ```text
-Double-click: Launch Duplicate Reviewer.command
+Double-click: Launch Duplicate Reviewer - Mac.command
 ```
 
 Windows:
 
 ```text
-Double-click: Launch Duplicate Reviewer.cmd
+Double-click: Launch Duplicate Reviewer - Windows.cmd
 ```
 
 Windows PowerShell fallback:
 
 ```powershell
-.\Launch Duplicate Reviewer.ps1
+.\Launch Duplicate Reviewer - Windows PowerShell.ps1
 ```
 
 Manual start:
@@ -51,6 +51,8 @@ Use `DUPLICATE_REVIEWER_PORT` in `.env` only if you need to move Duplicate Revie
 The browser UI can also load CSV files directly through the file picker.
 
 Use the launcher for normal review work after Scheduler downloads finish. The server-backed app automatically adds the latest Contact and Account exports to `Recent files` when those exports exist.
+
+On Windows, OneDrive may show `Node.js JavaScript Runtime` downloading a recent dataset when the latest export is cloud-only. Mark the app folder, `Output` folder, or latest export folder as `Always keep on this device` in File Explorer so recent dataset loads do not need OneDrive hydration.
 
 For UI smoke tests on a local machine, install Playwright once for all managed apps:
 
