@@ -303,7 +303,8 @@ p {
   min-width: 0;
   min-height: 0;
   background: var(--bg);
-  overflow: hidden;
+  overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 .control-pane {
@@ -2182,6 +2183,40 @@ select:focus {
   margin: 0;
 }
 
+.merge-repair-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--amber);
+  border-radius: 16px;
+  padding: 10px 12px;
+  background: var(--amber-soft);
+}
+
+.merge-repair-notice div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.merge-repair-notice strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.merge-repair-notice span,
+.merge-repair-notice em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  overflow-wrap: anywhere;
+}
+
+.merge-repair-notice .button {
+  flex: 0 0 auto;
+}
+
 .merge-result {
   display: grid;
   gap: 3px;
@@ -2452,6 +2487,7 @@ select:focus {
   .record-navigation,
   .pair-summary,
   .salesforce-merge-header,
+  .merge-repair-notice,
   .merge-actions {
     align-items: stretch;
     flex-direction: column;
@@ -2512,6 +2548,7 @@ select:focus {
   .record-card-actions,
   .record-card-actions .mini-button,
   .training-actions .mini-button,
+  .merge-repair-notice .button,
   .merge-actions .button,
   .confidence-control,
   .record-navigation .mini-button {

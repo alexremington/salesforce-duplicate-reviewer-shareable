@@ -18,10 +18,12 @@ const outDir = process.env.PLAYWRIGHT_SMOKE_OUT_DIR || path.join(os.tmpdir(), "d
 async function run() {
   await fs.mkdir(outDir, { recursive: true });
   const csvPath = path.join(outDir, "contacts-smoke.csv");
+  const missingContactIdCsvPath = path.join(outDir, "contacts-missing-ids.csv");
   const accountCsvPath = path.join(outDir, "accounts-smoke.csv");
   const contactCsv = contactSmokeCsv();
   const contactSmokeRowCount = csvDataRowCount(contactCsv);
   await fs.writeFile(csvPath, contactCsv);
+  await fs.writeFile(missingContactIdCsvPath, contactMissingIdSmokeCsv());
   await fs.writeFile(accountCsvPath, [
     "Id,Name,Website,Billing Street,Billing City,Billing State,Billing Postal Code,Billing Country",
     "001T00000000001,Northstar Analytics Inc.,northstar.example,125 Market St,San Francisco,CA,94105,United States",
@@ -195,6 +197,7 @@ async function run() {
     }
     await page.locator(".merge-confirmation-input").fill("MERGE");
     const staleRefreshState = await captureStaleRefreshFlow(page, contactSmokeCsv());
+    const missingContactIdRefreshState = await captureMissingContactIdRefreshFlow(page, missingContactIdCsvPath, contactSmokeCsv());
     await page.locator(".group-item-main").first().click();
     await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
     await page.locator('[data-review-mode="merge"]').click();
@@ -206,8 +209,10 @@ async function run() {
     const mergeConfirmationValue = await page.locator(".merge-confirmation-input").inputValue();
     const mergePayload = await captureMergePayload(page);
     await page.setViewportSize({ width: 1280, height: 560 });
+    const workspaceColumnScroll = await assertVerticalScrollAvailable(page, ".workspace-column", "workspace column");
     const reviewPaneScroll = await assertVerticalScrollAvailable(page, ".review-pane", "review pane");
     const rootScrollPolicy = await assertRootScrollPolicy(page);
+    const scrollTrapState = await assertNoPrimaryScrollTraps(page);
     const interactiveReachability = await visibleInteractiveReachability(page);
     await page.screenshot({ path: path.join(outDir, "desktop-merge.png"), fullPage: false });
 
@@ -393,6 +398,17 @@ async function run() {
     ) {
       throw new Error(`Expected stale pre-merge data to prompt and refresh without merging: ${JSON.stringify(staleRefreshState)}`);
     }
+    if (
+      !missingContactIdRefreshState.noticeVisible ||
+      !missingContactIdRefreshState.refreshButtonVisible ||
+      !missingContactIdRefreshState.refreshCalled ||
+      missingContactIdRefreshState.preMergeCalled ||
+      missingContactIdRefreshState.mergeCalled ||
+      !missingContactIdRefreshState.dialogMessage.includes("Contact IDs are required") ||
+      !missingContactIdRefreshState.refreshedHasIds
+    ) {
+      throw new Error(`Expected missing Contact IDs to block merge and offer a Contacts refresh: ${JSON.stringify(missingContactIdRefreshState)}`);
+    }
     if (mergePayload.masterFields?.LeadSource !== "Web") {
       throw new Error(`Expected Salesforce merge payload to preserve oldest Lead Source: ${JSON.stringify(mergePayload)}`);
     }
@@ -411,6 +427,12 @@ async function run() {
     if (!accountMergeDisabled) throw new Error("Expected Account merge mode to be disabled.");
     if (!shortcutsVisible) throw new Error("Expected shortcuts modal to be visible.");
     if (!rootScrollPolicy.ok) throw new Error(`Root scrolling is suppressed: ${JSON.stringify(rootScrollPolicy)}`);
+    if (!scrollTrapState.ok) {
+      throw new Error(`Primary content extends below a non-scrollable container: ${JSON.stringify(scrollTrapState)}`);
+    }
+    if (workspaceColumnScroll.hasOverflow && !workspaceColumnScroll.scrolled) {
+      throw new Error(`Workspace column has clipped content but did not scroll: ${JSON.stringify(workspaceColumnScroll)}`);
+    }
     if (reviewPaneScroll.hasOverflow && !reviewPaneScroll.scrolled) {
       throw new Error(`Review pane has clipped content but did not scroll: ${JSON.stringify(reviewPaneScroll)}`);
     }
@@ -461,11 +483,14 @@ async function run() {
       mergeMasterCanChange,
       leadSourceRule,
       mergeFieldCanChange,
+      missingContactIdRefreshState,
       mergePayload,
       accountMergeDisabled,
       shortcutsVisible,
       fileModeRedirect,
       rootScrollPolicy,
+      scrollTrapState,
+      workspaceColumnScroll,
       reviewPaneScroll,
       mobileScroll,
       interactiveCount: interactiveReachability.count,
@@ -718,6 +743,15 @@ function contactSmokeCsv() {
   return rows.map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function contactMissingIdSmokeCsv() {
+  const rows = [
+    ["Full Name", "Company", "Email", "Lead Source", "Created Date", "Phone", "Mobile"],
+    ["Ada Lovelace", "Northstar Analytics", "ada@example.com", "Web", "2024-01-01", "(555) 111-0101", ""],
+    ["Ada Lovelace", "Northstar Analytics Inc.", "ada@example.com", "Referral", "2024-02-01", "", "(555) 222-0101"]
+  ];
+  return rows.map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 async function mergeLeadSourceRuleState(page) {
   return page.evaluate(() => {
     const rows = [...document.querySelectorAll(".merge-matrix tbody tr")];
@@ -867,6 +901,80 @@ async function captureStaleRefreshFlow(page, refreshedCsv) {
   await refreshResponsePromise;
   await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
   await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+  await page.unroute("**/api/salesforce/premerge-check");
+  await page.unroute("**/api/salesforce/merge");
+  await page.unroute(`**${refreshEndpoint}`);
+  return state;
+}
+
+async function captureMissingContactIdRefreshFlow(page, missingIdCsvPath, refreshedCsv) {
+  const refreshEndpoint = "/api/smoke/missing-contact-ids/latest.csv";
+  const state = {
+    noticeVisible: false,
+    refreshButtonVisible: false,
+    refreshCalled: false,
+    preMergeCalled: false,
+    mergeCalled: false,
+    dialogMessage: "",
+    refreshedHasIds: false
+  };
+
+  await importContactsThroughMenu(page, missingIdCsvPath);
+  await page.evaluate((endpoint) => {
+    state.datasetSource = {
+      endpoint,
+      fileName: "contacts-missing-ids.csv",
+      displayName: "Latest Contacts",
+      objectType: "contact",
+      format: "csv"
+    };
+  }, refreshEndpoint);
+  await waitForFirstGroup(page, "Missing Contact ID dataset load");
+  await page.locator(".group-item-main").first().click();
+  await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
+  await page.locator('[data-review-mode="merge"]').click();
+  await page.locator(".merge-repair-notice").waitFor({ state: "visible", timeout: 5000 });
+  state.noticeVisible = await page.locator(".merge-repair-notice").isVisible();
+  state.refreshButtonVisible = await page.locator(".merge-refresh-contact-ids-button").isVisible();
+
+  await page.route("**/api/salesforce/premerge-check", async (route) => {
+    state.preMergeCalled = true;
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { message: "Pre-merge should not run without Contact IDs" } })
+    });
+  });
+  await page.route("**/api/salesforce/merge", async (route) => {
+    state.mergeCalled = true;
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { message: "Merge should not run without Contact IDs" } })
+    });
+  });
+  await page.route(`**${refreshEndpoint}`, async (route) => {
+    state.refreshCalled = true;
+    await route.fulfill({
+      status: 200,
+      contentType: "text/csv",
+      body: refreshedCsv
+    });
+  });
+
+  const refreshResponsePromise = page.waitForResponse((response) => response.url().endsWith(refreshEndpoint));
+  page.once("dialog", async (dialog) => {
+    state.dialogMessage = dialog.message();
+    await dialog.accept();
+  });
+  await page.locator(".merge-refresh-contact-ids-button").click();
+  await refreshResponsePromise;
+  await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
+  await waitForFirstGroup(page, "Missing Contact ID refresh");
+  state.refreshedHasIds = await page.evaluate(() => {
+    return state.objectType === "contact" && state.rows.length > 0 && state.rows.every((record) => /^003/.test(salesforceId(record)));
+  });
+
   await page.unroute("**/api/salesforce/premerge-check");
   await page.unroute("**/api/salesforce/merge");
   await page.unroute(`**${refreshEndpoint}`);
@@ -1180,6 +1288,66 @@ async function assertRootScrollPolicy(page) {
       htmlOverflowY: htmlStyle.overflowY,
       scrollHeight: root.scrollHeight,
       clientHeight: root.clientHeight
+    };
+  });
+}
+
+async function assertNoPrimaryScrollTraps(page) {
+  return page.evaluate(() => {
+    const blockedOverflow = new Set(["hidden", "clip"]);
+    const selectors = [
+      ["html", document.documentElement],
+      ["body", document.body],
+      [".app", document.querySelector(".app")],
+      [".main-grid", document.querySelector(".main-grid")],
+      [".workspace-column", document.querySelector(".workspace-column")],
+      [".control-pane", document.querySelector(".control-pane")],
+      [".review-pane", document.querySelector(".review-pane")]
+    ];
+    const broken = [];
+
+    const visibleTextBelowViewport = (element) => {
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          return node.textContent?.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+        }
+      });
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const rects = [...range.getClientRects()];
+        range.detach();
+        const clippedRect = rects.find((rect) => rect.width > 0 && rect.height > 0 && rect.bottom > window.innerHeight + 1);
+        if (clippedRect) {
+          return {
+            text: node.textContent.trim().replace(/\s+/g, " ").slice(0, 80),
+            bottom: Math.round(clippedRect.bottom)
+          };
+        }
+      }
+      return null;
+    };
+
+    for (const [selector, element] of selectors) {
+      if (!element) continue;
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      const hasVerticalOverflow = element.scrollHeight > element.clientHeight + 1;
+      const belowViewportText = visibleTextBelowViewport(element);
+      if (!blockedOverflow.has(style.overflowY) || (!hasVerticalOverflow && !belowViewportText)) continue;
+      broken.push({
+        selector,
+        overflowY: style.overflowY,
+        scrollHeight: element.scrollHeight,
+        clientHeight: element.clientHeight,
+        rectBottom: Math.round(rect.bottom),
+        belowViewportText
+      });
+    }
+
+    return {
+      ok: broken.length === 0,
+      broken
     };
   });
 }
