@@ -31,7 +31,7 @@ Double-click: Launch Duplicate Reviewer - Windows.cmd
 Windows PowerShell fallback:
 
 ```powershell
-.\Launch Duplicate Reviewer - Windows PowerShell.ps1
+.\scripts\launch-duplicate-reviewer-windows.ps1
 ```
 
 Manual start:

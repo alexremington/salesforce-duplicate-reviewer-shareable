@@ -11,7 +11,7 @@
     "setup:playwright": "node vendor/managed-app/scripts/setup-shared-playwright.js",
     "smoke:ui": "node tests/playwright-smoke.js",
     "smoke:ui:local": "node scripts/run-ui-smoke.js",
-    "start": "node server.js"
+    "start": "node server/server.js"
   },
   "engines": {
     "node": ">=18"

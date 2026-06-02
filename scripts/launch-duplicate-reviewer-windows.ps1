@@ -1,7 +1,8 @@
 param()
 
 $ErrorActionPreference = 'Stop'
-$ProjectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ProjectDir = Split-Path -Parent $ScriptDir
 $Launcher = Join-Path $ProjectDir 'scripts\launch-local-app.js'
 
 if (-not (Test-Path $Launcher)) {

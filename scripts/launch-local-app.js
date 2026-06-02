@@ -11,6 +11,7 @@ const PROJECT_DIR = path.resolve(__dirname, "..");
 const APP_ID = "salesforce-duplicate-reviewer";
 const APP_NAME = "Salesforce Duplicate Reviewer";
 const DEFAULT_PORT = 5180;
+const SERVER_SCRIPT = path.join("server", "server.js");
 const PORT_CANDIDATES = [5180, 5182, 5183, 5184, 5185, 5186, 5187, 5188, 5189, 5190];
 const EXPECTED_FEATURE_VERSION = readServerFeatureVersion();
 const REQUIRED_HEALTH = {
@@ -25,14 +26,14 @@ const REQUIRED_HEALTH = {
   svgStaticAssets: true
 };
 const STATIC_ASSETS = [
-  ["index.html", "index.html"],
-  ["redirect-file-mode.js", "redirect-file-mode.js"],
-  ["app.js", "app.js"],
-  ["matching-worker.js", "matching-worker.js"],
-  ["styles.css", "styles.css"],
-  ["vendor/managed-app/assets/politico-logo.svg", "vendor/managed-app/assets/politico-logo.svg"],
-  ["vendor/managed-app/css/managed-app-base.css", "vendor/managed-app/css/managed-app-base.css"],
-  ["vendor/managed-app/scripts/managed-worker-client.js", "vendor/managed-app/scripts/managed-worker-client.js"]
+  ["public/index.html", "index.html"],
+  ["public/redirect-file-mode.js", "redirect-file-mode.js"],
+  ["public/app.js", "app.js"],
+  ["public/matching-worker.js", "matching-worker.js"],
+  ["public/styles.css", "styles.css"],
+  ["public/vendor/managed-app/assets/politico-logo.svg", "vendor/managed-app/assets/politico-logo.svg"],
+  ["public/vendor/managed-app/css/managed-app-base.css", "vendor/managed-app/css/managed-app-base.css"],
+  ["public/vendor/managed-app/scripts/managed-worker-client.js", "vendor/managed-app/scripts/managed-worker-client.js"]
 ];
 
 main().catch((error) => {
@@ -120,9 +121,9 @@ function copyStaticAsset(source, target) {
 }
 
 function readServerFeatureVersion() {
-  const text = fs.readFileSync(path.join(PROJECT_DIR, "server.js"), "utf8");
+  const text = fs.readFileSync(path.join(PROJECT_DIR, SERVER_SCRIPT), "utf8");
   const match = text.match(/const FEATURE_VERSION = "([^"]+)"/);
-  if (!match) throw new Error("Could not read Duplicate Reviewer feature version from server.js.");
+  if (!match) throw new Error(`Could not read Duplicate Reviewer feature version from ${SERVER_SCRIPT}.`);
   return match[1];
 }
 
@@ -259,7 +260,7 @@ function isPortListening(port) {
 function startServer({ logDir, env }) {
   const outFd = fs.openSync(path.join(logDir, "duplicate-reviewer.out.log"), "a");
   const errFd = fs.openSync(path.join(logDir, "duplicate-reviewer.err.log"), "a");
-  const child = childProcess.spawn(process.execPath, ["server.js"], {
+  const child = childProcess.spawn(process.execPath, [SERVER_SCRIPT], {
     cwd: PROJECT_DIR,
     env,
     detached: true,

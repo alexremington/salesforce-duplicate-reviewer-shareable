@@ -8,6 +8,8 @@ const os = require("node:os");
 const path = require("node:path");
 
 const PROJECT_DIR = path.resolve(__dirname, "..");
+const SERVER_SCRIPT = path.join("server", "server.js");
+const PUBLIC_DIR = path.join(PROJECT_DIR, "public");
 const APP_NAME = "Salesforce Duplicate Reviewer";
 const APP_ID = "salesforce-duplicate-reviewer";
 const URL_ENV = "DUPLICATE_REVIEWER_URL";
@@ -60,12 +62,12 @@ async function main() {
     ...process.env,
     HOST: "127.0.0.1",
     PORT: String(port),
-    DUPLICATE_REVIEWER_STATIC_DIR: PROJECT_DIR,
+    DUPLICATE_REVIEWER_STATIC_DIR: PUBLIC_DIR,
     STAGING_CONTACTS_CSV: contactsCsvPath,
     STAGING_ACCOUNTS_CSV: accountsCsvPath
   };
 
-  serverProcess = childProcess.spawn(process.execPath, ["server.js"], {
+  serverProcess = childProcess.spawn(process.execPath, [SERVER_SCRIPT], {
     cwd: PROJECT_DIR,
     env: serverEnv,
     stdio: ["ignore", "pipe", "pipe"]
