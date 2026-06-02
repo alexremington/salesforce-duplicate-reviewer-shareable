@@ -309,7 +309,21 @@ function recentLogText(filePath) {
 
 function defaultCommandPath() {
   if (process.platform === "win32") {
-    return uniquePathParts([process.env.Path, process.env.PATH].filter(Boolean).join(path.delimiter)).join(path.delimiter);
+    return uniquePathParts([
+      process.env.Path,
+      process.env.PATH,
+      path.dirname(process.execPath),
+      process.env.ProgramFiles && path.join(process.env.ProgramFiles, "nodejs"),
+      process.env["ProgramFiles(x86)"] && path.join(process.env["ProgramFiles(x86)"], "nodejs"),
+      process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs", "nodejs"),
+      process.env.ProgramFiles && path.join(process.env.ProgramFiles, "sf", "bin"),
+      process.env.ProgramFiles && path.join(process.env.ProgramFiles, "Salesforce CLI", "bin"),
+      process.env["ProgramFiles(x86)"] && path.join(process.env["ProgramFiles(x86)"], "sf", "bin"),
+      process.env["ProgramFiles(x86)"] && path.join(process.env["ProgramFiles(x86)"], "Salesforce CLI", "bin"),
+      process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs", "sf", "bin"),
+      process.env.APPDATA && path.join(process.env.APPDATA, "npm"),
+      path.join(os.homedir(), "AppData", "Roaming", "npm")
+    ].filter(Boolean).join(path.delimiter)).join(path.delimiter);
   }
 
   return uniquePathParts([
