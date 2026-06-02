@@ -856,10 +856,7 @@ els.csvObjectMenu.addEventListener("click", (event) => {
   const button = event.target.closest?.("[data-csv-object]");
   if (!button) return;
 
-  pendingCsvObjectType = normalizeObjectType(button.dataset.csvObject, state.objectType);
-  setCsvObjectMenuOpen(false);
-  els.csvInput.value = "";
-  els.csvInput.click();
+  openDatasetImport(button.dataset.csvObject);
 });
 
 document.addEventListener("click", (event) => {
@@ -998,7 +995,7 @@ els.detailSurface.addEventListener("click", (event) => {
   const emptyAction = event.target.closest?.("[data-empty-action]");
   if (emptyAction) {
     if (emptyAction.dataset.emptyAction === "choose-csv") {
-      setCsvObjectMenuOpen(true);
+      openDatasetImport(state.objectType);
       els.chooseCsvButton.focus();
     } else if (emptyAction.dataset.emptyAction === "demo-data") {
       loadDemoData();
@@ -1084,6 +1081,13 @@ function setCsvObjectMenuOpen(isOpen) {
   els.csvObjectMenu.hidden = !isOpen;
   els.chooseCsvButton.setAttribute("aria-expanded", String(isOpen));
   if (isOpen) setExportMenuOpen(false);
+}
+
+function openDatasetImport(objectType = state.objectType) {
+  pendingCsvObjectType = normalizeObjectType(objectType, state.objectType);
+  setCsvObjectMenuOpen(false);
+  els.csvInput.value = "";
+  els.csvInput.click();
 }
 
 function setExportMenuOpen(isOpen) {

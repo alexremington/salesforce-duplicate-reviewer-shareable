@@ -22,7 +22,13 @@ macOS:
 Double-click: Launch Duplicate Reviewer.command
 ```
 
-Windows PowerShell:
+Windows:
+
+```text
+Double-click: Launch Duplicate Reviewer.cmd
+```
+
+Windows PowerShell fallback:
 
 ```powershell
 .\Launch Duplicate Reviewer.ps1
@@ -120,7 +126,9 @@ Generated CSV/JSON exports are written under `Output/`, which is ignored by Git.
 
 ## Local Server Helpers
 
-macOS users can use:
+For day-to-day review work, use `Launch Duplicate Reviewer.command` on macOS or `Launch Duplicate Reviewer.cmd` on Windows. PowerShell users can run `Launch Duplicate Reviewer.ps1` as a fallback. All three launchers delegate to `scripts/launch-local-app.js`, which chooses an available local port, prepares the per-user static cache, starts the server, checks readiness, and opens the browser.
+
+The local server can also be started manually:
 
 ```bash
 scripts/start-reviewer-server.sh

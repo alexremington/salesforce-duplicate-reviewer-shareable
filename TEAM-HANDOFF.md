@@ -9,7 +9,7 @@ Share a GitHub Release archive or a clean clone of the public-safe branch. Do no
 1. Install Node.js 18 or newer.
 2. Download or clone the app folder.
 3. Copy `.env.example` to `.env` only if Salesforce CLI-backed features are needed.
-4. Open `index.html` for file-only review, or start the server with the Mac or Windows launcher.
+4. Open `index.html` for file-only review, or start the server with the Mac `.command` or Windows `.cmd` launcher.
 5. Use `Choose CSV` or `Load Demo` to confirm the UI renders correctly.
 
 Use the launcher for normal server-backed work. When latest Contact or Account exports exist under `Output/`, the app adds them to `Recent files` automatically.
