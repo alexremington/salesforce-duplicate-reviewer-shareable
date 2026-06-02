@@ -6258,6 +6258,7 @@ function renderSalesforceMergePanel(group, activeRecords, currentDecision) {
         Salesforce merge keeps the selected master Contact and reparents related records from duplicate Contacts.
         Enforced merge rules are sent with the Salesforce merge request; other field choices document controlling values for review/export.
       </p>
+      ${mergeState.invalidRecords.length ? renderMissingContactIdNotice(group, mergeState) : ""}
       ${result ? renderMergeResult(result) : ""}
       <div class="merge-actions">
         <button
@@ -6317,6 +6318,7 @@ function getMergeState(group, activeRecords, currentDecision) {
     mergeRecords,
     alreadyMerged
   });
+  const canRefreshMissingContactIds = invalidRecords.length > 0 && canRefreshLoadedDatasetFromSource();
 
   return {
     acceptedValues,
@@ -6325,6 +6327,7 @@ function getMergeState(group, activeRecords, currentDecision) {
     selectedRecord,
     mergeRecords,
     invalidRecords,
+    canRefreshMissingContactIds,
     inFlight,
     locked: inFlight || alreadyMerged,
     canSubmit: !blockedReason && !inFlight,
@@ -6343,11 +6346,42 @@ function mergeBlockedReason({ activeRecords, currentDecision, selectedId, invali
   if (state.objectType !== "contact") return "Only Contact merge is available in this app.";
   if (activeRecords.length < 2) return "At least two active records are required.";
   if (currentDecision !== "duplicate") return "Mark this group Duplicate before merging.";
+  if (invalidRecords.length) return missingContactIdMergeMessage(invalidRecords.length);
   if (!selectedId) return "Choose a master Contact with a valid Salesforce ID.";
-  if (invalidRecords.length) return "Every active Contact must have a valid 003 Salesforce ID.";
   if (!mergeRecords.length) return "There are no duplicate Contacts to merge into the master.";
   if (mergeRecords.length > 20) return "Split this group first; one merge action supports up to 20 duplicate records.";
   return "";
+}
+
+function missingContactIdMergeMessage(missingCount = 0) {
+  const count = Number(missingCount) || 0;
+  const prefix = count
+    ? `${formatNumber(count)} active ${count === 1 ? "Contact is" : "Contacts are"} missing valid Salesforce Contact IDs.`
+    : "Valid Salesforce Contact IDs are missing.";
+  return `${prefix} Contact IDs are required before any merge can be sent to Salesforce. Re-pull the Contacts export with the Id field included before merging.`;
+}
+
+function renderMissingContactIdNotice(group, mergeState) {
+  return `
+    <div class="merge-repair-notice">
+      <div>
+        <strong>Contact IDs required</strong>
+        <span>${escapeHtml(missingContactIdMergeMessage(mergeState.invalidRecords.length))}</span>
+        <em>${escapeHtml(mergeState.canRefreshMissingContactIds
+          ? "The standard latest Contacts pull includes Id, so the app can refresh this dataset automatically."
+          : "This loaded dataset cannot be refreshed automatically. Re-run the Contacts pull/export with Id included, then import it again."
+        )}</em>
+      </div>
+      ${mergeState.canRefreshMissingContactIds ? `
+        <button
+          class="button button-secondary merge-refresh-contact-ids-button"
+          type="button"
+          data-merge-action="refresh-contact-ids"
+          data-group-key="${escapeHtml(group.key)}"
+        >Refresh Contacts</button>
+      ` : ""}
+    </div>
+  `;
 }
 
 function mergeStatusClass(result, blockedReason, inFlight) {
@@ -6879,6 +6913,10 @@ function setMergeMasterSelection(groupKey, value) {
 }
 
 async function handleMergeAction(button) {
+  if (button.dataset.mergeAction === "refresh-contact-ids") {
+    await handleMissingContactIdRefresh(button);
+    return;
+  }
   if (button.dataset.mergeAction !== "merge") return;
   const groupKey = button.dataset.groupKey;
   const group = findGroupByKey(groupKey);
@@ -6980,6 +7018,30 @@ async function handleMergeAction(button) {
   }
 }
 
+async function handleMissingContactIdRefresh(button) {
+  const groupKey = button.dataset.groupKey;
+  const group = findGroupByKey(groupKey);
+  if (!group) return;
+
+  const activeRecords = getActiveGroupRecords(group);
+  const mergeState = getMergeState(group, activeRecords, state.decisions.get(group.key) || "");
+  const message = missingContactIdMergeMessage(mergeState.invalidRecords.length);
+  if (!canRefreshLoadedDatasetFromSource()) {
+    window.alert(`${message}\n\nThis dataset was loaded from a local file or an unknown source, so the app cannot re-pull it automatically. Re-run the Contacts pull/export with the Id field included, then import the fresh file.`);
+    return;
+  }
+
+  const sourceLabel = state.datasetSource.displayName || state.datasetSource.fileName || state.fileName || "Latest Contacts";
+  const confirmed = window.confirm(`${message}\n\nRefresh ${sourceLabel} from Salesforce now?`);
+  if (!confirmed) return;
+
+  await refreshLoadedDatasetFromSource({
+    title: "Refreshing Contacts",
+    startMessage: `Fetching ${sourceLabel} with Contact IDs included.`,
+    matchMessage: `Matching refreshed ${sourceLabel}.`
+  });
+}
+
 async function checkSalesforcePreMergeFreshness({ groupKey, mergeState, mergeIds, records }) {
   const response = await fetch("/api/salesforce/premerge-check", {
     method: "POST",
@@ -7039,7 +7101,7 @@ function canRefreshLoadedDatasetFromSource() {
   return state.objectType === "contact" && isServerBackedApp() && Boolean(state.datasetSource?.endpoint);
 }
 
-async function refreshLoadedDatasetFromSource() {
+async function refreshLoadedDatasetFromSource(options = {}) {
   const source = { ...(state.datasetSource || {}) };
   if (!source.endpoint || !isServerBackedApp()) {
     window.alert("Automatic refresh is unavailable for this loaded dataset.");
@@ -7051,8 +7113,11 @@ async function refreshLoadedDatasetFromSource() {
   const displayName = source.displayName || fileName;
   const format = source.format || datasetFormatFromFileName(source.endpoint || fileName);
   let loadStarted = false;
+  const title = options.title || "Refreshing Contacts";
+  const startMessage = options.startMessage || `Fetching ${displayName} from Salesforce.`;
+  const matchMessage = options.matchMessage || `Matching ${displayName}.`;
 
-  showLoadingModal("Refreshing Contacts", `Fetching ${displayName} from Salesforce.`, 0);
+  showLoadingModal(title, startMessage, 0);
   try {
     await nextPaint();
     const response = await fetch(source.endpoint, { cache: "no-store" });
@@ -7060,7 +7125,7 @@ async function refreshLoadedDatasetFromSource() {
     const datasetText = await response.text();
     loadStarted = true;
     beginFileLoad(fileName, objectType);
-    showLoadingModal("Refreshing Contacts", `Matching ${displayName}.`, 0);
+    showLoadingModal(title, matchMessage, 0);
     await loadDatasetText(datasetText, {
       fileName,
       objectType,

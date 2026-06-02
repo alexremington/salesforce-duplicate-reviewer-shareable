@@ -104,7 +104,7 @@ The merge action supports `Contact` records only. Account matching remains avail
 Current app-enforced rules:
 
 - A group must be marked `Duplicate` before merge controls can submit.
-- Every active record in the merge group must be a Contact with a valid `003` Salesforce ID.
+- Every active record in the merge group must be a Contact with a valid `003` Salesforce ID. If the loaded Contacts dataset is missing IDs, the app blocks merge and, for server-backed latest Contacts data, offers to refresh the Contacts pull that includes the `Id` field.
 - One Contact is selected as the master. The selected master keeps its field values by default, and Salesforce reparents related records from duplicate Contacts to that master.
 - `Lead Source` is locked to the oldest created Contact when both `Lead Source` and `Created Date` are available. If the selected master has a different Lead Source, the merge payload updates the master to the oldest-created value.
 - The browser collects intent and confirmation, but merge execution stays server-side so Salesforce access tokens are not exposed to the browser.
@@ -120,7 +120,7 @@ Field-retention policy for merges we perform. If a listed field is not yet inclu
 - Other Contact fields are not expected to create merge conflicts unless a team-specific rule is added. The selected master value can remain the default retained value.
 - Related object detail should be preserved from both sides of the merge. Salesforce should keep or reparent campaigns, activities, entitlements, opportunities, and other related records from the duplicate Contacts to the surviving master Contact.
 
-Before every merge, the server re-reads the selected Contacts from Salesforce and compares the current values with the rows loaded in the reviewer. Missing, deleted, or changed records block the merge. If the loaded dataset came from a server-backed latest Contacts endpoint, the browser asks whether to refresh that dataset automatically; approving the prompt reloads the latest export before the merge can be tried again. Manual file uploads cannot be refreshed automatically because the browser does not retain permission to reread the original local path.
+Before every merge, the server re-reads the selected Contacts from Salesforce and compares the current values with the rows loaded in the reviewer. Missing IDs, missing records, deleted records, or changed records block the merge. If the loaded dataset came from a server-backed latest Contacts endpoint, the browser asks whether to refresh that dataset automatically; approving the prompt reloads the latest export before the merge can be tried again. Manual file uploads cannot be refreshed automatically because the browser does not retain permission to reread the original local path.
 
 Salesforce merges do not have a complete one-click rollback in this app. Each attempted merge writes the requested master, duplicate IDs, pre-merge freshness result, and a recovery snapshot to the audit log. If a merge needs to be unwound, use the audit entry to identify the master and duplicate Contacts, restore deleted duplicate Contacts from Salesforce recovery tooling if still available, then manually repair related-record ownership and any master-field changes.
 
