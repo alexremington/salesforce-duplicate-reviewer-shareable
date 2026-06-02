@@ -12,10 +12,13 @@ A Duplicate Reviewer change is done when the implementation, verification, and s
 - User-facing state is visible for duplicate decisions, merge readiness, loading, errors, and empty datasets.
 - Content that extends beyond the viewport remains reachable by page-level or pane-level scrolling.
 - Interactive controls touched by the change are covered by smoke tests or a focused manual pass.
-- `npm run check` passes.
-- `npm run smoke:ui` passes after UI changes.
+- Every fixed user-visible bug has a named regression assertion in the check or smoke harness.
+- `npm run check` passes, including live server contract checks for current health and API routes.
+- `npm run smoke:ui:local` passes after UI changes.
+- Stale runtime checks reject or restart any running server whose health or API contract does not match the current source.
 - CI is green before treating the change as ready to share.
 - Setup, maintenance, or handoff docs are updated when behavior changes.
+- `docs/RELEASE-CHECKLIST.md` is followed before commit and push.
 
 ## Public-Safe Work
 

@@ -12,11 +12,15 @@ const APP_ID = "salesforce-duplicate-reviewer";
 const APP_NAME = "Salesforce Duplicate Reviewer";
 const DEFAULT_PORT = 5180;
 const PORT_CANDIDATES = [5180, 5182, 5183, 5184, 5185, 5186, 5187, 5188, 5189, 5190];
+const EXPECTED_FEATURE_VERSION = readServerFeatureVersion();
 const REQUIRED_HEALTH = {
   brandHeaderVersion: "shared-logo-contact-v1",
+  featureVersion: EXPECTED_FEATURE_VERSION,
+  apiContractVersion: "duplicate-reviewer-api-contract-v1",
   latestStagingFiles: true,
   jsonDatasets: true,
   salesforceMerge: true,
+  salesforcePreMergeCheck: true,
   staticAssetRoot: true,
   svgStaticAssets: true
 };
@@ -115,6 +119,13 @@ function copyStaticAsset(source, target) {
   }
 }
 
+function readServerFeatureVersion() {
+  const text = fs.readFileSync(path.join(PROJECT_DIR, "server.js"), "utf8");
+  const match = text.match(/const FEATURE_VERSION = "([^"]+)"/);
+  if (!match) throw new Error("Could not read Duplicate Reviewer feature version from server.js.");
+  return match[1];
+}
+
 function launchEnvironment({ port, staticDir }) {
   const defaultPath = defaultCommandPath();
   return {
@@ -142,15 +153,19 @@ async function selectPort({ configuredPort }) {
 async function reviewerReady(port) {
   const health = await reviewerHealth(port);
   if (!health) return false;
-  return (
+  const healthReady = (
     reviewerHealthMatchesApp(health) &&
     health.brandHeaderVersion === REQUIRED_HEALTH.brandHeaderVersion &&
+    health.featureVersion === REQUIRED_HEALTH.featureVersion &&
+    health.apiContractVersion === REQUIRED_HEALTH.apiContractVersion &&
     health.latestStagingFiles === REQUIRED_HEALTH.latestStagingFiles &&
     health.jsonDatasets === REQUIRED_HEALTH.jsonDatasets &&
     health.salesforceMerge === REQUIRED_HEALTH.salesforceMerge &&
+    health.salesforcePreMergeCheck === REQUIRED_HEALTH.salesforcePreMergeCheck &&
     health.staticAssetRoot === REQUIRED_HEALTH.staticAssetRoot &&
     health.svgStaticAssets === REQUIRED_HEALTH.svgStaticAssets
   );
+  return healthReady && await reviewerApiContractsReady(port);
 }
 
 async function reviewerMatchesApp(port) {
@@ -166,28 +181,62 @@ function reviewerHealth(port) {
   return requestJson(`http://127.0.0.1:${port}/api/health`).catch(() => null);
 }
 
-function requestJson(url) {
+async function reviewerApiContractsReady(port) {
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const payload = { objectType: "account" };
+  const [preMerge, merge] = await Promise.all([
+    requestJson(`${baseUrl}/api/salesforce/premerge-check`, { method: "POST", body: payload, acceptErrorStatus: true, raw: true }).catch(() => null),
+    requestJson(`${baseUrl}/api/salesforce/merge`, { method: "POST", body: payload, acceptErrorStatus: true, raw: true }).catch(() => null)
+  ]);
+  return routeRejectsUnsupportedMerge(preMerge) && routeRejectsUnsupportedMerge(merge);
+}
+
+function routeRejectsUnsupportedMerge(result) {
+  return result?.statusCode === 400 && /Only Contact merges are supported/.test(result.body || "");
+}
+
+function requestJson(url, options = {}) {
   return new Promise((resolve, reject) => {
-    const request = http.get(url, { timeout: 1500 }, (response) => {
+    const body = options.body == null ? "" : JSON.stringify(options.body);
+    const request = http.request(url, {
+      method: options.method || "GET",
+      timeout: 1500,
+      headers: body ? {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body)
+      } : undefined
+    }, (response) => {
       let body = "";
       response.setEncoding("utf8");
       response.on("data", (chunk) => {
         body += chunk;
       });
       response.on("end", () => {
+        const result = {
+          statusCode: response.statusCode,
+          body,
+          json: null
+        };
+        try {
+          result.json = body ? JSON.parse(body) : null;
+        } catch {
+          // Keep the raw body for contract diagnostics.
+        }
         if (response.statusCode < 200 || response.statusCode >= 300) {
+          if (options.acceptErrorStatus) {
+            resolve(result);
+            return;
+          }
           reject(new Error(`HTTP ${response.statusCode}: ${body}`));
           return;
         }
-        try {
-          resolve(JSON.parse(body));
-        } catch (error) {
-          reject(error);
-        }
+        resolve(options.raw ? result : result.json);
       });
     });
     request.on("timeout", () => request.destroy(new Error("request timed out")));
     request.on("error", reject);
+    if (body) request.write(body);
+    request.end();
   });
 }
 

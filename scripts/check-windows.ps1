@@ -83,6 +83,12 @@ if ($LASTEXITCODE -ne 0) {
   throw 'package.json is not valid JSON.'
 }
 
+Write-Host 'Checking server contracts...'
+& node scripts/check-server-contracts.js
+if ($LASTEXITCODE -ne 0) {
+  throw 'Server contract checks failed.'
+}
+
 Write-Host 'Checking Windows server startup...'
 $port = Get-FreePort
 $env:PORT = [string]$port

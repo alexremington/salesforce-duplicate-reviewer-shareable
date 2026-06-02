@@ -75,6 +75,7 @@ async function run() {
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
     const latestJsonLoad = await datasetLoadState(page);
     const latestReportSummary = await reportSummaryState(page);
+    const leftPaneSmallListLayout = await assertLeftPaneSmallListLayout(page);
     const loadedInteractiveReachability = await visibleInteractiveReachability(page);
     await page.locator("#chooseCsvButton").click();
     await page.getByRole("menuitem", { name: "Contacts" }).waitFor({ state: "visible", timeout: 5000 });
@@ -327,6 +328,9 @@ async function run() {
     if (latestReportSummary.surface.summaryBackground === latestReportSummary.surface.canvasBackground || latestReportSummary.surface.reviewHeaderBackground === latestReportSummary.surface.canvasBackground) {
       throw new Error(`Expected summary and group title to sit on a distinct readable surface: ${JSON.stringify(latestReportSummary.surface)}`);
     }
+    if (!leftPaneSmallListLayout.ok) {
+      throw new Error(`Expected compact left-pane layout without small-list scroll trap: ${JSON.stringify(leftPaneSmallListLayout)}`);
+    }
     if (!latestRecentFiles.contacts || !latestRecentFiles.accounts) {
       throw new Error(`Expected latest Contact and Account exports in Recent files: ${JSON.stringify(latestRecentFiles)}`);
     }
@@ -493,6 +497,7 @@ async function run() {
       loadingProgressbar,
       loadingStatusSamples,
       latestJsonLoad,
+      leftPaneSmallListLayout,
       topbarImportState,
       fastestSearchDefaultUnchecked,
       thresholdFilteredScores,
@@ -1462,6 +1467,65 @@ async function assertVerticalScrollAvailable(page, selector, label) {
       clientHeight: element.clientHeight
     };
   }, label);
+}
+
+async function assertLeftPaneSmallListLayout(page) {
+  return page.evaluate(() => {
+    const numberFromText = (value) => Number(String(value || "").replace(/,/g, "")) || 0;
+    const weightNumber = (value) => {
+      if (value === "normal") return 400;
+      if (value === "bold") return 700;
+      return Number(value) || 400;
+    };
+    const groupCount = numberFromText(document.querySelector("#groupCount")?.textContent);
+    const groupList = document.querySelector("#groupList");
+    const groupPanel = document.querySelector(".group-panel");
+    const groupItem = document.querySelector(".group-item");
+    const labelFilter = document.querySelector(".label-status-filter");
+    const labelOptions = [...document.querySelectorAll(".label-status-option span")];
+    const labelFooter = document.querySelector(".label-status-filter-footer");
+    const recentNames = [...document.querySelectorAll(".recent-file-name")];
+    const groupListStyle = groupList ? getComputedStyle(groupList) : null;
+    const groupPanelStyle = groupPanel ? getComputedStyle(groupPanel) : null;
+    const labelFilterRect = labelFilter?.getBoundingClientRect();
+    const lastLabelRect = labelOptions.at(-1)?.getBoundingClientRect();
+    const labelFooterRect = labelFooter?.getBoundingClientRect();
+    const labelFooterGap = lastLabelRect && labelFooterRect
+      ? Math.round(labelFooterRect.top - lastLabelRect.bottom)
+      : 0;
+    const labelWeights = labelOptions.map((node) => weightNumber(getComputedStyle(node).fontWeight));
+    const recentNameWeights = recentNames.map((node) => weightNumber(getComputedStyle(node).fontWeight));
+    const smallListShouldNotVirtualize = groupCount <= 60;
+    const groupItemClippedByPanel = Boolean(
+      groupPanel &&
+      groupItem &&
+      ["hidden", "clip"].includes(groupPanelStyle?.overflowY) &&
+      groupItem.getBoundingClientRect().bottom > groupPanel.getBoundingClientRect().bottom + 1
+    );
+
+    return {
+      ok: Boolean(
+        groupList &&
+        labelFilter &&
+        (!smallListShouldNotVirtualize || !groupList.classList.contains("is-virtualized")) &&
+        (!smallListShouldNotVirtualize || !/(auto|scroll|hidden|clip)/.test(groupListStyle?.overflowY || "")) &&
+        !["hidden", "clip"].includes(groupPanelStyle?.overflowY || "") &&
+        !groupItemClippedByPanel &&
+        labelFooterGap <= 16 &&
+        labelWeights.every((weight) => weight < 600) &&
+        recentNameWeights.every((weight) => weight < 600)
+      ),
+      groupCount,
+      groupListVirtualized: groupList?.classList.contains("is-virtualized") || false,
+      groupListOverflowY: groupListStyle?.overflowY || "",
+      groupPanelOverflowY: groupPanelStyle?.overflowY || "",
+      labelFooterGap,
+      labelFilterHeight: labelFilterRect ? Math.round(labelFilterRect.height) : 0,
+      labelWeights,
+      recentNameWeights,
+      groupItemClippedByPanel
+    };
+  });
 }
 
 async function assertRightPaneSingleScrollModel(page) {
