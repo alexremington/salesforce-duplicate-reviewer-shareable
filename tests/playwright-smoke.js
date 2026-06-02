@@ -72,6 +72,11 @@ async function run() {
     await page.getByRole("menuitem", { name: "Contacts" }).waitFor({ state: "visible", timeout: 5000 });
     await page.keyboard.press("Escape");
     const csvMenuClosed = await page.locator("#csvObjectMenu").isHidden();
+    await page.locator("#exportMenuButton").click();
+    await page.getByRole("menuitem", { name: "Decisions" }).waitFor({ state: "visible", timeout: 5000 });
+    const exportMenuState = await exportMenuStateForSmoke(page);
+    await page.keyboard.press("Escape");
+    const exportMenuClosed = await page.locator("#exportMenu").isHidden();
     await page.locator("#demoButton").click();
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
 
@@ -186,6 +191,15 @@ async function run() {
       }, mergeFieldSelection);
     }
     await page.locator(".merge-confirmation-input").fill("MERGE");
+    const staleRefreshState = await captureStaleRefreshFlow(page, contactSmokeCsv());
+    await page.locator(".group-item-main").first().click();
+    await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
+    await page.locator('[data-review-mode="merge"]').click();
+    await page.locator(".merge-master-radio").first().waitFor({ state: "visible", timeout: 5000 });
+    if (await page.locator(".merge-master-radio").count() > 1) {
+      await page.locator(".merge-master-radio").nth(1).check();
+    }
+    await page.locator(".merge-confirmation-input").fill("MERGE");
     const mergeConfirmationValue = await page.locator(".merge-confirmation-input").inputValue();
     const mergePayload = await captureMergePayload(page);
     await page.setViewportSize({ width: 1280, height: 560 });
@@ -219,7 +233,7 @@ async function run() {
       bodyScrollWidth: document.body.scrollWidth
     }));
 
-    if (!emptyChooseVisible) throw new Error("Expected empty-state Choose File action to be visible.");
+    if (!emptyChooseVisible) throw new Error("Expected empty-state Import action to be visible.");
     if (!emptyDemoVisible) throw new Error("Expected empty-state Load Demo action to be visible.");
     if (!lightTheme.colorScheme.includes("light") || !darkTheme.colorScheme.includes("dark") || lightTheme.bodyBg === darkTheme.bodyBg) {
       throw new Error(`Expected the UI theme to follow system light/dark mode: ${JSON.stringify({ lightTheme, darkTheme })}`);
@@ -233,8 +247,22 @@ async function run() {
     if (!brandLogo.supportContact || brandLogo.supportHref !== "mailto:aremington@politico.com" || !brandLogo.supportRightAligned) {
       throw new Error(`Expected support contact at the right side of the header: ${JSON.stringify(brandLogo)}`);
     }
+    if (
+      brandLogo.titleFontSize !== "25px" ||
+      !brandLogo.titleFontFamily.includes("Iowan Old Style") ||
+      !zeroLetterSpacing(brandLogo.titleLetterSpacing) ||
+      brandLogo.subtitleText !== "Salesforce Account and Contact Matching" ||
+      brandLogo.subtitleFontSize !== "12px" ||
+      brandLogo.subtitleFontWeight !== "800" ||
+      !zeroLetterSpacing(brandLogo.subtitleLetterSpacing)
+    ) {
+      throw new Error(`Expected Duplicate Reviewer to use shared managed header typography: ${JSON.stringify(brandLogo)}`);
+    }
     if (!brandLogo.actionsCentered || !brandLogo.actionRowsBalanced || !brandLogo.actionsComfortable) {
       throw new Error(`Expected Duplicate Reviewer header buttons to be centered in balanced, legible rows: ${JSON.stringify(brandLogo)}`);
+    }
+    if (brandLogo.actionTexts.join("|") !== "Import|Export >|?|Send to Codex|Demo Data") {
+      throw new Error(`Expected Duplicate Reviewer header actions to be simplified and ordered: ${JSON.stringify(brandLogo)}`);
     }
     if (brandLogo.copyCenterDelta > 4 || brandLogo.copyGap < 10 || brandLogo.copyGap > 18) {
       throw new Error(`Expected POLITICO logo to align vertically with the brand text and keep even brand spacing: ${JSON.stringify(brandLogo)}`);
@@ -272,7 +300,10 @@ async function run() {
     if (!latestRecentFiles.contacts || !latestRecentFiles.accounts) {
       throw new Error(`Expected latest Contact and Account exports in Recent files: ${JSON.stringify(latestRecentFiles)}`);
     }
-    if (!csvMenuClosed) throw new Error("Expected CSV object menu to close with Escape.");
+    if (!csvMenuClosed) throw new Error("Expected Import menu to close with Escape.");
+    if (!exportMenuClosed || exportMenuState.options.join("|") !== "Decisions|Labels") {
+      throw new Error(`Expected Export menu to show Decisions and Labels and close with Escape: ${JSON.stringify({ exportMenuClosed, exportMenuState })}`);
+    }
     if (matchControlsExpanded !== "true") throw new Error("Expected Match Controls panel to expand.");
     if (thresholdReadout !== "80-99") throw new Error(`Expected threshold readout to update to 80-99, got ${thresholdReadout}.`);
     if (thresholdControl.minRange !== "80" || thresholdControl.maxRange !== "99" || thresholdControl.minNumber !== "80" || thresholdControl.maxNumber !== "99") {
@@ -300,8 +331,8 @@ async function run() {
     if (customFilterState.singleFilterIndexCount !== 0 || customFilterState.multipleFilterIndexCount < 2) {
       throw new Error(`Expected filter row numbers only when there is more than one filter: ${JSON.stringify(customFilterState)}`);
     }
-    if (!customFilterState.singleFilterLayout.sameLine) {
-      throw new Error(`Expected field, operator, and value to stay on one desktop line: ${JSON.stringify(customFilterState.singleFilterLayout)}`);
+    if (!customFilterState.singleFilterLayout.sameLine || !customFilterState.singleFilterLayout.withinPanel) {
+      throw new Error(`Expected field, operator, and value to stay on one desktop line inside the Match Controls card: ${JSON.stringify(customFilterState.singleFilterLayout)}`);
     }
     if (customFilterState.filteredCount !== 2 || customFilterState.logicValue !== "1 OR 2") {
       throw new Error(`Expected custom boolean filters to narrow the group list: ${JSON.stringify(customFilterState)}`);
@@ -345,8 +376,28 @@ async function run() {
     }
     if (!mergeFieldCanChange) throw new Error("Expected Contact merge field radio selection to change.");
     if (mergeConfirmationValue !== "MERGE") throw new Error("Expected Contact merge confirmation input to accept text.");
+    if (
+      !staleRefreshState.preMergeCalled ||
+      !staleRefreshState.refreshCalled ||
+      staleRefreshState.mergeCalled ||
+      !staleRefreshState.dialogMessage.includes("Refresh Latest Contacts")
+    ) {
+      throw new Error(`Expected stale pre-merge data to prompt and refresh without merging: ${JSON.stringify(staleRefreshState)}`);
+    }
     if (mergePayload.masterFields?.LeadSource !== "Web") {
       throw new Error(`Expected Salesforce merge payload to preserve oldest Lead Source: ${JSON.stringify(mergePayload)}`);
+    }
+    if (!mergePayload.preMergePayload?.records?.length) {
+      throw new Error(`Expected Salesforce pre-merge freshness check to include loaded records: ${JSON.stringify(mergePayload)}`);
+    }
+    if (!mergePayload.records?.length) {
+      throw new Error(`Expected Salesforce merge payload to include loaded freshness records: ${JSON.stringify(mergePayload)}`);
+    }
+    if (
+      mergePayload.preMergePayload.masterId !== mergePayload.masterId ||
+      JSON.stringify(mergePayload.preMergePayload.mergeIds || []) !== JSON.stringify(mergePayload.mergeIds || [])
+    ) {
+      throw new Error(`Expected pre-merge check and merge payload to target the same records: ${JSON.stringify(mergePayload)}`);
     }
     if (!accountMergeDisabled) throw new Error("Expected Account merge mode to be disabled.");
     if (!shortcutsVisible) throw new Error("Expected shortcuts modal to be visible.");
@@ -639,6 +690,29 @@ async function mergeLeadSourceRuleState(page) {
 
 async function captureMergePayload(page) {
   let payload = null;
+  let preMergePayload = null;
+  await page.route("**/api/salesforce/premerge-check", async (route) => {
+    preMergePayload = JSON.parse(route.request().postData() || "{}");
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        status: "fresh",
+        checkedAt: new Date().toISOString(),
+        objectType: "Contact",
+        groupKey: preMergePayload.groupKey,
+        masterId: preMergePayload.masterId,
+        mergeIds: preMergePayload.mergeIds || [],
+        ids: [preMergePayload.masterId, ...(preMergePayload.mergeIds || [])].filter(Boolean),
+        missingIds: [],
+        deletedIds: [],
+        changedFields: [],
+        currentRecords: [],
+        loadedRecords: preMergePayload.records || []
+      })
+    });
+  });
   await page.route("**/api/salesforce/merge", async (route) => {
     payload = JSON.parse(route.request().postData() || "{}");
     await route.fulfill({
@@ -660,8 +734,93 @@ async function captureMergePayload(page) {
   page.once("dialog", (dialog) => dialog.accept());
   await page.locator(".merge-submit-button").click();
   await page.locator(".merge-result.success").waitFor({ state: "visible", timeout: 5000 });
+  await page.unroute("**/api/salesforce/premerge-check");
   await page.unroute("**/api/salesforce/merge");
-  return payload || {};
+  return {
+    ...(payload || {}),
+    preMergePayload
+  };
+}
+
+async function captureStaleRefreshFlow(page, refreshedCsv) {
+  const refreshEndpoint = "/api/smoke/stale-refresh/latest.csv";
+  const state = {
+    preMergeCalled: false,
+    refreshCalled: false,
+    mergeCalled: false,
+    dialogMessage: ""
+  };
+  await page.evaluate((endpoint) => {
+    state.datasetSource = {
+      endpoint,
+      fileName: "contacts-smoke.csv",
+      displayName: "Latest Contacts",
+      objectType: "contact",
+      format: "csv"
+    };
+  }, refreshEndpoint);
+  await page.route("**/api/salesforce/premerge-check", async (route) => {
+    const payload = JSON.parse(route.request().postData() || "{}");
+    state.preMergeCalled = true;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: false,
+        status: "stale",
+        checkedAt: new Date().toISOString(),
+        objectType: "Contact",
+        groupKey: payload.groupKey,
+        masterId: payload.masterId,
+        mergeIds: payload.mergeIds || [],
+        ids: [payload.masterId, ...(payload.mergeIds || [])].filter(Boolean),
+        missingIds: [],
+        deletedIds: [],
+        changedFields: [
+          {
+            id: payload.masterId,
+            recordName: "Ada Lovelace",
+            field: "email",
+            label: "Email",
+            loadedValue: "ada@example.com",
+            currentValue: "ada.updated@example.com"
+          }
+        ],
+        currentRecords: [],
+        loadedRecords: payload.records || []
+      })
+    });
+  });
+  await page.route("**/api/salesforce/merge", async (route) => {
+    state.mergeCalled = true;
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { message: "Merge should not run with stale data" } })
+    });
+  });
+  await page.route(`**${refreshEndpoint}`, async (route) => {
+    state.refreshCalled = true;
+    await route.fulfill({
+      status: 200,
+      contentType: "text/csv",
+      body: refreshedCsv
+    });
+  });
+
+  const refreshResponsePromise = page.waitForResponse((response) => response.url().endsWith(refreshEndpoint));
+  page.once("dialog", async (dialog) => {
+    state.dialogMessage = dialog.message();
+    await dialog.accept();
+  });
+  await page.locator(".merge-submit-button").click();
+  await refreshResponsePromise;
+  await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
+  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+  await page.unroute("**/api/salesforce/premerge-check");
+  await page.unroute("**/api/salesforce/merge");
+  await page.unroute(`**${refreshEndpoint}`);
+  return state;
 }
 
 async function setRangeValue(page, selector, value) {
@@ -691,6 +850,8 @@ async function brandLogoState(page) {
   return page.locator(".brand-logo").evaluate((logo) => {
     const frame = logo.closest(".brand-logo-frame");
     const copy = document.querySelector(".brand-copy");
+    const title = document.querySelector(".brand h1");
+    const subtitle = document.querySelector(".brand-copy p");
     const topbar = document.querySelector(".topbar");
     const actions = document.querySelector(".topbar-actions");
     const support = document.querySelector(".topbar-support");
@@ -712,6 +873,8 @@ async function brandLogoState(page) {
     const actionsCenter = actionsRect.left + actionsRect.width / 2;
     const actionButtons = [...actions.querySelectorAll(".button, .icon-button")]
       .filter((button) => button.getClientRects().length > 0);
+    const titleStyle = title ? getComputedStyle(title) : null;
+    const subtitleStyle = subtitle ? getComputedStyle(subtitle) : null;
     const rowCounts = [...actionButtons.reduce((rows, button) => {
       const top = Math.round(button.getBoundingClientRect().top);
       rows.set(top, (rows.get(top) || 0) + 1);
@@ -736,18 +899,40 @@ async function brandLogoState(page) {
       frameHeight: Math.round(frameRect.height),
       copyGap: Math.round(copyRect.left - frameRect.right),
       copyCenterDelta: Math.round(Math.abs(frameCenter - copyCenter)),
+      titleText: title?.textContent?.trim() || "",
+      titleFontFamily: titleStyle?.fontFamily || "",
+      titleFontSize: titleStyle?.fontSize || "",
+      titleLetterSpacing: titleStyle?.letterSpacing || "",
+      subtitleText: subtitle?.textContent?.trim() || "",
+      subtitleFontFamily: subtitleStyle?.fontFamily || "",
+      subtitleFontSize: subtitleStyle?.fontSize || "",
+      subtitleFontWeight: subtitleStyle?.fontWeight || "",
+      subtitleLetterSpacing: subtitleStyle?.letterSpacing || "",
       supportContact: support?.textContent?.replace(/\s+/g, " ").trim() || "",
       supportHref: supportLink?.getAttribute("href") || "",
       supportRightAligned: Math.abs(Math.round(topbarRect.right - supportRect.right) - 24) <= 2,
       actionsCenterDelta: Math.abs(Math.round(actionsCenter - topbarCenter)),
       actionsCentered: actionsRect.width > 0 && Math.abs(Math.round(actionsCenter - topbarCenter)) <= 16,
+      actionTexts: actionButtons.map((button) => button.textContent?.replace(/\s+/g, " ").trim() || button.getAttribute("aria-label") || ""),
       actionRowCounts: rowCounts,
       actionButtonCount: actionButtons.length,
       actionButtonRects: buttonRects,
-      actionRowsBalanced: rowCounts.length === 2 && rowCounts[0] === 4 && rowCounts[1] === 3,
+      actionRowsBalanced: rowCounts.length === 2 && rowCounts[0] === 3 && rowCounts[1] === 2,
       actionsComfortable: buttonRects.every((rect) => rect.height <= 40 && rect.fontSize <= 12)
     };
   });
+}
+
+async function exportMenuStateForSmoke(page) {
+  return page.locator("#exportMenu").evaluate((menu) => ({
+    hidden: menu.hidden,
+    options: [...menu.querySelectorAll('[role="menuitem"]')].map((button) => button.textContent?.trim() || ""),
+    disabled: [...menu.querySelectorAll('[role="menuitem"]')].map((button) => button.disabled)
+  }));
+}
+
+function zeroLetterSpacing(value) {
+  return value === "normal" || value === "0px";
 }
 
 async function paneSurfaceState(page) {
@@ -854,6 +1039,9 @@ async function addFilter(page, expectedCount) {
 
 async function filterRowLayoutState(page, index) {
   return page.locator(".filter-row").nth(index).evaluate((row) => {
+    const panel = row.closest(".match-controls-panel");
+    const rowRect = row.getBoundingClientRect();
+    const panelRect = panel?.getBoundingClientRect();
     const controls = [
       row.querySelector(".filter-field-select"),
       row.querySelector(".filter-operator-select"),
@@ -863,7 +1051,10 @@ async function filterRowLayoutState(page, index) {
     return {
       controlCount: controls.length,
       tops,
-      sameLine: tops.length >= 3 && Math.max(...tops) - Math.min(...tops) <= 2
+      sameLine: tops.length >= 3 && Math.max(...tops) - Math.min(...tops) <= 2,
+      withinPanel: Boolean(panelRect && rowRect.left >= panelRect.left - 1 && rowRect.right <= panelRect.right + 1),
+      rowRight: Math.round(rowRect.right),
+      panelRight: Math.round(panelRect?.right || 0)
     };
   });
 }

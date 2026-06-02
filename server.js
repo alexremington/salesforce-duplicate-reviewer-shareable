@@ -35,6 +35,48 @@ const MAX_MERGE_VICTIMS = 20;
 const SALESFORCE_ID_PATTERN = /^[a-zA-Z0-9]{15}(?:[a-zA-Z0-9]{3})?$/;
 const MERGE_MASTER_FIELD_ALLOWLIST = new Set(["LeadSource"]);
 const MERGE_MASTER_FIELD_PATTERN = /^[A-Za-z][A-Za-z0-9_]*$/;
+const CONTACT_PREMERGE_SOQL_FIELDS = [
+  "Id",
+  "IsDeleted",
+  "CreatedDate",
+  "LastModifiedDate",
+  "SystemModstamp",
+  "Name",
+  "FirstName",
+  "LastName",
+  "Email",
+  "LeadSource",
+  "Phone",
+  "MobilePhone",
+  "AccountId",
+  "Account.Name"
+];
+const CONTACT_PREMERGE_COMPARISON_FIELDS = [
+  ["fullName", "Full Name"],
+  ["firstName", "First Name"],
+  ["lastName", "Last Name"],
+  ["company", "Company / Account"],
+  ["email", "Email"],
+  ["leadSource", "Lead Source"],
+  ["phone", "Phone"],
+  ["mobile", "Mobile"]
+];
+const RECOVERY_SNAPSHOT_FIELDS = [
+  "Id",
+  "Name",
+  "FirstName",
+  "LastName",
+  "Email",
+  "LeadSource",
+  "Phone",
+  "MobilePhone",
+  "AccountId",
+  "AccountName",
+  "CreatedDate",
+  "LastModifiedDate",
+  "SystemModstamp",
+  "IsDeleted"
+];
 
 const CSV_ENDPOINTS = new Map([
   [
@@ -174,6 +216,13 @@ async function handleRequest(request, response) {
   if (request.method === "POST" && url.pathname === "/api/salesforce/merge") {
     const body = await readJsonBody(request, 128 * 1024);
     const result = await mergeSalesforceRecords(body);
+    sendJson(response, result);
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/salesforce/premerge-check") {
+    const body = await readJsonBody(request, 256 * 1024);
+    const result = await checkSalesforcePreMergeFreshness(body);
     sendJson(response, result);
     return;
   }
@@ -553,8 +602,21 @@ async function readJsonBody(request, maxBytes = 32 * 1024) {
   }
 }
 
+async function checkSalesforcePreMergeFreshness(body) {
+  const mergeRequest = validateMergeRequest(body, { requireConfirmation: false });
+  const auth = await getSalesforceAuth();
+  return buildPreMergeFreshnessResult({
+    auth,
+    objectType: mergeRequest.objectType,
+    groupKey: mergeRequest.groupKey,
+    masterId: mergeRequest.masterId,
+    mergeIds: mergeRequest.mergeIds,
+    loadedRecords: mergeRequest.loadedRecords
+  });
+}
+
 async function mergeSalesforceRecords(body) {
-  const mergeRequest = validateMergeRequest(body);
+  const mergeRequest = validateMergeRequest(body, { requireConfirmation: true });
   const auditBase = {
     requestedAt: new Date().toISOString(),
     objectType: mergeRequest.objectType,
@@ -563,11 +625,24 @@ async function mergeSalesforceRecords(body) {
     mergeIds: mergeRequest.mergeIds,
     masterFields: mergeRequest.masterFields,
     masterFieldsToNull: mergeRequest.masterFieldsToNull,
+    loadedRecords: mergeRequest.loadedRecords,
     orgAlias: SF_ORG_ALIAS
   };
 
   try {
     const auth = await getSalesforceAuth();
+    const preMergeCheck = await buildPreMergeFreshnessResult({
+      auth,
+      objectType: mergeRequest.objectType,
+      groupKey: mergeRequest.groupKey,
+      masterId: mergeRequest.masterId,
+      mergeIds: mergeRequest.mergeIds,
+      loadedRecords: mergeRequest.loadedRecords
+    });
+    if (preMergeCheck.status !== "fresh") {
+      throw httpError(409, preMergeFreshnessSummary(preMergeCheck), { preMergeCheck });
+    }
+
     const batches = chunkArray(mergeRequest.mergeIds, 2);
     const results = [];
 
@@ -598,25 +673,34 @@ async function mergeSalesforceRecords(body) {
       instanceUrl: auth.instanceUrl,
       apiVersion: auth.apiVersion,
       orgAlias: auth.orgAlias,
+      preMergeCheck,
+      recoverySnapshot: buildMergeRecoverySnapshot(preMergeCheck),
       mergedAt: new Date().toISOString()
     };
     await appendMergeAudit({ ...auditBase, status: "success", response });
     return response;
   } catch (error) {
-    await appendMergeAudit({ ...auditBase, status: "failed", error: error.message || "Merge failed" }).catch(() => {});
+    await appendMergeAudit({
+      ...auditBase,
+      status: "failed",
+      error: error.message || "Merge failed",
+      preMergeCheck: error.preMergeCheck || error.details?.preMergeCheck || null
+    }).catch(() => {});
     throw error;
   }
 }
 
-function validateMergeRequest(body) {
+function validateMergeRequest(body, options = {}) {
+  const requireConfirmation = options.requireConfirmation !== false;
   const objectType = normalizeMergeObjectType(body.objectType);
   const masterId = normalizeSalesforceId(body.masterId);
   const mergeIds = uniqueIds(Array.isArray(body.mergeIds) ? body.mergeIds : []).filter((id) => id !== masterId);
   const masterFields = validateMergeMasterFields(body.masterFields);
   const masterFieldsToNull = validateMergeMasterFieldsToNull(body.masterFieldsToNull, masterFields);
+  const loadedRecords = validatePreMergeLoadedRecords(body.records);
   const expectedPrefix = "003";
 
-  if (body.confirmation !== "MERGE") throw httpError(400, "Type MERGE to confirm this Salesforce merge.");
+  if (requireConfirmation && body.confirmation !== "MERGE") throw httpError(400, "Type MERGE to confirm this Salesforce merge.");
   if (!masterId) throw httpError(400, "A master Salesforce ID is required.");
   if (!masterId.startsWith(expectedPrefix)) throw httpError(400, `${objectType} merges require ${expectedPrefix} Salesforce IDs.`);
   if (!mergeIds.length) throw httpError(400, "At least one duplicate Salesforce ID is required.");
@@ -633,8 +717,173 @@ function validateMergeRequest(body) {
     mergeIds,
     masterFields,
     masterFieldsToNull,
+    loadedRecords,
     groupKey: String(body.groupKey || "")
   };
+}
+
+function validatePreMergeLoadedRecords(value) {
+  if (value == null) return [];
+  if (!Array.isArray(value)) throw httpError(400, "records must be an array.");
+  if (value.length > MAX_MERGE_VICTIMS + 1) throw httpError(400, `A merge freshness check supports up to ${MAX_MERGE_VICTIMS + 1} records.`);
+
+  return value.map((record) => {
+    if (!record || typeof record !== "object") throw httpError(400, "Each freshness record must be an object.");
+    const id = normalizeSalesforceId(record.id);
+    if (!id) throw httpError(400, "Each freshness record requires a valid Salesforce ID.");
+    const fields = record.fields && typeof record.fields === "object" && !Array.isArray(record.fields)
+      ? record.fields
+      : {};
+    return {
+      id,
+      name: String(record.name || ""),
+      rowIndex: Number.isFinite(Number(record.rowIndex)) ? Number(record.rowIndex) : null,
+      fields: Object.fromEntries(
+        CONTACT_PREMERGE_COMPARISON_FIELDS
+          .filter(([field]) => Object.prototype.hasOwnProperty.call(fields, field))
+          .map(([field]) => [field, String(fields[field] ?? "")])
+      )
+    };
+  });
+}
+
+async function buildPreMergeFreshnessResult({ auth, objectType, groupKey, masterId, mergeIds, loadedRecords = [] }) {
+  if (objectType !== "Contact") throw httpError(400, "Only Contact merge freshness checks are supported.");
+  const ids = uniqueIds([masterId, ...mergeIds]);
+  const loadedById = new Map(loadedRecords.map((record) => [salesforceIdKey(record.id), record]));
+  const currentRecords = await querySalesforceContactsByIds(auth, ids);
+  const currentById = new Map(currentRecords.map((record) => [salesforceIdKey(record.Id), record]));
+  const missingIds = [];
+  const deletedIds = [];
+  const changedFields = [];
+
+  ids.forEach((id) => {
+    const current = currentById.get(salesforceIdKey(id));
+    const loaded = loadedById.get(salesforceIdKey(id));
+    if (!current) {
+      missingIds.push(id);
+      return;
+    }
+    if (current.IsDeleted) deletedIds.push(id);
+    if (!loaded) return;
+
+    CONTACT_PREMERGE_COMPARISON_FIELDS.forEach(([field, label]) => {
+      if (!Object.prototype.hasOwnProperty.call(loaded.fields, field)) return;
+      const loadedValue = loaded.fields[field];
+      const currentValue = currentContactComparisonValue(current, field);
+      if (sameSalesforceFreshnessValue(field, loadedValue, currentValue)) return;
+      changedFields.push({
+        id,
+        recordName: loaded.name || current.Name || id,
+        field,
+        label,
+        loadedValue,
+        currentValue
+      });
+    });
+  });
+
+  const status = missingIds.length || deletedIds.length || changedFields.length ? "stale" : "fresh";
+  const checkedAt = new Date().toISOString();
+  return {
+    ok: status === "fresh",
+    status,
+    checkedAt,
+    objectType,
+    groupKey,
+    masterId,
+    mergeIds,
+    ids,
+    orgAlias: auth.orgAlias,
+    instanceUrl: auth.instanceUrl,
+    apiVersion: auth.apiVersion,
+    missingIds,
+    deletedIds,
+    changedFields,
+    currentRecords: currentRecords.map(salesforceContactRecoveryRecord),
+    loadedRecords
+  };
+}
+
+async function querySalesforceContactsByIds(auth, ids) {
+  if (!ids.length) return [];
+  const idList = ids.map((id) => `'${soqlStringEscape(id)}'`).join(",");
+  const soql = `SELECT ${CONTACT_PREMERGE_SOQL_FIELDS.join(", ")} FROM Contact WHERE Id IN (${idList})`;
+  const url = `${auth.instanceUrl}/services/data/${auth.apiVersion}/queryAll?q=${encodeURIComponent(soql)}`;
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${auth.accessToken}`,
+      "Content-Type": "application/json"
+    }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw httpError(502, `Salesforce freshness check failed: ${payload?.[0]?.message || payload.message || `${response.status} ${response.statusText}`}`);
+  }
+  return Array.isArray(payload.records) ? payload.records.map(stripSalesforceAttributes) : [];
+}
+
+function stripSalesforceAttributes(record) {
+  if (!record || typeof record !== "object") return {};
+  return Object.fromEntries(Object.entries(record).filter(([key]) => key !== "attributes"));
+}
+
+function salesforceContactRecoveryRecord(record) {
+  const normalized = {
+    ...record,
+    AccountName: record?.Account?.Name || ""
+  };
+  return Object.fromEntries(RECOVERY_SNAPSHOT_FIELDS.map((field) => [field, normalized[field] ?? ""]));
+}
+
+function currentContactComparisonValue(record, field) {
+  if (field === "fullName") return record.Name || "";
+  if (field === "firstName") return record.FirstName || "";
+  if (field === "lastName") return record.LastName || "";
+  if (field === "company") return record.Account?.Name || "";
+  if (field === "email") return record.Email || "";
+  if (field === "leadSource") return record.LeadSource || "";
+  if (field === "phone") return record.Phone || "";
+  if (field === "mobile") return record.MobilePhone || "";
+  return "";
+}
+
+function sameSalesforceFreshnessValue(field, left, right) {
+  return normalizeSalesforceFreshnessValue(field, left) === normalizeSalesforceFreshnessValue(field, right);
+}
+
+function normalizeSalesforceFreshnessValue(field, value) {
+  const text = String(value ?? "").trim();
+  if (field === "phone" || field === "mobile") {
+    return text.replace(/\D/g, "");
+  }
+  return text.toLowerCase().replace(/\s+/g, " ");
+}
+
+function preMergeFreshnessSummary(check) {
+  const parts = [];
+  if (check.missingIds?.length) parts.push(`${check.missingIds.length} missing`);
+  if (check.deletedIds?.length) parts.push(`${check.deletedIds.length} deleted`);
+  if (check.changedFields?.length) parts.push(`${check.changedFields.length} changed field${check.changedFields.length === 1 ? "" : "s"}`);
+  return `Pre-merge freshness check failed (${parts.join(", ") || "stale data"}). Refresh Contacts before merging.`;
+}
+
+function buildMergeRecoverySnapshot(check) {
+  return {
+    capturedAt: check.checkedAt,
+    note: "Use this audit snapshot as recovery evidence. Salesforce does not provide a complete automatic rollback for merges; restore deleted duplicate Contacts from the Recycle Bin if available, then manually repair related-record ownership and any master-field changes.",
+    masterId: check.masterId,
+    duplicateIds: check.mergeIds,
+    currentRecords: check.currentRecords
+  };
+}
+
+function salesforceIdKey(id) {
+  return String(id || "").slice(0, 15).toLowerCase();
+}
+
+function soqlStringEscape(value) {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
 function validateMergeMasterFields(value) {
@@ -1053,12 +1302,13 @@ function fileModeCorsHeaders(request) {
 function sendError(response, error) {
   const status = error.status || 500;
   if (status >= 500) console.error(error);
-  sendJson(response, { error: { message: error.message || "Internal server error" } }, status);
+  sendJson(response, { error: { message: error.message || "Internal server error", ...(error.details || {}) } }, status);
 }
 
-function httpError(status, message) {
+function httpError(status, message, details = null) {
   const error = new Error(message);
   error.status = status;
+  if (details) error.details = details;
   return error;
 }
 
