@@ -31,8 +31,8 @@ const SF_ORG_ALIAS = process.env.SF_ORG_ALIAS || "politico-staging";
 const SF_INSTANCE_URL = process.env.SF_INSTANCE_URL || "https://politico--staging.sandbox.my.salesforce.com";
 const SF_API_VERSION = process.env.SF_API_VERSION || "v67.0";
 const SF_CLI_BIN = String(process.env.SF_CLI_BIN || "").trim();
-const FEATURE_VERSION = "duplicate-reviewer-premerge-contract-v1";
-const API_CONTRACT_VERSION = "duplicate-reviewer-api-contract-v1";
+const FEATURE_VERSION = "duplicate-reviewer-cli-warning-safe-v1";
+const API_CONTRACT_VERSION = "duplicate-reviewer-api-contract-v2";
 const DEFAULT_PATH = defaultCommandPath();
 let salesforceCliCommandCache = null;
 const MERGE_AUDIT_LOG = path.join(OUTPUT_DIR, "salesforce-merge-log.jsonl");
@@ -177,6 +177,8 @@ async function handleRequest(request, response) {
       headerContact: true,
       salesforceMerge: true,
       salesforcePreMergeCheck: true,
+      salesforceCliWarningSafe: true,
+      salesforceCliApiVersionEnvIsolated: true,
       salesforceMergeObjectTypes: ["Contact"],
       pid: process.pid,
       port: PORT
@@ -1008,15 +1010,23 @@ function execFileJson(command, args, options = {}) {
 }
 
 function salesforceCliEnv() {
-  return {
-    ...process.env,
-    SF_AUTOUPDATE_DISABLE: process.env.SF_AUTOUPDATE_DISABLE || "true",
-    SF_DISABLE_TELEMETRY: process.env.SF_DISABLE_TELEMETRY || "true",
-    SF_HIDE_RELEASE_NOTES: process.env.SF_HIDE_RELEASE_NOTES || "true",
-    SF_LOG_LEVEL: process.env.SF_LOG_LEVEL || "error",
-    ...(DEFAULT_PATH ? { PATH: DEFAULT_PATH, Path: process.platform === "win32" ? DEFAULT_PATH : process.env.Path } : {}),
-    ...(process.platform === "win32" ? {} : { SF_USE_GENERIC_UNIX_KEYCHAIN: process.env.SF_USE_GENERIC_UNIX_KEYCHAIN || "true" })
-  };
+  const env = { ...process.env };
+  delete env.SF_API_VERSION;
+  delete env.SF_ORG_API_VERSION;
+  delete env.SFDX_API_VERSION;
+
+  env.SF_AUTOUPDATE_DISABLE = process.env.SF_AUTOUPDATE_DISABLE || "true";
+  env.SF_DISABLE_TELEMETRY = process.env.SF_DISABLE_TELEMETRY || "true";
+  env.SF_HIDE_RELEASE_NOTES = process.env.SF_HIDE_RELEASE_NOTES || "true";
+  env.SF_LOG_LEVEL = process.env.SF_LOG_LEVEL || "error";
+  if (DEFAULT_PATH) {
+    env.PATH = DEFAULT_PATH;
+    if (process.platform === "win32") env.Path = DEFAULT_PATH;
+  }
+  if (process.platform !== "win32") {
+    env.SF_USE_GENERIC_UNIX_KEYCHAIN = process.env.SF_USE_GENERIC_UNIX_KEYCHAIN || "true";
+  }
+  return env;
 }
 
 function salesforceCliInvocation(command, args) {
@@ -1169,10 +1179,25 @@ function salesforceCliError(message, error, stdout = "", stderr = "", parsed = n
   const parsedMessage = salesforceCliJsonErrorMessage(parsed);
   const stderrDetail = nonWarningSalesforceCliOutput(stderr);
   const stdoutDetail = parsedMessage ? "" : nonWarningSalesforceCliOutput(stdout);
-  const detail = [parsedMessage, stderrDetail, stdoutDetail, error?.message]
+  const processDetail = salesforceCliProcessErrorDetail(error, { parsedMessage, stderrDetail, stdoutDetail });
+  const detail = [parsedMessage, stderrDetail, stdoutDetail, processDetail]
     .map((value) => String(value || "").trim())
     .filter(Boolean)[0] || "";
   return httpError(500, detail ? `${message}: ${detail}` : message);
+}
+
+function salesforceCliProcessErrorDetail(error, output = {}) {
+  if (!error) return "";
+  if (!output.parsedMessage && !output.stderrDetail && !output.stdoutDetail && error.code != null) {
+    return `Salesforce CLI exited with code ${error.code} without JSON output.`;
+  }
+
+  return String(error.message || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !/^Command failed:/i.test(line) && !isSalesforceCliWarningLine(line))
+    .join("\n")
+    .trim();
 }
 
 function salesforceCliJsonErrorMessage(payload) {

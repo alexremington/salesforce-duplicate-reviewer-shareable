@@ -37,7 +37,7 @@ server_is_duplicate_reviewer() {
 server_supports_required_features() {
   local health
   health="$(server_health)"
-  [[ "${health}" == *'"salesforceMerge":true'* && "${health}" == *'"salesforcePreMergeCheck":true'* && "${health}" == *'"latestStagingFiles":true'* && "${health}" == *'"jsonDatasets":true'* && "${health}" == *'"staticAssetRoot":true'* && "${health}" == *'"svgStaticAssets":true'* && "${health}" == *'"brandHeaderVersion":"shared-logo-contact-v1"'* && "${health}" == *'"featureVersion":"duplicate-reviewer-premerge-contract-v1"'* && "${health}" == *'"apiContractVersion":"duplicate-reviewer-api-contract-v1"'* ]]
+  [[ "${health}" == *'"salesforceMerge":true'* && "${health}" == *'"salesforcePreMergeCheck":true'* && "${health}" == *'"salesforceCliWarningSafe":true'* && "${health}" == *'"salesforceCliApiVersionEnvIsolated":true'* && "${health}" == *'"latestStagingFiles":true'* && "${health}" == *'"jsonDatasets":true'* && "${health}" == *'"staticAssetRoot":true'* && "${health}" == *'"svgStaticAssets":true'* && "${health}" == *'"brandHeaderVersion":"shared-logo-contact-v1"'* && "${health}" == *'"featureVersion":"duplicate-reviewer-cli-warning-safe-v1"'* && "${health}" == *'"apiContractVersion":"duplicate-reviewer-api-contract-v2"'* ]]
 }
 
 write_server_plist() {
