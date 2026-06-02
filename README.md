@@ -131,7 +131,7 @@ Salesforce merges do not have a complete one-click rollback in this app. Each at
 Merge results are saved with the browser review state and server-side audit entries are appended to:
 
 ```text
-/Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/salesforce-duplicate-reviewer/Output/salesforce-merge-log.jsonl
+/Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/Output/salesforce-merge-log.jsonl
 ```
 
 ## Salesforce Bulk Export
@@ -150,13 +150,13 @@ SF_ACCESS_TOKEN="$(sf org display --target-org politico --json | node -e 'let s=
 Run the Bulk API query manually with:
 
 ```bash
-/Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/salesforce-duplicate-reviewer/scripts/run-salesforce-bulk-query.sh
+/Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/scripts/run-salesforce-bulk-query.sh
 ```
 
 The wrapper gets an access token from Salesforce CLI org alias `politico`, runs `queries/report-00OVq00000CxYd3MAF.soql`, writes a timestamped CSV for app compatibility, writes a timestamped JSON export, and updates both `salesforce-report-latest.json` and `salesforce-report-latest.csv`:
 
 ```text
-/Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/salesforce-duplicate-reviewer/Output/report-00OVq00000CxYd3MAF
+/Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/Output/report-00OVq00000CxYd3MAF
 ```
 
 For the staging sandbox Contacts report:
@@ -166,17 +166,17 @@ org alias: politico-staging
 instance: https://politico--staging.sandbox.my.salesforce.com
 report ID: 00OVZ000003DjaH2AS
 report name: New All Contacts Report
-query: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/salesforce-duplicate-reviewer/queries/report-00OVZ000003DjaH2AS.soql
-latest JSON: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/salesforce-duplicate-reviewer/Output/staging-contacts/salesforce-report-latest.json
-compatibility CSV: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/salesforce-duplicate-reviewer/Output/staging-contacts/salesforce-report-latest.csv
+query: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/queries/report-00OVZ000003DjaH2AS.soql
+latest JSON: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/Output/staging-contacts/salesforce-report-latest.json
+compatibility CSV: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/Output/staging-contacts/salesforce-report-latest.csv
 ```
 
 The staging report has nearly one million Contact rows, so use the staging Bulk API wrapper rather than the Reports API:
 
 ```bash
-/Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/salesforce-duplicate-reviewer/scripts/run-staging-contacts-bulk-query.sh --dry-run
-/Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/salesforce-duplicate-reviewer/scripts/run-staging-contacts-bulk-query.sh
-/Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/salesforce-duplicate-reviewer/scripts/run-staging-contacts-bulk-query.sh --background
+/Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/scripts/run-staging-contacts-bulk-query.sh --dry-run
+/Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/scripts/run-staging-contacts-bulk-query.sh
+/Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/scripts/run-staging-contacts-bulk-query.sh --background
 ```
 
 For the staging sandbox Accounts report:
@@ -186,15 +186,15 @@ org alias: politico-staging
 instance: https://politico--staging.sandbox.my.salesforce.com
 report ID: 00OVZ000003Dm572AC
 report name: New Accounts Report
-query: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/salesforce-duplicate-reviewer/queries/report-00OVZ000003Dm572AC.soql
-latest JSON: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/salesforce-duplicate-reviewer/Output/staging-accounts/salesforce-report-latest.json
-compatibility CSV: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/salesforce-duplicate-reviewer/Output/staging-accounts/salesforce-report-latest.csv
+query: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/queries/report-00OVZ000003Dm572AC.soql
+latest JSON: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/Output/staging-accounts/salesforce-report-latest.json
+compatibility CSV: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/Output/staging-accounts/salesforce-report-latest.csv
 ```
 
 ```bash
-/Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/salesforce-duplicate-reviewer/scripts/run-staging-accounts-bulk-query.sh --dry-run
-/Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/salesforce-duplicate-reviewer/scripts/run-staging-accounts-bulk-query.sh
-/Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/salesforce-duplicate-reviewer/scripts/run-staging-accounts-bulk-query.sh --background
+/Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/scripts/run-staging-accounts-bulk-query.sh --dry-run
+/Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/scripts/run-staging-accounts-bulk-query.sh
+/Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/scripts/run-staging-accounts-bulk-query.sh --background
 ```
 
 After a successful staging export, the wrapper starts a local Duplicate Reviewer server at:

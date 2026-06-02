@@ -27,5 +27,8 @@ These instructions apply to this repository and its subdirectories.
 ## Validation
 
 - After UI or launcher changes, run `npm run check`, `npm run check:windows`, and `npm run smoke:ui:local`.
+- `npm run check` must include live server contract coverage for current health/config flags, static app loading, and method-sensitive API routes. Mocked Playwright routes are not enough for server-backed workflows.
+- Any user-visible bug fix should add or update a named regression assertion that would have failed before the fix.
+- Launcher changes must reject or restart stale runtime processes when feature or API contract versions do not match the current source.
 - Use Playwright for smoke testing. Do not attempt to use the Codex in-app browser for smoke tests; the repo Playwright harness is the source of truth for rendered smoke validation.
 - Smoke coverage should exercise primary buttons and fail on scroll traps, hidden overflowing content, layout overlap, and nonfunctional controls.

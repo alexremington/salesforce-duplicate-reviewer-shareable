@@ -364,6 +364,7 @@ const MATCHING_YIELD_INTERVAL_MS = 32;
 const SCORING_CHUNK_SIZE = 1200;
 const GROUP_ITEM_ESTIMATED_HEIGHT = 108;
 const GROUP_LIST_OVERSCAN = 8;
+const GROUP_LIST_VIRTUALIZATION_THRESHOLD = 60;
 const DRAFT_GROUP_FILTER_ID = "__draft-filter";
 const RECENT_FILE_LIMIT = 4;
 const MAX_RECENT_FILE_CONTENT_BYTES = 20 * 1024 * 1024;
@@ -4914,7 +4915,17 @@ function renderGroups(options = {}) {
     return;
   }
 
-  renderVirtualGroupList(filtered, options);
+  if (filtered.length > GROUP_LIST_VIRTUALIZATION_THRESHOLD) {
+    renderVirtualGroupList(filtered, options);
+    return;
+  }
+
+  renderPlainGroupList(filtered);
+}
+
+function renderPlainGroupList(groups) {
+  els.groupList.classList.remove("is-virtualized");
+  els.groupList.innerHTML = groups.map(renderGroupItem).join("");
 }
 
 function renderVirtualGroupList(groups, { preserveScroll = false } = {}) {

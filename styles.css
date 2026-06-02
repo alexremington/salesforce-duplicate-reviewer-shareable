@@ -503,8 +503,8 @@ p {
 
 .recent-files {
   display: grid;
-  gap: 8px;
-  margin-top: 12px;
+  gap: 6px;
+  margin-top: 10px;
 }
 
 .recent-files-title {
@@ -516,22 +516,22 @@ p {
 
 .recent-file-list {
   display: grid;
-  gap: 6px;
+  gap: 5px;
 }
 
 .recent-file,
 .recent-empty {
   width: 100%;
   border: 1px solid var(--line-subtle);
-  border-radius: 15px;
+  border-radius: 12px;
   background: var(--surface-muted);
-  padding: 9px;
+  padding: 8px 9px;
   text-align: left;
 }
 
 .recent-file {
   display: grid;
-  gap: 3px;
+  gap: 2px;
 }
 
 .recent-file:hover {
@@ -549,14 +549,14 @@ p {
 .recent-file-name {
   color: var(--ink);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 500;
 }
 
 .recent-file-meta,
 .recent-empty {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .search-label {
@@ -841,13 +841,14 @@ select:focus {
 
 .label-status-filter {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   margin: 0;
-  padding: 10px 11px 11px;
+  padding: 8px 10px 9px;
   border: 1px solid var(--line-muted);
   border-radius: 12px;
   background: var(--surface-panel);
+  align-content: start;
 }
 
 .label-status-filter legend {
@@ -860,11 +861,11 @@ select:focus {
 .label-status-option {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   min-width: 0;
   color: var(--ink);
   font-size: 13px;
-  font-weight: 750;
+  font-weight: 500;
 }
 
 .label-status-option input {
@@ -880,7 +881,8 @@ select:focus {
 .label-status-filter-footer {
   display: flex;
   justify-content: flex-end;
-  padding-top: 2px;
+  padding-top: 0;
+  margin-top: 1px;
 }
 
 .filter-logic-control {
@@ -992,10 +994,10 @@ select:focus {
 }
 
 .group-panel {
-  min-height: 280px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .group-panel.is-collapsed {
@@ -1005,8 +1007,9 @@ select:focus {
 .group-panel-body {
   min-height: 0;
   display: flex;
-  flex: 1;
+  flex: 0 0 auto;
   flex-direction: column;
+  overflow: visible;
 }
 
 .group-title-actions {
@@ -1022,17 +1025,20 @@ select:focus {
 
 .group-list {
   display: grid;
-  flex: 1;
+  flex: 0 0 auto;
   gap: 10px;
   min-height: 0;
-  overflow: auto;
+  overflow: visible;
   padding-right: 2px;
-  scrollbar-gutter: stable;
 }
 
 .group-list.is-virtualized {
   position: relative;
   display: block;
+  height: min(58vh, 620px);
+  min-height: 320px;
+  overflow: auto;
+  scrollbar-gutter: stable;
   contain: layout paint;
 }
 

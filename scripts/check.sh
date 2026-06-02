@@ -27,6 +27,9 @@ find . \
 echo "Checking package metadata..."
 node -e 'JSON.parse(require("node:fs").readFileSync("package.json", "utf8"))'
 
+echo "Checking server contracts..."
+node scripts/check-server-contracts.js
+
 if git rev-parse --verify shareable >/dev/null 2>&1; then
   echo "Checking shareable branch safety..."
   "${PROJECT_DIR}/scripts/check-shareable.sh" shareable

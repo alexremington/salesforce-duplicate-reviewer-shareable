@@ -31,6 +31,8 @@ const SF_ORG_ALIAS = process.env.SF_ORG_ALIAS || "politico-staging";
 const SF_INSTANCE_URL = process.env.SF_INSTANCE_URL || "https://politico--staging.sandbox.my.salesforce.com";
 const SF_API_VERSION = process.env.SF_API_VERSION || "v67.0";
 const SF_CLI_BIN = String(process.env.SF_CLI_BIN || "").trim();
+const FEATURE_VERSION = "duplicate-reviewer-premerge-contract-v1";
+const API_CONTRACT_VERSION = "duplicate-reviewer-api-contract-v1";
 const DEFAULT_PATH = defaultCommandPath();
 let salesforceCliCommandCache = null;
 const MERGE_AUDIT_LOG = path.join(OUTPUT_DIR, "salesforce-merge-log.jsonl");
@@ -169,9 +171,12 @@ async function handleRequest(request, response) {
       svgStaticAssets: true,
       brandLogoAsset: true,
       brandHeaderVersion: "shared-logo-contact-v1",
+      featureVersion: FEATURE_VERSION,
+      apiContractVersion: API_CONTRACT_VERSION,
       sharedBrandLogo: true,
       headerContact: true,
       salesforceMerge: true,
+      salesforcePreMergeCheck: true,
       salesforceMergeObjectTypes: ["Contact"],
       pid: process.pid,
       port: PORT
