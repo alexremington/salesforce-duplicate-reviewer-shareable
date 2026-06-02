@@ -4708,7 +4708,7 @@ function renderLoadingModal() {
   els.loadingProgress?.setAttribute("aria-valuenow", String(Math.round(progressValue)));
   els.loadingProgressBar?.style.setProperty("--loading-progress", `${progressValue}%`);
   if (els.loadingSplineStatus) {
-    els.loadingSplineStatus.textContent = loadingSplineStatusText(progressValue);
+    els.loadingSplineStatus.textContent = loadingProgressStatusText(message, progressValue);
   }
 }
 
@@ -4716,6 +4716,56 @@ function clampProgress(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return 0;
   return Math.max(0, Math.min(100, number));
+}
+
+function loadingProgressStatusText(message, progressValue) {
+  const progress = clampProgress(progressValue);
+  const normalizedMessage = String(message || "").trim();
+  const step = loadingProgressStatusStep(normalizedMessage, progress);
+  if (step.type === "spline") return loadingSplineStatusText(progress);
+  const steps = loadingProgressStatusSteps();
+  const stepNumber = steps.indexOf(step) + 1;
+  return `${step.label}: stage ${formatNumber(stepNumber)}/${formatNumber(steps.length)} - ${Math.round(progress)}%`;
+}
+
+function loadingProgressStatusStep(message, progressValue) {
+  const progress = clampProgress(progressValue);
+  const steps = loadingProgressStatusSteps();
+  if (shouldShowSplineInterlude(message, progress)) {
+    return steps.find((step) => step.type === "spline");
+  }
+
+  const matchedStep = steps.find((step) => step.pattern?.test(message));
+  if (matchedStep) return matchedStep;
+
+  const stepIndex = Math.min(
+    steps.length - 1,
+    Math.floor((progress / 100) * steps.length)
+  );
+  return steps[stepIndex];
+}
+
+function loadingProgressStatusSteps() {
+  if (loadingProgressStatusSteps.steps) return loadingProgressStatusSteps.steps;
+  loadingProgressStatusSteps.steps = [
+    { label: "Reading dataset", pattern: /\b(reading|fetching|parsing|csv|json|dataset)\b/i },
+    { label: "Preparing records", pattern: /\b(preparing records|matching records|sample records)\b/i },
+    { label: "Checking field statistics", pattern: /\b(field statistics|field mapping)\b/i },
+    { label: "Building candidate buckets", pattern: /\b(building candidate buckets|scanning)\b/i },
+    { label: "Reticulating splines", type: "spline" },
+    { label: "Finding candidate pairs", pattern: /\b(finding candidate pairs|found [\d,]+ candidate pairs|checking small-dataset candidates)\b/i },
+    { label: "Scoring candidate pairs", pattern: /\bscoring\b/i },
+    { label: "Sorting scored pairs", pattern: /\b(sorting scored pairs)\b/i },
+    { label: "Building match groups", pattern: /\b(building match groups)\b/i },
+    { label: "Rendering duplicate groups", pattern: /\b(rendering|ready)\b/i },
+    { label: "Restoring review state", pattern: /\b(restoring saved review state)\b/i }
+  ];
+  return loadingProgressStatusSteps.steps;
+}
+
+function shouldShowSplineInterlude(message, progressValue) {
+  if (progressValue < 48 || progressValue > 62) return false;
+  return !/\b(reading|fetching|parsing|rendering|ready|restoring)\b/i.test(message);
 }
 
 function loadingSplineStatusText(progressValue) {
