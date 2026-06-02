@@ -231,13 +231,13 @@ node scripts/check-account-calibration.js \
 Then open `index.html` in a browser and verify:
 
 - Demo data loads for Contacts and Accounts.
-- Choosing File opens the Contacts/Accounts menu.
+- Import opens the Contacts/Accounts menu.
 - Field Mapping appears after data load.
 - Match Controls threshold and High Recall recompute groups.
 - Match Groups selects, searches, sorts ascending/descending, hides labeled groups, and navigates correctly.
 - Duplicate / Not Duplicate decisions update the group list and export count.
-- Pair calibration labels update the `Export Labels` count and produce a pair-level CSV.
-- Import Labels restores an exported label CSV for the currently loaded dataset and updates the `Export Labels` count.
+- Pair calibration labels enable the `Export > Labels` menu item and produce a pair-level CSV.
+- `Import > Labels` restores an exported label CSV for the currently loaded dataset and enables the `Export > Labels` menu item.
 - Reloading the same dataset restores pair labels, group decisions, accepted field choices, and separated-record choices.
 - Separating and restoring records updates the active cluster.
-- Export Decisions downloads a canonical-record CSV.
+- `Export > Decisions` downloads a canonical-record CSV.

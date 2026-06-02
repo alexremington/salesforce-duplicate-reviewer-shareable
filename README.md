@@ -30,7 +30,7 @@ Manual start:
 npm start
 ```
 
-Click `Choose File`, then choose whether the import is a `Contacts` or `Accounts` file. Recent files remember which object type was used when they were loaded, so the same file can be reopened with the correct object type.
+Click `Import`, then choose whether the import is a `Contacts` or `Accounts` file. Recent files remember which object type was used when they were loaded, so the same file can be reopened with the correct object type.
 
 After a file is selected, the Source panel and review pane show a loading state while the browser parses the file and calculates match groups.
 
@@ -91,7 +91,32 @@ SF_INSTANCE_URL=https://politico--staging.sandbox.my.salesforce.com
 SF_API_VERSION=v67.0
 ```
 
-The merge action supports `Contact` records only. Account matching remains available in the `Evaluate` workflow, but Account merge is disabled because downstream Finance dependencies need business logic outside this app. The Contact merge keeps the selected master record's field values and asks Salesforce to move related records from the duplicate records to the master. Accepted values in the reviewer remain review/export guidance and are not written as field updates during merge. Groups with more than three active records are merged through successive SOAP merge requests, two duplicate records at a time.
+The merge action supports `Contact` records only. Account matching remains available in the `Evaluate` workflow, but Account merge is disabled because downstream Finance dependencies need business logic outside this app. Groups with more than three active records are merged through successive SOAP merge requests, two duplicate records at a time.
+
+### Merge Rules
+
+Current app-enforced rules:
+
+- A group must be marked `Duplicate` before merge controls can submit.
+- Every active record in the merge group must be a Contact with a valid `003` Salesforce ID.
+- One Contact is selected as the master. The selected master keeps its field values by default, and Salesforce reparents related records from duplicate Contacts to that master.
+- `Lead Source` is locked to the oldest created Contact when both `Lead Source` and `Created Date` are available. If the selected master has a different Lead Source, the merge payload updates the master to the oldest-created value.
+- The browser collects intent and confirmation, but merge execution stays server-side so Salesforce access tokens are not exposed to the browser.
+- The user must type `MERGE` and accept the browser confirmation before a merge is sent to Salesforce.
+- Before every merge, the server re-reads the selected Contacts from Salesforce and blocks the merge if any selected record is missing, deleted, or changed from the loaded reviewer data.
+
+Field-retention policy for merges we perform. If a listed field is not yet included in the automated merge payload, verify or update the surviving Contact as part of the merge workflow:
+
+- `Marketing Opt-Out`: if true on any merged record, retain true on the surviving Contact.
+- `Invalid Email`: if true on any merged record, retain true on the surviving Contact.
+- `International Opt-In`: if true on any merged record, retain true on the surviving Contact.
+- `Marketo Exclusion`: if true on any or all merged records, set the surviving Contact value to false.
+- Other Contact fields are not expected to create merge conflicts unless a team-specific rule is added. The selected master value can remain the default retained value.
+- Related object detail should be preserved from both sides of the merge. Salesforce should keep or reparent campaigns, activities, entitlements, opportunities, and other related records from the duplicate Contacts to the surviving master Contact.
+
+Before every merge, the server re-reads the selected Contacts from Salesforce and compares the current values with the rows loaded in the reviewer. Missing, deleted, or changed records block the merge. If the loaded dataset came from a server-backed latest Contacts endpoint, the browser asks whether to refresh that dataset automatically; approving the prompt reloads the latest export before the merge can be tried again. Manual file uploads cannot be refreshed automatically because the browser does not retain permission to reread the original local path.
+
+Salesforce merges do not have a complete one-click rollback in this app. Each attempted merge writes the requested master, duplicate IDs, pre-merge freshness result, and a recovery snapshot to the audit log. If a merge needs to be unwound, use the audit entry to identify the master and duplicate Contacts, restore deleted duplicate Contacts from Salesforce recovery tooling if still available, then manually repair related-record ownership and any master-field changes.
 
 Merge results are saved with the browser review state and server-side audit entries are appended to:
 
@@ -206,7 +231,7 @@ Each duplicate group includes a compact pair-labeling panel. Use `Match`, `Not M
 
 Labels and review choices are saved automatically in the browser for the loaded dataset. When the same dataset is loaded again, the app restores saved pair labels, duplicate/not-duplicate judgments, accepted field values, and separated-record choices from local IndexedDB storage. The Source panel shows when saved review state is restored or saved.
 
-`Export Labels` downloads a pair-level calibration CSV with object type, group score, pair score, Salesforce IDs, names, label, confidence, reasons, and field-score JSON. `Import Labels` restores labels from one of those exported CSVs into the currently loaded dataset and then saves them in local browser storage. `Unsure` rows are exported for auditability, but they should usually be excluded from model calibration.
+Use `Export > Labels` to download a pair-level calibration CSV with object type, group score, pair score, Salesforce IDs, names, label, confidence, reasons, and field-score JSON. Use `Import > Labels` to restore labels from one of those exported CSVs into the currently loaded dataset and save them in local browser storage. `Unsure` rows are exported for auditability, but they should usually be excluded from model calibration.
 
 You can check the exported labels against the current scorer with:
 

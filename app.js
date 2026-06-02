@@ -140,6 +140,16 @@ const CONTACT_CREATED_DATE_FIELD = "createdDate";
 const MERGE_FIELD_API_NAMES = {
   leadSource: "LeadSource"
 };
+const PREMERGE_FRESHNESS_FIELDS = [
+  "fullName",
+  "firstName",
+  "lastName",
+  "company",
+  "email",
+  "leadSource",
+  "phone",
+  "mobile"
+];
 const GROUP_FILTER_FIELD_TYPES = {
   recordId: "text",
   fullName: "text",
@@ -709,6 +719,13 @@ const SAMPLE_DATA = {
 const state = {
   objectType: "contact",
   fileName: "",
+  datasetSource: {
+    endpoint: "",
+    fileName: "",
+    displayName: "",
+    objectType: "contact",
+    format: ""
+  },
   datasetKey: "",
   reviewStateStatus: "",
   loadError: "",
@@ -799,6 +816,8 @@ const els = {
   duplicateButton: document.getElementById("duplicateButton"),
   notDuplicateButton: document.getElementById("notDuplicateButton"),
   exportButton: document.getElementById("exportButton"),
+  exportMenuButton: document.getElementById("exportMenuButton"),
+  exportMenu: document.getElementById("exportMenu"),
   trainingExportButton: document.getElementById("trainingExportButton"),
   codexTrainingButton: document.getElementById("codexTrainingButton"),
   trainingImportButton: document.getElementById("trainingImportButton"),
@@ -817,6 +836,10 @@ const els = {
 if (SHOULD_BOOT_UI) {
 els.chooseCsvButton.addEventListener("click", () => {
   setCsvObjectMenuOpen(els.csvObjectMenu.hidden);
+});
+
+els.exportMenuButton.addEventListener("click", () => {
+  setExportMenuOpen(els.exportMenu.hidden);
 });
 
 els.reviewModeButtons.forEach((button) => {
@@ -840,8 +863,8 @@ els.csvObjectMenu.addEventListener("click", (event) => {
 });
 
 document.addEventListener("click", (event) => {
-  if (event.target.closest?.(".csv-picker")) return;
-  setCsvObjectMenuOpen(false);
+  if (!event.target.closest?.(".csv-picker")) setCsvObjectMenuOpen(false);
+  if (!event.target.closest?.(".export-picker")) setExportMenuOpen(false);
 });
 
 document.addEventListener("keydown", (event) => {
@@ -852,6 +875,7 @@ document.addEventListener("keydown", (event) => {
       return;
     }
     setCsvObjectMenuOpen(false);
+    setExportMenuOpen(false);
   }
   handleGroupNavigationKeyboardShortcut(event);
   handleTrainingKeyboardShortcut(event);
@@ -903,10 +927,17 @@ els.rerunButton.addEventListener("click", () => {
 
 els.duplicateButton.addEventListener("click", () => markDecision("duplicate"));
 els.notDuplicateButton.addEventListener("click", () => markDecision("not-duplicate"));
-els.exportButton.addEventListener("click", exportDecisions);
-els.trainingExportButton.addEventListener("click", exportTrainingLabels);
+els.exportButton.addEventListener("click", () => {
+  setExportMenuOpen(false);
+  exportDecisions();
+});
+els.trainingExportButton.addEventListener("click", () => {
+  setExportMenuOpen(false);
+  exportTrainingLabels();
+});
 els.codexTrainingButton.addEventListener("click", sendTrainingLabelsToCodex);
 els.trainingImportButton.addEventListener("click", () => {
+  setCsvObjectMenuOpen(false);
   els.trainingImportInput.value = "";
   els.trainingImportInput.click();
 });
@@ -1052,6 +1083,13 @@ function setPanelExpanded(panel, toggle, body, expanded) {
 function setCsvObjectMenuOpen(isOpen) {
   els.csvObjectMenu.hidden = !isOpen;
   els.chooseCsvButton.setAttribute("aria-expanded", String(isOpen));
+  if (isOpen) setExportMenuOpen(false);
+}
+
+function setExportMenuOpen(isOpen) {
+  els.exportMenu.hidden = !isOpen;
+  els.exportMenuButton.setAttribute("aria-expanded", String(isOpen));
+  if (isOpen) setCsvObjectMenuOpen(false);
 }
 
 function openShortcutsModal() {
@@ -1132,6 +1170,13 @@ async function loadDatasetText(datasetText, {
   }, updateLoadingProgress);
 
   await applyProcessedDataset(result, { fromObjects: false });
+  setLoadedDatasetSource({
+    endpoint,
+    fileName: result.fileName || fileName || datasetFileNameForFormat(format),
+    displayName,
+    objectType: normalizeObjectType(result.objectType || state.objectType),
+    format: result.format || format
+  });
   if (saveRecent) {
     saveRecentFileInBackground({
       name: result.fileName || fileName || datasetFileNameForFormat(format),
@@ -1194,7 +1239,9 @@ async function loadFromUrlIfRequested() {
       objectType,
       format: datasetFormatFromFileName(source.endpoint || fileName),
       size: datasetText.length,
-      saveRecent: false
+      saveRecent: false,
+      displayName: source.label,
+      endpoint: source.endpoint
     });
     if (params.get("saveRecent") !== "0") {
       saveRecentFileInBackground({
@@ -1248,6 +1295,13 @@ function beginFileLoad(fileName, objectType = state.objectType) {
 
 function clearLoadedDatasetForPendingLoad() {
   state.fileName = "";
+  state.datasetSource = {
+    endpoint: "",
+    fileName: "",
+    displayName: "",
+    objectType: state.objectType,
+    format: ""
+  };
   state.lastProcessingMode = "";
   state.headers = [];
   state.rows = [];
@@ -1363,7 +1417,9 @@ async function loadRecentFile(fileId) {
       objectType,
       format: record.format || datasetFormatFromFileName(record.name || record.endpoint),
       size: record.size || datasetText.length,
-      saveRecent: false
+      saveRecent: false,
+      displayName: record.displayName || record.name,
+      endpoint: record.endpoint || ""
     });
     saveRecentFileInBackground({
       name: record.name,
@@ -1390,6 +1446,16 @@ async function recentFileDatasetText(record) {
   }
 
   return record.content || "";
+}
+
+function setLoadedDatasetSource({ endpoint = "", fileName = "", displayName = "", objectType = state.objectType, format = "" } = {}) {
+  state.datasetSource = {
+    endpoint: String(endpoint || ""),
+    fileName: String(fileName || state.fileName || ""),
+    displayName: String(displayName || fileName || state.fileName || ""),
+    objectType: normalizeObjectType(objectType, state.objectType),
+    format: String(format || datasetFormatFromFileName(fileName || endpoint || state.fileName))
+  };
 }
 
 async function saveRecentFile(fileRecord) {
@@ -1939,7 +2005,29 @@ function sanitizeMergeResult(result) {
     orgAlias: String(result.orgAlias || ""),
     instanceUrl: String(result.instanceUrl || ""),
     apiVersion: String(result.apiVersion || ""),
-    mergedAt: String(result.mergedAt || result.at || "")
+    mergedAt: String(result.mergedAt || result.at || ""),
+    preMergeCheck: sanitizePreMergeCheck(result.preMergeCheck),
+    recoverySnapshot: result.recoverySnapshot && typeof result.recoverySnapshot === "object" ? result.recoverySnapshot : null
+  };
+}
+
+function sanitizePreMergeCheck(check) {
+  if (!check || typeof check !== "object") return null;
+  return {
+    status: String(check.status || ""),
+    checkedAt: String(check.checkedAt || ""),
+    missingIds: Array.isArray(check.missingIds) ? check.missingIds.map(String) : [],
+    deletedIds: Array.isArray(check.deletedIds) ? check.deletedIds.map(String) : [],
+    changedFields: Array.isArray(check.changedFields)
+      ? check.changedFields.map((change) => ({
+          id: String(change.id || ""),
+          recordName: String(change.recordName || ""),
+          field: String(change.field || ""),
+          label: String(change.label || ""),
+          loadedValue: String(change.loadedValue ?? ""),
+          currentValue: String(change.currentValue ?? "")
+        }))
+      : []
   };
 }
 
@@ -4733,12 +4821,26 @@ function renderMetrics() {
 function renderTrainingExportButton() {
   const labelCount = trainingLabelCount();
   els.trainingExportButton.disabled = !labelCount;
-  els.trainingExportButton.textContent = labelCount ? `Export Labels (${formatNumber(labelCount)})` : "Export Labels";
+  els.trainingExportButton.textContent = "Labels";
+  els.trainingExportButton.setAttribute(
+    "aria-label",
+    labelCount ? `Export labels (${formatNumber(labelCount)})` : "Export labels"
+  );
   els.trainingExportButton.classList.toggle("is-active", labelCount > 0);
   els.codexTrainingButton.disabled = !labelCount;
-  els.codexTrainingButton.textContent = labelCount ? `Send to Codex (${formatNumber(labelCount)})` : "Send Labels to Codex";
+  els.codexTrainingButton.textContent = "Send to Codex";
+  els.codexTrainingButton.setAttribute(
+    "aria-label",
+    labelCount ? `Send ${formatNumber(labelCount)} labels to Codex` : "Send to Codex"
+  );
   els.codexTrainingButton.classList.toggle("is-active", labelCount > 0);
   els.trainingImportButton.disabled = !state.rows.length;
+  updateExportMenuButtonState();
+}
+
+function updateExportMenuButtonState() {
+  const hasExports = !els.exportButton.disabled || !els.trainingExportButton.disabled;
+  els.exportMenuButton.classList.toggle("is-active", hasExports);
 }
 
 function renderGroups(options = {}) {
@@ -5872,10 +5974,13 @@ function renderDetail() {
   els.notDuplicateButton.classList.toggle("is-active", currentDecision === "not-duplicate");
   els.duplicateButton.setAttribute("aria-pressed", currentDecision === "duplicate" ? "true" : "false");
   els.notDuplicateButton.setAttribute("aria-pressed", currentDecision === "not-duplicate" ? "true" : "false");
-  els.exportButton.textContent = exportableCount
-    ? `Export Decisions (${formatNumber(exportableCount)})`
-    : "Export Decisions";
+  els.exportButton.textContent = "Decisions";
+  els.exportButton.setAttribute(
+    "aria-label",
+    exportableCount ? `Export decisions (${formatNumber(exportableCount)})` : "Export decisions"
+  );
   els.exportButton.classList.toggle("is-active", exportableCount > 0);
+  updateExportMenuButtonState();
   els.decisionStatus.textContent = hasGroup
     ? currentDecision
       ? `Duplicate decision: ${decisionLabel(currentDecision)}`
@@ -5909,7 +6014,7 @@ function renderDetail() {
         <strong>${state.loadError ? "Dataset could not be loaded" : state.rows.length ? "No duplicate groups" : "No duplicate groups yet"}</strong>
         <span>${state.loadError ? escapeHtml(state.loadError) : state.rows.length ? "Adjust the thresholds or mapping." : "Choose a CSV or JSON file, or load demo data."}</span>
         <div class="empty-actions">
-          <button class="button button-primary" type="button" data-empty-action="choose-csv">Choose File</button>
+          <button class="button button-primary" type="button" data-empty-action="choose-csv">Import</button>
           <button class="button button-secondary" type="button" data-empty-action="demo-data">Load Demo</button>
         </div>
       </div>
@@ -6793,32 +6898,60 @@ async function handleMergeAction(button) {
 
   const mergeIds = mergeState.mergeRecords.map(({ id }) => id);
   const masterFieldPayload = buildSalesforceMergeMasterFieldPayload(group, mergeState);
-  const confirmed = window.confirm(
-    `Merge ${mergeIds.length} ${mergeIds.length === 1 ? "record" : "records"} into ${mergeState.selectedId} in Salesforce?\n\nThis deletes the duplicate records and reparents related records to the master.`
-  );
-  if (!confirmed) return;
+  const preMergeRecords = buildSalesforcePreMergeRecords(activeRecords);
+  let refreshAfterStaleCheck = false;
 
   mergeInFlightGroupKeys.add(groupKey);
   renderDetail();
 
   try {
-    const response = await fetch("/api/salesforce/merge", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        objectType: state.objectType,
-        groupKey,
-        masterId: mergeState.selectedId,
-        mergeIds,
-        ...masterFieldPayload,
-        confirmation: "MERGE"
-      })
+    const preMergeCheck = await checkSalesforcePreMergeFreshness({
+      groupKey,
+      mergeState,
+      mergeIds,
+      records: preMergeRecords
     });
-    const payload = await readApiJson(response);
-    if (!response.ok) throw new Error(payload.error?.message || "Salesforce merge failed.");
 
-    state.mergeResults.set(groupKey, sanitizeMergeResult({ ...payload, status: "success" }));
-    state.decisions.set(groupKey, "duplicate");
+    if (preMergeCheck.status !== "fresh") {
+      const message = preMergeFreshnessSummary(preMergeCheck);
+      state.mergeResults.set(
+        groupKey,
+        sanitizeMergeResult({
+          status: "failed",
+          objectType: state.objectType,
+          masterId: mergeState.selectedId,
+          mergedRecordIds: mergeIds,
+          message,
+          preMergeCheck,
+          mergedAt: new Date().toISOString()
+        })
+      );
+      refreshAfterStaleCheck = confirmPreMergeDatasetRefresh(preMergeCheck);
+    } else {
+      const confirmed = window.confirm(
+        `Merge ${mergeIds.length} ${mergeIds.length === 1 ? "record" : "records"} into ${mergeState.selectedId} in Salesforce?\n\nThis deletes the duplicate records and reparents related records to the master.`
+      );
+      if (!confirmed) return;
+
+      const response = await fetch("/api/salesforce/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          objectType: state.objectType,
+          groupKey,
+          masterId: mergeState.selectedId,
+          mergeIds,
+          records: preMergeRecords,
+          ...masterFieldPayload,
+          confirmation: "MERGE"
+        })
+      });
+      const payload = await readApiJson(response);
+      if (!response.ok) throw new Error(payload.error?.message || "Salesforce merge failed.");
+
+      state.mergeResults.set(groupKey, sanitizeMergeResult({ ...payload, status: "success" }));
+      state.decisions.set(groupKey, "duplicate");
+    }
   } catch (error) {
     state.mergeResults.set(
       groupKey,
@@ -6837,6 +6970,143 @@ async function handleMergeAction(button) {
     renderGroups();
     renderDetail();
   }
+
+  if (refreshAfterStaleCheck) {
+    await refreshLoadedDatasetFromSource();
+  }
+}
+
+async function checkSalesforcePreMergeFreshness({ groupKey, mergeState, mergeIds, records }) {
+  const response = await fetch("/api/salesforce/premerge-check", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      objectType: state.objectType,
+      groupKey,
+      masterId: mergeState.selectedId,
+      mergeIds,
+      records
+    })
+  });
+  const payload = await readApiJson(response);
+  if (!response.ok) throw new Error(payload.error?.message || "Pre-merge freshness check failed.");
+  return payload;
+}
+
+function buildSalesforcePreMergeRecords(records) {
+  return records
+    .map((record) => {
+      const id = normalizeSalesforceIdForMerge(salesforceId(record));
+      if (!id) return null;
+      const fields = {};
+      PREMERGE_FRESHNESS_FIELDS.forEach((field) => {
+        if (!shouldIncludeSalesforcePreMergeField(field)) return;
+        fields[field] = String(getDisplayFieldValue(record, field) || "");
+      });
+      return {
+        id,
+        name: displayName(record),
+        rowIndex: Number.isFinite(record.__rowIndex) ? record.__rowIndex : null,
+        fields
+      };
+    })
+    .filter(Boolean);
+}
+
+function shouldIncludeSalesforcePreMergeField(field) {
+  if (field === "fullName") return Boolean(state.mapping.fullName || state.mapping.firstName || state.mapping.lastName);
+  return Boolean(state.mapping[field]);
+}
+
+function confirmPreMergeDatasetRefresh(check) {
+  const message = preMergeFreshnessSummary(check);
+  if (!canRefreshLoadedDatasetFromSource()) {
+    window.alert(
+      `${message}\n\nThis dataset was loaded from a local file or an unknown source, so the app cannot refresh it automatically. Load a fresh Contacts export before merging.`
+    );
+    return false;
+  }
+
+  const sourceLabel = state.datasetSource.displayName || state.datasetSource.fileName || state.fileName || "the current Contacts dataset";
+  return window.confirm(`${message}\n\nRefresh ${sourceLabel} from Salesforce now?`);
+}
+
+function canRefreshLoadedDatasetFromSource() {
+  return state.objectType === "contact" && isServerBackedApp() && Boolean(state.datasetSource?.endpoint);
+}
+
+async function refreshLoadedDatasetFromSource() {
+  const source = { ...(state.datasetSource || {}) };
+  if (!source.endpoint || !isServerBackedApp()) {
+    window.alert("Automatic refresh is unavailable for this loaded dataset.");
+    return;
+  }
+
+  const objectType = normalizeObjectType(source.objectType, state.objectType);
+  const fileName = source.fileName || state.fileName || "salesforce-report-latest.json";
+  const displayName = source.displayName || fileName;
+  const format = source.format || datasetFormatFromFileName(source.endpoint || fileName);
+  let loadStarted = false;
+
+  showLoadingModal("Refreshing Contacts", `Fetching ${displayName} from Salesforce.`, 0);
+  try {
+    await nextPaint();
+    const response = await fetch(source.endpoint, { cache: "no-store" });
+    if (!response.ok) throw new Error(`Dataset refresh failed: ${response.status}`);
+    const datasetText = await response.text();
+    loadStarted = true;
+    beginFileLoad(fileName, objectType);
+    showLoadingModal("Refreshing Contacts", `Matching ${displayName}.`, 0);
+    await loadDatasetText(datasetText, {
+      fileName,
+      objectType,
+      format,
+      size: datasetText.length,
+      saveRecent: true,
+      displayName,
+      endpoint: source.endpoint
+    });
+    if (!state.reviewStateStatus) state.reviewStateStatus = "Dataset refreshed";
+    renderSource();
+  } catch (error) {
+    if (isAbortError(error)) return;
+    state.reviewStateStatus = error.message || "Dataset refresh failed";
+    if (loadStarted) {
+      state.loadError = state.reviewStateStatus;
+      endFileLoad();
+      renderDetail();
+    }
+    renderSource();
+    window.alert(
+      loadStarted
+        ? `${state.reviewStateStatus}. Load a fresh Contacts export before merging.`
+        : `${state.reviewStateStatus}. The current loaded data was left in place.`
+    );
+  } finally {
+    hideLoadingModal();
+  }
+}
+
+function preMergeFreshnessSummary(check) {
+  const missingCount = Array.isArray(check?.missingIds) ? check.missingIds.length : 0;
+  const deletedCount = Array.isArray(check?.deletedIds) ? check.deletedIds.length : 0;
+  const changedFields = Array.isArray(check?.changedFields) ? check.changedFields : [];
+  const parts = [];
+  if (missingCount) parts.push(`${missingCount} missing`);
+  if (deletedCount) parts.push(`${deletedCount} deleted`);
+  if (changedFields.length) parts.push(`${changedFields.length} changed field${changedFields.length === 1 ? "" : "s"}`);
+  const examples = changedFields.slice(0, 3).map(formatPreMergeFieldChange).filter(Boolean);
+  const suffix = examples.length ? `\n\nExamples:\n${examples.join("\n")}` : "";
+  return `Pre-merge freshness check failed (${parts.join(", ") || "stale data"}). Salesforce has changed since this dataset was loaded.${suffix}`;
+}
+
+function formatPreMergeFieldChange(change) {
+  if (!change || typeof change !== "object") return "";
+  const label = change.label || FIELD_LABELS[change.field] || change.field || "Field";
+  const recordName = change.recordName || change.id || "Record";
+  const loaded = String(change.loadedValue || "").trim() || "(blank)";
+  const current = String(change.currentValue || "").trim() || "(blank)";
+  return `- ${recordName}: ${label} changed from "${loaded}" to "${current}"`;
 }
 
 function buildSalesforceMergeMasterFieldPayload(group, mergeState) {
