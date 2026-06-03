@@ -36,6 +36,10 @@ const API_CONTRACT_VERSION = "duplicate-reviewer-api-contract-v2";
 const DEFAULT_PATH = managedPlatform.defaultCommandPath();
 const salesforceMergeService = createSalesforceMergeService();
 let salesforceCliCommandCache = null;
+let salesforceAuthCache = null;
+const SALESFORCE_AUTH_CACHE_TTL_MS = 5 * 60 * 1000;
+const ENDPOINT_RESPONSE_CACHE_LIMIT = 8;
+const endpointResponseCache = new Map();
 const MERGE_AUDIT_LOG = path.join(OUTPUT_DIR, "salesforce-merge-log.jsonl");
 const MAX_MERGE_VICTIMS = 20;
 const SALESFORCE_ID_PATTERN = /^[a-zA-Z0-9]{15}(?:[a-zA-Z0-9]{3})?$/;
@@ -189,25 +193,30 @@ async function handleRequest(request, response) {
 
   if (request.method === "GET" && CSV_ENDPOINTS.has(url.pathname)) {
     const endpoint = CSV_ENDPOINTS.get(url.pathname);
-    const data = await readCsvEndpointData(endpoint);
+    const cached = await cachedEndpointResponse(endpoint, "csv", () => readCsvEndpointData(endpoint));
+    if (sendNotModifiedIfFresh(request, response, cached)) return;
     response.writeHead(200, {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": `inline; filename="${endpoint.fileName}"`,
-      "Cache-Control": "no-store"
+      ...cacheValidationHeaders(cached)
     });
-    response.end(data);
+    response.end(cached.body);
     return;
   }
 
   if (request.method === "GET" && JSON_ENDPOINTS.has(url.pathname)) {
     const endpoint = JSON_ENDPOINTS.get(url.pathname);
-    const data = await readJsonEndpointData(endpoint);
+    const cached = await cachedEndpointResponse(endpoint, "json", async () => {
+      const data = await readJsonEndpointData(endpoint);
+      return Buffer.from(`${JSON.stringify(data)}\n`, "utf8");
+    });
+    if (sendNotModifiedIfFresh(request, response, cached)) return;
     response.writeHead(200, {
       "Content-Type": "application/json; charset=utf-8",
       "Content-Disposition": `inline; filename="${endpoint.fileName}"`,
-      "Cache-Control": "no-store"
+      ...cacheValidationHeaders(cached)
     });
-    response.end(`${JSON.stringify(data)}\n`);
+    response.end(cached.body);
     return;
   }
 
@@ -442,6 +451,71 @@ async function latestEndpointStat(endpoint) {
   }
 }
 
+async function cachedEndpointResponse(endpoint, format, buildBody) {
+  const version = await latestEndpointVersion(endpoint);
+  const cacheKey = [
+    format,
+    version.path,
+    version.size,
+    Math.floor(version.mtimeMs)
+  ].join("|");
+  const cached = endpointResponseCache.get(cacheKey);
+  if (cached) return cached;
+
+  const body = await buildBody();
+  const response = {
+    body: Buffer.isBuffer(body) ? body : Buffer.from(String(body || ""), "utf8"),
+    etag: weakEtag(version),
+    lastModified: new Date(version.mtimeMs).toUTCString()
+  };
+  endpointResponseCache.set(cacheKey, response);
+  pruneEndpointResponseCache();
+  return response;
+}
+
+async function latestEndpointVersion(endpoint) {
+  const paths = [endpoint.path, endpoint.jsonPath, endpoint.csvPath].filter(Boolean);
+  for (const filePath of paths) {
+    try {
+      const stat = await fs.stat(filePath);
+      return {
+        path: filePath,
+        size: stat.size,
+        mtimeMs: stat.mtimeMs
+      };
+    } catch (error) {
+      if (error.code !== "ENOENT" && !isTransientFileProviderReadError(error)) throw error;
+    }
+  }
+  throw httpError(404, "Latest Salesforce export was not found.");
+}
+
+function weakEtag(version) {
+  return `W/"${Buffer.from(`${version.path}:${version.size}:${Math.floor(version.mtimeMs)}`).toString("base64url")}"`;
+}
+
+function sendNotModifiedIfFresh(request, response, cached) {
+  if (request.headers["if-none-match"] !== cached.etag) return false;
+  response.writeHead(304, cacheValidationHeaders(cached));
+  response.end();
+  return true;
+}
+
+function cacheValidationHeaders(cached) {
+  return {
+    "Cache-Control": "private, max-age=0, must-revalidate",
+    ETag: cached.etag,
+    "Last-Modified": cached.lastModified
+  };
+}
+
+function pruneEndpointResponseCache() {
+  while (endpointResponseCache.size > ENDPOINT_RESPONSE_CACHE_LIMIT) {
+    const [oldestKey] = endpointResponseCache.keys();
+    endpointResponseCache.delete(oldestKey);
+  }
+}
+
 function salesforceJsonExportToCsv(json) {
   const payload = JSON.parse(Buffer.isBuffer(json) ? json.toString("utf8") : String(json || ""));
   if (!Array.isArray(payload.columns) || !Array.isArray(payload.rows)) {
@@ -622,15 +696,14 @@ function createSalesforceMergeService() {
 
 async function checkSalesforcePreMergeFreshness(body) {
   const mergeRequest = validateMergeRequest(body, { requireConfirmation: false });
-  const auth = await getSalesforceAuth();
-  return buildPreMergeFreshnessResult({
+  return withSalesforceAuthRefresh((auth) => buildPreMergeFreshnessResult({
     auth,
     objectType: mergeRequest.objectType,
     groupKey: mergeRequest.groupKey,
     masterId: mergeRequest.masterId,
     mergeIds: mergeRequest.mergeIds,
     loadedRecords: mergeRequest.loadedRecords
-  });
+  }));
 }
 
 async function mergeSalesforceRecords(body) {
@@ -648,15 +721,30 @@ async function mergeSalesforceRecords(body) {
   };
 
   try {
-    const auth = await getSalesforceAuth();
-    const preMergeCheck = await buildPreMergeFreshnessResult({
-      auth,
-      objectType: mergeRequest.objectType,
-      groupKey: mergeRequest.groupKey,
-      masterId: mergeRequest.masterId,
-      mergeIds: mergeRequest.mergeIds,
-      loadedRecords: mergeRequest.loadedRecords
-    });
+    let auth = await getSalesforceAuth();
+    let preMergeCheck;
+    try {
+      preMergeCheck = await buildPreMergeFreshnessResult({
+        auth,
+        objectType: mergeRequest.objectType,
+        groupKey: mergeRequest.groupKey,
+        masterId: mergeRequest.masterId,
+        mergeIds: mergeRequest.mergeIds,
+        loadedRecords: mergeRequest.loadedRecords
+      });
+    } catch (error) {
+      if (!isSalesforceAuthRejected(error)) throw error;
+      clearSalesforceAuthCache();
+      auth = await getSalesforceAuth({ forceRefresh: true });
+      preMergeCheck = await buildPreMergeFreshnessResult({
+        auth,
+        objectType: mergeRequest.objectType,
+        groupKey: mergeRequest.groupKey,
+        masterId: mergeRequest.masterId,
+        mergeIds: mergeRequest.mergeIds,
+        loadedRecords: mergeRequest.loadedRecords
+      });
+    }
     if (preMergeCheck.status !== "fresh") {
       throw httpError(409, preMergeFreshnessSummary(preMergeCheck), { preMergeCheck });
     }
@@ -836,6 +924,9 @@ async function querySalesforceContactsByIds(auth, ids) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
+    if (response.status === 401) {
+      throw httpError(401, "Salesforce authentication was rejected. Refreshing the Salesforce session may be required.");
+    }
     throw httpError(502, `Salesforce freshness check failed: ${payload?.[0]?.message || payload.message || `${response.status} ${response.statusText}`}`);
   }
   return Array.isArray(payload.records) ? payload.records.map(stripSalesforceAttributes) : [];
@@ -963,7 +1054,17 @@ function uniqueIds(values) {
   return ids;
 }
 
-async function getSalesforceAuth() {
+async function withSalesforceAuthRefresh(operation) {
+  try {
+    return await operation(await getSalesforceAuth());
+  } catch (error) {
+    if (!isSalesforceAuthRejected(error)) throw error;
+    clearSalesforceAuthCache();
+    return operation(await getSalesforceAuth({ forceRefresh: true }));
+  }
+}
+
+async function getSalesforceAuth(options = {}) {
   const envAccessToken = process.env.SF_ACCESS_TOKEN;
   if (envAccessToken) {
     return {
@@ -974,18 +1075,35 @@ async function getSalesforceAuth() {
     };
   }
 
+  if (!options.forceRefresh && salesforceAuthCache?.expiresAt > Date.now()) {
+    return salesforceAuthCache.value;
+  }
+
   const display = await execFileJson(salesforceCliCommand(), ["org", "display", "--target-org", SF_ORG_ALIAS, "--json"], {
     env: salesforceCliEnv()
   });
   const result = display.result || {};
   if (!result.accessToken) throw httpError(500, `Salesforce CLI did not return an access token for ${SF_ORG_ALIAS}.`);
 
-  return {
+  const auth = {
     accessToken: result.accessToken,
     instanceUrl: normalizeInstanceUrl(SF_INSTANCE_URL || result.instanceUrl),
     apiVersion: normalizeApiVersion(SF_API_VERSION),
     orgAlias: SF_ORG_ALIAS
   };
+  salesforceAuthCache = {
+    value: auth,
+    expiresAt: Date.now() + SALESFORCE_AUTH_CACHE_TTL_MS
+  };
+  return auth;
+}
+
+function clearSalesforceAuthCache() {
+  salesforceAuthCache = null;
+}
+
+function isSalesforceAuthRejected(error) {
+  return Number(error?.status) === 401 || /401|unauthorized|invalid session/i.test(String(error?.message || ""));
 }
 
 function execFileJson(command, args, options = {}) {
@@ -1184,6 +1302,9 @@ async function mergeSalesforceRecordBatch({ auth, objectType, masterId, mergeIds
   const text = await response.text();
   const fault = soapFaultMessage(text);
   if (!response.ok || fault) {
+    if (response.status === 401 || /invalid session|session expired|unauthorized/i.test(fault || "")) {
+      throw httpError(401, "Salesforce authentication was rejected during merge. Log in to Salesforce again, then retry.");
+    }
     throw httpError(502, `Salesforce merge failed: ${fault || `${response.status} ${response.statusText}`}`);
   }
 

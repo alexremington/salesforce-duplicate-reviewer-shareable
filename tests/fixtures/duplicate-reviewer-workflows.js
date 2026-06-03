@@ -50,6 +50,14 @@ function contactMissingIdSmokeCsv() {
   ]);
 }
 
+function contactLastNameChangeSmokeCsv() {
+  return csvRows([
+    ["Id", "First Name", "Last Name", "Company", "Email", "Lead Source", "Created Date", "Phone", "Mobile"],
+    ["003L00000000001", "Jordan", "Taylor", "POLITICO", "jordan.taylor@politico.com", "Web", "2024-03-01", "", ""],
+    ["003L00000000002", "Jordan", "Rivera", "POLITICO", "jordan.rivera@politico.com", "Referral", "2025-03-01", "", ""]
+  ]);
+}
+
 function accountSmokeCsv() {
   return csvRows([
     ["Id", "Name", "Website", "Billing Street", "Billing City", "Billing State", "Billing Postal Code", "Billing Country"],
@@ -84,6 +92,7 @@ function csvCell(value) {
 
 module.exports = {
   accountSmokeCsv,
+  contactLastNameChangeSmokeCsv,
   contactMissingIdSmokeCsv,
   contactSmokeCsv,
   largeContactSmokeCsv

@@ -761,6 +761,7 @@ const state = {
   filterLogic: "",
   labelStatusFilters: new Set(),
   pendingLabelStatusFilters: new Set(),
+  lastMatchingStats: null,
   recentFiles: []
 };
 
@@ -776,6 +777,8 @@ let shortcutsReturnFocus = null;
 // These caches are tied to immutable group arrays and are cleared on recompute.
 let visibleGroupsCache = null;
 let groupLookupCache = null;
+let groupListRenderCache = null;
+let detailRenderCache = "";
 let groupListRenderFrame = 0;
 let matchingWorkerRunner = null;
 
@@ -1308,10 +1311,13 @@ function clearLoadedDatasetForPendingLoad() {
     format: ""
   };
   state.lastProcessingMode = "";
+  state.lastMatchingStats = null;
   state.headers = [];
   state.rows = [];
   state.mapping = {};
   state.groups = [];
+  groupListRenderCache = null;
+  detailRenderCache = "";
   state.selectedGroupKey = "";
   state.filters = [];
   state.filterLogic = "";
@@ -2117,6 +2123,7 @@ async function ingestRows(rows, fileName, fromObjects, knownHeaders) {
 
 async function applyProcessedDataset(result, { fromObjects = false } = {}) {
   state.lastProcessingMode = result.processingMode || "";
+  state.lastMatchingStats = result.matchingStats || null;
   stageRowsForReview({
     rows: result.rows || [],
     fileName: result.fileName || datasetFileNameForFormat(result.format),
@@ -2126,7 +2133,7 @@ async function applyProcessedDataset(result, { fromObjects = false } = {}) {
     objectType: result.objectType
   });
   await updateLoadingProgress("Rendering duplicate groups.", 98);
-  applyComputedGroups(result.groups || []);
+  applyComputedGroups(result.groups || [], result.matchingStats || null);
   await updateLoadingProgress("Ready.", 100);
   return fromObjects ? Promise.resolve() : restoreReviewStateForCurrentDataset();
 }
@@ -2148,6 +2155,7 @@ function stageRowsForReview({ rows, fileName, fromObjects, headers, mapping, obj
   state.selectedGroupKey = "";
   state.trainingLabels.clear();
   state.trainingPairIndexes.clear();
+  state.lastMatchingStats = null;
   mergeMasterSelections.clear();
   mergeConfirmations.clear();
   mergeInFlightGroupKeys.clear();
@@ -2177,8 +2185,9 @@ async function recompute({ title = "Matching Records", message = "Preparing reco
       highRecallMode: state.highRecallMode
     }, updateLoadingProgress);
     state.lastProcessingMode = result.processingMode || "";
+    state.lastMatchingStats = result.matchingStats || null;
     await updateLoadingProgress("Rendering duplicate groups.", 98);
-    applyComputedGroups(result.groups || []);
+    applyComputedGroups(result.groups || [], result.matchingStats || null);
     await updateLoadingProgress("Ready.", 100);
   } catch (error) {
     if (!isAbortError(error)) throw error;
@@ -2187,9 +2196,12 @@ async function recompute({ title = "Matching Records", message = "Preparing reco
   }
 }
 
-function applyComputedGroups(groups) {
+function applyComputedGroups(groups, matchingStats = null) {
   state.groups = Array.isArray(groups) ? groups : [];
+  state.lastMatchingStats = matchingStats || state.lastMatchingStats;
   groupLookupCache = null;
+  groupListRenderCache = null;
+  detailRenderCache = "";
   if (!state.groups.some((group) => group.key === state.selectedGroupKey)) {
     state.selectedGroupKey = state.groups[0]?.key || "";
   }
@@ -2249,13 +2261,14 @@ async function processMatchingJobOnMain(payload, progress = async () => {}) {
     const mapping = dataset.mapping || autoMapHeaders(headers, OBJECT_CONFIG[dataset.objectType].fields);
     stageMatchingContext(rows, dataset.objectType, headers, mapping);
     await progress("Matching records.", 7);
-    const groups = await buildGroupsAsync(rows, dataset.objectType, mapping, payload.threshold, payload.highRecallMode, progress);
+    const { groups, matchingStats } = await buildGroupsAsync(rows, dataset.objectType, mapping, payload.threshold, payload.highRecallMode, progress);
     return {
       ...dataset,
       rows,
       headers,
       mapping,
       groups,
+      matchingStats,
       processingMode: "main"
     };
   }
@@ -2268,7 +2281,7 @@ async function processMatchingJobOnMain(payload, progress = async () => {}) {
     const objectType = normalizeObjectType(payload.objectType, state.objectType);
     const mapping = payload.mapping || {};
     stageMatchingContext(rows, objectType, payload.headers || inferHeaders(rows), mapping);
-    const groups = await buildGroupsAsync(
+    const { groups, matchingStats } = await buildGroupsAsync(
       rows,
       objectType,
       mapping,
@@ -2276,7 +2289,7 @@ async function processMatchingJobOnMain(payload, progress = async () => {}) {
       payload.highRecallMode,
       progress
     );
-    return { groups, processingMode: "main" };
+    return { groups, matchingStats, processingMode: "main" };
   }
 
   throw new Error(`Unsupported matching job: ${payload.mode || "unknown"}`);
@@ -2621,9 +2634,24 @@ function readMappingFromControls() {
  * away from all-pairs comparison in normal cases.
  */
 async function buildGroupsAsync(rows, objectType, mapping, threshold, highRecallMode = false, progress = async () => {}) {
+  const startedAt = performance.now();
   if (!rows.length) {
     await progress("No records to match.", 100);
-    return [];
+    return {
+      groups: [],
+      matchingStats: {
+        objectType,
+        rowCount: 0,
+        threshold,
+        highRecallMode,
+        elapsedMs: 0,
+        candidatePairs: 0,
+        candidateAttempts: 0,
+        scoredPairs: 0,
+        retainedPairs: 0,
+        resultGroups: 0
+      }
+    };
   }
 
   await progress("Preparing records.", 8);
@@ -2631,7 +2659,7 @@ async function buildGroupsAsync(rows, objectType, mapping, threshold, highRecall
 
   await progress("Finding candidate pairs.", 22);
   const pairKeys = objectType === "contact"
-    ? await getContactCandidatePairsAsync(preparedRows, highRecallMode, candidatePairLimit(highRecallMode), progress)
+    ? await getContactCandidatePairsAsync(preparedRows, highRecallMode, candidatePairLimit(highRecallMode), threshold, progress)
     : await getAccountCandidatePairsAsync(preparedRows, highRecallMode, candidatePairLimit(highRecallMode), threshold, progress);
 
   await progress(`Scoring ${formatNumber(pairKeys.size)} candidate pairs.`, 44);
@@ -2648,7 +2676,25 @@ async function buildGroupsAsync(rows, objectType, mapping, threshold, highRecall
     .map((group, index) => ({ ...group, id: index + 1 }));
 
   await progress("Rendering duplicate groups.", 96);
-  return groups;
+  return {
+    groups,
+    matchingStats: {
+      objectType,
+      rowCount: rows.length,
+      threshold,
+      highRecallMode,
+      elapsedMs: Math.round(performance.now() - startedAt),
+      candidatePairs: pairKeys.size,
+      candidateAttempts: pairKeys.searchStats?.attempts || 0,
+      candidateAttemptCapHit: Boolean(pairKeys.searchStats?.attemptCapHit),
+      bucketCount: pairKeys.bucketStats?.bucketCount || 0,
+      maxBucketSize: pairKeys.bucketStats?.maxBucketSize || 0,
+      oversizedBucketCount: pairKeys.bucketStats?.oversizedBucketCount || 0,
+      scoredPairs: pairs.scoreStats?.scoredPairs || pairKeys.size,
+      retainedPairs: pairs.scoreStats?.retainedPairs || pairs.length,
+      resultGroups: groups.length
+    }
+  };
 }
 
 function getScoringContext(rows, objectType, mapping) {
@@ -2737,6 +2783,10 @@ async function scoreCandidatePairsAsync(pairKeys, preparedRows, scorer, threshol
 
   await progress("Sorting scored pairs.", 78);
   pairs.sort((a, b) => b.value - a.value || b.fieldMatchRatio - a.fieldMatchRatio);
+  pairs.scoreStats = {
+    scoredPairs: keys.length,
+    retainedPairs: pairs.length
+  };
   return pairs;
 }
 
@@ -2999,6 +3049,7 @@ async function getContactCandidatePairsAsync(
   rows,
   highRecallMode = false,
   maxCandidatePairs = candidatePairLimit(highRecallMode),
+  threshold = state.threshold,
   progress = async () => {}
 ) {
   const buckets = new Map();
@@ -3030,7 +3081,7 @@ async function getContactCandidatePairsAsync(
     rows.length <= 300 ? rows.length : 0,
     highRecallMode ? contactHighRecallBucketKeys : null,
     maxCandidatePairs,
-    null,
+    contactCandidatePairFilter(threshold),
     progress
   );
 }
@@ -3096,6 +3147,38 @@ function accountCandidatePairFilter(threshold) {
   const minimumScore = Number(threshold);
   if (!Number.isFinite(minimumScore) || minimumScore <= 0) return null;
   return (left, right) => accountCandidateCanReachThreshold(left, right, minimumScore);
+}
+
+function contactCandidatePairFilter(threshold) {
+  const minimumScore = Number(threshold);
+  if (!Number.isFinite(minimumScore) || minimumScore <= 0) return null;
+  return (left, right) => contactCandidateCanReachThreshold(left, right, minimumScore);
+}
+
+function contactCandidateCanReachThreshold(left, right, minimumScore) {
+  if (hasSharedExactContactIdentifier(left, right)) return true;
+  if (
+    minimumScore <= CONTACT_FIRST_NAME_COMPANY_DOMAIN_FLOOR &&
+    hasContactFirstNameCompanyDomainCandidateCorroboration(left, right)
+  ) {
+    return true;
+  }
+  if (left.lastName && right.lastName && nameSimilarity(left.lastName, right.lastName) < 0.72) return false;
+  return true;
+}
+
+function hasContactFirstNameCompanyDomainCandidateCorroboration(left, right) {
+  const sameEmailDomain = Boolean(left.domain && left.domain === right.domain);
+  const companySimilarity = comparableScore(left.company, right.company, contactCompanySimilarity);
+  return hasContactFirstNameCompanyDomainCorroboration(left, right, companySimilarity, sameEmailDomain);
+}
+
+function hasSharedExactContactIdentifier(left, right) {
+  if (left.email && left.email === right.email) return true;
+  if (left.linkedIn && left.linkedIn === right.linkedIn) return true;
+  if (!left.phones?.length || !right.phones?.length) return false;
+  const rightPhones = new Set(right.phones);
+  return left.phones.some((phone) => rightPhones.has(phone));
 }
 
 function accountCandidateCanReachThreshold(left, right, threshold) {
@@ -3219,6 +3302,7 @@ async function pairsFromBucketsAsync(
 ) {
   const pairs = new Set();
   const searchState = createCandidateSearchState(maxCandidatePairs, candidateFilter);
+  const bucketStats = summarizeCandidateBuckets(buckets);
   const sortedBuckets = sortedCandidateBuckets(buckets);
   const totalBuckets = Math.max(sortedBuckets.length, 1);
   let lastYield = performance.now();
@@ -3243,7 +3327,7 @@ async function pairsFromBucketsAsync(
     );
     if (pairs.size >= maxCandidatePairs || searchState.stopped) {
       await progress(`Found ${formatNumber(pairs.size)} candidate pairs.`, 42);
-      return finishCandidatePairs(pairs, searchState);
+      return finishCandidatePairs(pairs, searchState, bucketStats);
     }
     await pulse(bucketIndex + 1);
   }
@@ -3257,7 +3341,7 @@ async function pairsFromBucketsAsync(
         addCandidatePair(left, right, pairs, rows, maxCandidatePairs, candidateFilter, searchState);
         if (pairs.size >= maxCandidatePairs || searchState.stopped) {
           await progress(`Found ${formatNumber(pairs.size)} candidate pairs.`, 42);
-          return finishCandidatePairs(pairs, searchState);
+          return finishCandidatePairs(pairs, searchState, bucketStats);
         }
         if (performance.now() - lastYield >= MATCHING_YIELD_INTERVAL_MS) {
           const percent = 40 + (attempts / exhaustiveTotal) * 3;
@@ -3269,7 +3353,7 @@ async function pairsFromBucketsAsync(
   }
 
   await progress(`Found ${formatNumber(pairs.size)} candidate pairs.`, 42);
-  return finishCandidatePairs(pairs, searchState);
+  return finishCandidatePairs(pairs, searchState, bucketStats);
 }
 
 function createCandidateSearchState(maxCandidatePairs, candidateFilter) {
@@ -3281,12 +3365,27 @@ function createCandidateSearchState(maxCandidatePairs, candidateFilter) {
   };
 }
 
-function finishCandidatePairs(pairs, searchState) {
+function finishCandidatePairs(pairs, searchState, bucketStats = null) {
   pairs.searchStats = {
     attempts: searchState.attempts,
     attemptCapHit: searchState.stopped
   };
+  pairs.bucketStats = bucketStats;
   return pairs;
+}
+
+function summarizeCandidateBuckets(buckets) {
+  let maxBucketSize = 0;
+  let oversizedBucketCount = 0;
+  for (const indexes of buckets.values()) {
+    maxBucketSize = Math.max(maxBucketSize, indexes.length);
+    if (indexes.length > MAX_DUPLICATE_BUCKET_SIZE) oversizedBucketCount += 1;
+  }
+  return {
+    bucketCount: buckets.size,
+    maxBucketSize,
+    oversizedBucketCount
+  };
 }
 
 function sortedCandidateBuckets(buckets) {
@@ -4908,12 +5007,14 @@ function renderGroups(options = {}) {
 
   if (!state.rows.length) {
     els.groupList.classList.remove("is-virtualized");
+    groupListRenderCache = null;
     els.groupList.innerHTML = `<div class="empty-row">No records loaded</div>`;
     return;
   }
 
   if (!filtered.length) {
     els.groupList.classList.remove("is-virtualized");
+    groupListRenderCache = null;
     els.groupList.innerHTML = `<div class="empty-row">No matching groups</div>`;
     return;
   }
@@ -4927,8 +5028,14 @@ function renderGroups(options = {}) {
 }
 
 function renderPlainGroupList(groups) {
+  const signature = `plain:${groupRenderStateSignature(groups)}`;
+  if (groupListRenderCache?.signature === signature) {
+    renderGroupSelection();
+    return;
+  }
   els.groupList.classList.remove("is-virtualized");
   els.groupList.innerHTML = groups.map(renderGroupItem).join("");
+  groupListRenderCache = { signature };
 }
 
 function renderVirtualGroupList(groups, { preserveScroll = false } = {}) {
@@ -4939,16 +5046,51 @@ function renderVirtualGroupList(groups, { preserveScroll = false } = {}) {
   const end = Math.min(groups.length, start + visibleCount);
   const offsetTop = start * GROUP_ITEM_ESTIMATED_HEIGHT;
   const totalHeight = groups.length * GROUP_ITEM_ESTIMATED_HEIGHT;
+  const visibleGroups = groups.slice(start, end);
+  const signature = [
+    "virtual",
+    start,
+    end,
+    groups.length,
+    totalHeight,
+    groupRenderStateSignature(visibleGroups)
+  ].join(":");
+
+  if (groupListRenderCache?.signature === signature) {
+    els.groupList.scrollTop = scrollTop;
+    renderGroupSelection();
+    return;
+  }
 
   els.groupList.classList.add("is-virtualized");
   els.groupList.innerHTML = `
     <div class="group-list-spacer" style="height: ${totalHeight}px;">
       <div class="group-list-window" style="transform: translateY(${offsetTop}px);">
-        ${groups.slice(start, end).map(renderGroupItem).join("")}
+        ${visibleGroups.map(renderGroupItem).join("")}
       </div>
     </div>
   `;
   els.groupList.scrollTop = scrollTop;
+  groupListRenderCache = { signature };
+}
+
+function groupRenderStateSignature(groups) {
+  return groups.map((group) => {
+    const labelStatus = groupTrainingLabelStatus(group);
+    const separatedCount = getSeparatedGroupRecords(group).length;
+    const decision = state.decisions.get(group.key) || "";
+    return [
+      group.key,
+      group.score,
+      group.minPairScore,
+      group.matchedFieldPercent,
+      group.records.length,
+      labelStatus.status,
+      labelStatus.labeledCount,
+      separatedCount,
+      decision
+    ].join(",");
+  }).join("|");
 }
 
 function selectedGroupScrollTop(groups, fallbackScrollTop) {
@@ -5062,7 +5204,11 @@ function renderGroupLabelIndicator(labelStatus) {
 function selectGroup(groupKey) {
   if (!groupKey || groupKey === state.selectedGroupKey) return;
   state.selectedGroupKey = groupKey;
-  renderGroups();
+  if (els.groupList.querySelector(`[data-group-key="${cssEscape(groupKey)}"]`)) {
+    renderGroupSelection();
+  } else {
+    renderGroups();
+  }
   renderDetail();
 }
 
@@ -6033,6 +6179,12 @@ function renderDetail() {
   const activeRecords = group ? getActiveGroupRecords(group) : [];
   const separatedRecords = group ? getSeparatedGroupRecords(group) : [];
   const currentDecision = group ? state.decisions.get(group.key) || "" : "";
+  const detailSignature = detailRenderSignature({
+    group,
+    activeRecords,
+    separatedRecords,
+    currentDecision
+  });
   updateNavigationControls();
   els.duplicateButton.disabled = !hasGroup || activeRecords.length < 2;
   els.notDuplicateButton.disabled = !hasGroup;
@@ -6055,6 +6207,9 @@ function renderDetail() {
       : "Duplicate decision not set"
     : "No judgment selected";
   els.decisionStatus.className = `decision-status ${currentDecision}`;
+
+  if (detailRenderCache === detailSignature) return;
+  detailRenderCache = detailSignature;
 
   if (state.isLoadingFile) {
     els.detailTitle.textContent = "Loading Dataset";
@@ -6100,6 +6255,54 @@ function renderDetail() {
         : renderEvaluateWorkspace(group, bestPair, activeRecords, separatedRecords)}
     </div>
   `;
+}
+
+function detailRenderSignature({ group, activeRecords, separatedRecords, currentDecision }) {
+  if (state.isLoadingFile) {
+    return [
+      "loading",
+      state.loadingFileName,
+      state.objectType,
+      state.reviewMode
+    ].join("|");
+  }
+  if (!group) {
+    return [
+      "empty",
+      state.loadError || "",
+      state.rows.length,
+      state.objectType,
+      state.reviewMode
+    ].join("|");
+  }
+
+  const groupKey = group.key;
+  const fieldResolutions = state.fieldResolutions.get(groupKey) || {};
+  const mergeResult = state.mergeResults.get(groupKey) || null;
+  const separatedKeys = [...(state.separatedRecords.get(groupKey) || [])].sort();
+  const trainingContext = state.reviewMode === "evaluate" ? getTrainingPairContext(group) : null;
+  const trainingLabel = trainingContext ? state.trainingLabels.get(trainingContext.pair.key) : null;
+  return JSON.stringify({
+    mode: state.reviewMode,
+    objectType: state.objectType,
+    groupKey,
+    decision: currentDecision,
+    activeRecordKeys: activeRecords.map(recordKey),
+    separatedRecordKeys: separatedRecords.map(recordKey),
+    separatedKeys,
+    fieldResolutions,
+    mergeMaster: mergeMasterSelections.get(groupKey) || "",
+    mergeConfirmation: mergeConfirmations.get(groupKey) || "",
+    mergeInFlight: mergeInFlightGroupKeys.has(groupKey),
+    mergeResultStatus: mergeResult?.status || "",
+    mergeResultMessage: mergeResult?.message || "",
+    trainingPairIndex: state.trainingPairIndexes.get(groupKey) || 0,
+    trainingPairKey: trainingContext?.pair.key || "",
+    trainingPairLabel: trainingLabel?.label || "",
+    trainingPairConfidence: trainingLabel?.confidence || state.trainingConfidence,
+    trainingConfidence: state.trainingConfidence,
+    trainingLabelCount: state.trainingLabels.size
+  });
 }
 
 function setReviewMode(mode) {
@@ -8036,6 +8239,11 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function cssEscape(value) {
+  if (globalThis.CSS?.escape) return globalThis.CSS.escape(String(value ?? ""));
+  return String(value ?? "").replace(/["\\\]\[]/g, "\\$&");
 }
 
 class UnionFind {

@@ -9,6 +9,7 @@ const {
 } = require("../vendor/managed-app/scripts/smoke-test-harness");
 const {
   accountSmokeCsv,
+  contactLastNameChangeSmokeCsv,
   contactMissingIdSmokeCsv,
   contactSmokeCsv,
   largeContactSmokeCsv
@@ -33,13 +34,15 @@ const PERFORMANCE_BUDGETS = {
   emptyImportContactsMs: 15000,
   latestContactsJsonMs: 10000,
   topbarImportContactsMs: 15000,
-  largeContactCsvWorkerMs: 30000
+  largeContactCsvWorkerMs: 30000,
+  largeContactCandidateAttempts: 500000
 };
 
 async function run() {
   await fs.mkdir(outDir, { recursive: true });
   const csvPath = path.join(outDir, "contacts-smoke.csv");
   const missingContactIdCsvPath = path.join(outDir, "contacts-missing-ids.csv");
+  const lastNameChangeCsvPath = path.join(outDir, "contacts-last-name-change.csv");
   const accountCsvPath = path.join(outDir, "accounts-smoke.csv");
   const largeContactCsvPath = path.join(outDir, "contacts-large-smoke.csv");
   const contactCsv = contactSmokeCsv();
@@ -48,6 +51,7 @@ async function run() {
   const largeContactSmokeRowCount = csvDataRowCount(largeContactCsv);
   await fs.writeFile(csvPath, contactCsv);
   await fs.writeFile(missingContactIdCsvPath, contactMissingIdSmokeCsv());
+  await fs.writeFile(lastNameChangeCsvPath, contactLastNameChangeSmokeCsv());
   await fs.writeFile(accountCsvPath, accountSmokeCsv());
   await fs.writeFile(largeContactCsvPath, largeContactCsv);
 
@@ -57,6 +61,7 @@ async function run() {
   try {
     const fileModeRedirect = await assertFileModeRedirect(browser);
     const emptyImportButtonState = await assertEmptyImportButtonOpensFileChooser(browser, csvPath);
+    const lastNameChangeCandidateState = await assertLastNameChangeCandidateMatch(browser, lastNameChangeCsvPath);
     const largeContactPerformance = await assertLargeContactCsvPerformance(browser, largeContactCsvPath);
 
     const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
@@ -175,10 +180,7 @@ async function run() {
       fieldResolutionSelectable = optionCount > 0;
     }
 
-    const trainingMatchButton = page.locator('[data-label-action="match"]').first();
-    if (await trainingMatchButton.isVisible()) {
-      await trainingMatchButton.click();
-    }
+    const trainingLabelRerenderState = await exerciseTrainingLabelRerender(page);
     await page.locator(".group-item.is-label-full .label-status-indicator.full").first().waitFor({ state: "visible", timeout: 5000 });
     const fullLabelIndicators = await page.locator(".group-item.is-label-full .label-status-indicator.full").count();
     const trainingExportEnabled = await page.locator("#trainingExportButton").isEnabled();
@@ -282,6 +284,16 @@ async function run() {
     assertPerformanceBudget("empty-state Contact import", emptyImportButtonState.elapsedMs, PERFORMANCE_BUDGETS.emptyImportContactsMs);
     if (largeContactPerformance.rowCount !== largeContactSmokeRowCount || !largeContactPerformance.groupCount || largeContactPerformance.processingMode !== "worker") {
       throw new Error(`Expected large Contact CSV fixture to load through worker-backed matching: ${JSON.stringify(largeContactPerformance)}`);
+    }
+    if (!largeContactPerformance.matchingStats || largeContactPerformance.matchingStats.candidateAttempts > PERFORMANCE_BUDGETS.largeContactCandidateAttempts) {
+      throw new Error(`Large Contact CSV candidate attempts exceeded budget: ${JSON.stringify(largeContactPerformance.matchingStats)}`);
+    }
+    if (
+      lastNameChangeCandidateState.groupCount !== 1 ||
+      lastNameChangeCandidateState.firstGroupScore < 86 ||
+      !lastNameChangeCandidateState.matchingStats?.candidatePairs
+    ) {
+      throw new Error(`Expected last-name-change Contact pair to survive candidate pruning: ${JSON.stringify(lastNameChangeCandidateState)}`);
     }
     assertPerformanceBudget("large Contact CSV worker import", largeContactPerformance.elapsedMs, PERFORMANCE_BUDGETS.largeContactCsvWorkerMs);
     if (!lightTheme.colorScheme.includes("light") || !darkTheme.colorScheme.includes("dark") || lightTheme.bodyBg === darkTheme.bodyBg) {
@@ -430,6 +442,14 @@ async function run() {
     }
     if (!separatedBadgeVisible) throw new Error("Expected Separate action to show a separated-record badge.");
     if (!fieldResolutionSelectable) throw new Error("Expected visible field-resolution selects to contain options.");
+    if (
+      !trainingLabelRerenderState.matchActiveAfterMatch ||
+      !trainingLabelRerenderState.notMatchActiveAfterRelabel ||
+      trainingLabelRerenderState.matchActiveAfterRelabel ||
+      trainingLabelRerenderState.notMatchPressedAfterRelabel !== "true"
+    ) {
+      throw new Error(`Expected training label buttons to rerender after relabeling the same pair: ${JSON.stringify(trainingLabelRerenderState)}`);
+    }
     if (!trainingExportEnabled) throw new Error("Expected training label action to enable label export.");
     if (!fullLabelIndicators) throw new Error("Expected fully labeled groups to show a green label indicator.");
     if (labelStatusFilterState.countBeforeApply !== labelStatusFilterState.startingCount || !labelStatusFilterState.applyEnabledAfterChange) {
@@ -562,6 +582,7 @@ async function run() {
       loadingStatusSamples,
       latestJsonLoad,
       latestJsonLoadElapsedMs,
+      lastNameChangeCandidateState,
       largeContactPerformance,
       performanceBudgets: PERFORMANCE_BUDGETS,
       leftPaneSmallListLayout,
@@ -642,6 +663,36 @@ async function assertEmptyImportButtonOpensFileChooser(browser, filePath) {
       fileChooserOpened: true,
       elapsedMs: Date.now() - startedAt,
       ...(await datasetLoadState(page))
+    };
+  } finally {
+    await page.close();
+  }
+}
+
+async function assertLastNameChangeCandidateMatch(browser, filePath) {
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const diagnostics = [];
+  page.on("console", (message) => {
+    if (["error", "warning"].includes(message.type())) {
+      diagnostics.push(`${message.type()}: ${message.text()}`);
+    }
+  });
+  page.on("pageerror", (error) => diagnostics.push(`pageerror: ${error.message}`));
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('[data-empty-action="choose-csv"]').waitFor({ state: "visible", timeout: 5000 });
+    const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
+    await page.locator('[data-empty-action="choose-csv"]').click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles(filePath);
+    await waitForLoadingModalHidden(page, "Last-name-change Contact candidate load", diagnostics);
+    await waitForFirstGroup(page, "Last-name-change Contact candidate load");
+    return {
+      ...(await datasetLoadState(page)),
+      ...(await page.evaluate(() => ({
+        firstGroupScore: state.groups[0]?.score || 0,
+        firstGroupReasons: state.groups[0]?.reasons || []
+      })))
     };
   } finally {
     await page.close();
@@ -740,8 +791,47 @@ async function datasetLoadState(page) {
     rowCount: state.rows.length,
     groupCount: state.groups.length,
     workerAvailable: typeof Worker !== "undefined",
-    processingMode: state.lastProcessingMode
+    processingMode: state.lastProcessingMode,
+    matchingStats: state.lastMatchingStats
   }));
+}
+
+async function exerciseTrainingLabelRerender(page) {
+  const matchButton = page.locator('[data-label-action="match"]').first();
+  const notMatchButton = page.locator('[data-label-action="not_match"]').first();
+  if (!(await matchButton.isVisible())) {
+    return {
+      available: false,
+      matchActiveAfterMatch: false,
+      matchActiveAfterRelabel: false,
+      notMatchActiveAfterRelabel: false,
+      notMatchPressedAfterRelabel: ""
+    };
+  }
+
+  await matchButton.click();
+  await page.waitForFunction(() => {
+    const button = document.querySelector('[data-label-action="match"]');
+    return button?.classList.contains("is-active") && button?.getAttribute("aria-pressed") === "true";
+  }, null, { timeout: 5000 });
+  const matchActiveAfterMatch = await matchButton.evaluate((button) => button.classList.contains("is-active"));
+
+  await notMatchButton.click();
+  await page.waitForFunction(() => {
+    const match = document.querySelector('[data-label-action="match"]');
+    const notMatch = document.querySelector('[data-label-action="not_match"]');
+    return !match?.classList.contains("is-active") &&
+      notMatch?.classList.contains("is-active") &&
+      notMatch?.getAttribute("aria-pressed") === "true";
+  }, null, { timeout: 5000 });
+
+  return {
+    available: true,
+    matchActiveAfterMatch,
+    matchActiveAfterRelabel: await matchButton.evaluate((button) => button.classList.contains("is-active")),
+    notMatchActiveAfterRelabel: await notMatchButton.evaluate((button) => button.classList.contains("is-active")),
+    notMatchPressedAfterRelabel: await notMatchButton.getAttribute("aria-pressed")
+  };
 }
 
 async function reportSummaryState(page) {

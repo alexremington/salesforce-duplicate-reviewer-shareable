@@ -37,15 +37,6 @@ function Test-PowerShellSyntax {
   }
 }
 
-function Invoke-NodeCheck {
-  param([string]$Path)
-
-  & node --check $Path
-  if ($LASTEXITCODE -ne 0) {
-    throw "JavaScript syntax check failed for $Path"
-  }
-}
-
 function Get-FreePort {
   $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Parse('127.0.0.1'), 0)
   $listener.Start()
@@ -72,7 +63,10 @@ function Wait-ForHealth {
 }
 
 Write-Host 'Checking JavaScript syntax...'
-Get-CheckedFiles '*.js' | ForEach-Object { Invoke-NodeCheck $_.FullName }
+& node ../automation-shared-resources/scripts/check-js-syntax.js . --exclude Output --exclude incoming --exclude logs --exclude node_modules
+if ($LASTEXITCODE -ne 0) {
+  throw 'JavaScript syntax checks failed.'
+}
 
 Write-Host 'Checking PowerShell syntax...'
 Get-CheckedFiles '*.ps1' | ForEach-Object { Test-PowerShellSyntax $_.FullName }

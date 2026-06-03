@@ -7,13 +7,11 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${PROJECT_DIR}"
 
 echo "Checking JavaScript syntax..."
-find . \
-  -path './.git' -prune -o \
-  -path './Output' -prune -o \
-  -path './incoming' -prune -o \
-  -path './logs' -prune -o \
-  -path './node_modules' -prune -o \
-  -type f -name '*.js' -exec node --check {} \;
+node ../automation-shared-resources/scripts/check-js-syntax.js . \
+  --exclude Output \
+  --exclude incoming \
+  --exclude logs \
+  --exclude node_modules
 
 echo "Checking shell syntax..."
 find . \
