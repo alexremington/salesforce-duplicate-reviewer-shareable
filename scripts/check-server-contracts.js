@@ -64,6 +64,7 @@ async function main() {
     assertEqual(health.jsonDatasets, true, "health jsonDatasets");
 
     await assertStaticApp(baseUrl);
+    await assertLatestEndpointCaching(baseUrl);
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/premerge-check");
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/merge");
     await assertSalesforcePreMergeWithWarningCli(baseUrl);
@@ -75,6 +76,21 @@ async function main() {
   }
 
   console.log("Server contract checks passed.");
+}
+
+async function assertLatestEndpointCaching(baseUrl) {
+  const first = await requestText(`${baseUrl}/api/staging-contacts/latest.json`);
+  const etag = first.headers.etag;
+  if (first.statusCode !== 200 || !etag || !first.body.includes("salesforce-duplicate-reviewer.dataset")) {
+    throw new Error(`Latest JSON cache contract failed: HTTP ${first.statusCode}: ${first.body}`);
+  }
+
+  const second = await requestText(`${baseUrl}/api/staging-contacts/latest.json`, {
+    headers: { "If-None-Match": etag }
+  });
+  if (second.statusCode !== 304) {
+    throw new Error(`Latest JSON cache revalidation failed: HTTP ${second.statusCode}: ${second.body}`);
+  }
 }
 
 async function writeSmokeDataset(csvPath, firstId, secondId) {
@@ -394,10 +410,13 @@ function requestText(url, options = {}) {
     const request = http.request(url, {
       method: options.method || "GET",
       timeout: 1500,
-      headers: body ? {
+      headers: {
+        ...(options.headers || {}),
+        ...(body ? {
         "Content-Type": "application/json",
         "Content-Length": Buffer.byteLength(body)
-      } : undefined
+        } : {})
+      }
     }, (response) => {
       let responseBody = "";
       response.setEncoding("utf8");
@@ -405,7 +424,7 @@ function requestText(url, options = {}) {
         responseBody += chunk;
       });
       response.on("end", () => {
-        resolve({ statusCode: response.statusCode || 0, body: responseBody });
+        resolve({ statusCode: response.statusCode || 0, headers: response.headers, body: responseBody });
       });
     });
     request.on("timeout", () => request.destroy(new Error("request timed out")));
