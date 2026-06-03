@@ -126,44 +126,6 @@
             </div>
           </section>
 
-          <section class="panel group-panel collapsible-panel" data-collapsible-panel data-default-expanded="true">
-            <div class="panel-title">
-              <button
-                class="panel-toggle"
-                type="button"
-                aria-expanded="true"
-                aria-controls="matchGroupsPanelBody"
-                data-collapse-toggle
-              >
-                <span class="collapse-icon" aria-hidden="true"></span>
-                <span>Match Groups</span>
-              </button>
-              <div class="group-title-actions">
-                <span id="groupCount">0</span>
-                <button
-                  class="icon-button sort-toggle"
-                  type="button"
-                  id="groupSortToggle"
-                  aria-label="Sorted descending. Click to sort ascending."
-                  title="Sorted descending. Click to sort ascending."
-                >
-                  <svg class="sort-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path class="sort-direction-arrow" d="M7 4v14m0 0 4-4m-4 4-4-4" />
-                    <path d="M13 6h8M13 12h6M13 18h3" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-            <div class="panel-body group-panel-body" id="matchGroupsPanelBody">
-              <div class="group-filter-toolbar" id="groupFilterToolbar">
-                <div class="label-status-filter-host" id="labelStatusFilter"></div>
-              </div>
-              <div class="group-list" id="groupList"></div>
-            </div>
-          </section>
-        </aside>
-
-        <div class="workspace-column">
           <section class="panel match-controls-panel collapsible-panel" data-collapsible-panel data-default-expanded="true">
             <div class="panel-title">
               <button
@@ -220,7 +182,7 @@
                   <div class="check-row">
                     <label title="Uses narrower candidate buckets for speed. Leave unchecked to find more possible duplicates.">
                       <input id="highRecallMode" type="checkbox" />
-                      Fastest search (may miss some results)
+                      Fastest search <span class="muted-inline">(may miss some results)</span>
                     </label>
                   </div>
                 </div>
@@ -234,6 +196,44 @@
             </div>
           </section>
 
+          <section class="panel group-panel collapsible-panel" data-collapsible-panel data-default-expanded="true">
+            <div class="panel-title">
+              <button
+                class="panel-toggle"
+                type="button"
+                aria-expanded="true"
+                aria-controls="matchGroupsPanelBody"
+                data-collapse-toggle
+              >
+                <span class="collapse-icon" aria-hidden="true"></span>
+                <span>Match Groups</span>
+              </button>
+              <div class="group-title-actions">
+                <span id="groupCount">0</span>
+                <button
+                  class="icon-button sort-toggle"
+                  type="button"
+                  id="groupSortToggle"
+                  aria-label="Sorted descending. Click to sort ascending."
+                  title="Sorted descending. Click to sort ascending."
+                >
+                  <svg class="sort-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path class="sort-direction-arrow" d="M7 4v14m0 0 4-4m-4 4-4-4" />
+                    <path d="M13 6h8M13 12h6M13 18h3" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div class="panel-body group-panel-body" id="matchGroupsPanelBody">
+              <div class="group-filter-toolbar" id="groupFilterToolbar">
+                <div class="label-status-filter-host" id="labelStatusFilter"></div>
+              </div>
+              <div class="group-list" id="groupList"></div>
+            </div>
+          </section>
+        </aside>
+
+        <div class="workspace-column">
           <section class="review-pane" aria-label="Duplicate review workspace">
           <div class="report-summary" id="metrics" aria-label="Dataset summary">
             <div class="report-stat" data-summary-metric="records">

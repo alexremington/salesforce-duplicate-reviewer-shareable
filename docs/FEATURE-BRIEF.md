@@ -24,16 +24,18 @@ Use this before UI-heavy or workflow-changing work. Keep it short enough to fit 
 
 ## UI Expectations
 
+- Hume design target:
 - Required visible state:
 - Required controls:
 - Empty, loading, success, and error states:
+- Whitespace, no-overlap, and scroll criteria:
+- Keyboard, focus, and contrast criteria:
 - Desktop success criteria:
 - Mobile success criteria:
 
 ## Verification
 
 - Local checks:
-- Playwright coverage:
+- Playwright coverage, including Hume design alignment:
 - Manual checks:
 - Docs to update:
-

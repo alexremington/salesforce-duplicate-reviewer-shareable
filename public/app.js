@@ -4856,9 +4856,12 @@ function renderMapping() {
 }
 
 function renderMetrics() {
+  const reviewedCount = state.decisions.size;
+  const reviewedPercent = state.groups.length ? Math.round((reviewedCount / state.groups.length) * 100) : 0;
   const metrics = [
     ["records", "Total Records", state.rows.length],
-    ["groups", "Match Groups", state.groups.length]
+    ["groups", "Match Groups", state.groups.length],
+    ["reviewed", "Reviewed", `${reviewedPercent}%`]
   ];
 
   els.metrics.innerHTML = metrics
@@ -4866,7 +4869,7 @@ function renderMetrics() {
       ([key, label, value]) => `
         <div class="report-stat" data-summary-metric="${escapeHtml(key)}">
           <span class="report-stat-label">${escapeHtml(label)}</span>
-          <strong class="report-stat-value">${formatNumber(value)}</strong>
+          <strong class="report-stat-value">${typeof value === "number" ? formatNumber(value) : escapeHtml(value)}</strong>
         </div>
       `
     )

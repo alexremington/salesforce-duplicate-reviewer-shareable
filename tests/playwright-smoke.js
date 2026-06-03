@@ -101,6 +101,7 @@ async function run() {
     const latestJsonLoad = await datasetLoadState(page);
     const latestReportSummary = await reportSummaryState(page);
     const leftPaneSmallListLayout = await assertLeftPaneSmallListLayout(page);
+    const humeRegionLayout = await assertHumeRegionLayout(page);
     const loadedInteractiveReachability = await visibleInteractiveReachability(page);
     await page.locator("#chooseCsvButton").click();
     await page.getByRole("menuitem", { name: "Contacts" }).waitFor({ state: "visible", timeout: 5000 });
@@ -296,12 +297,12 @@ async function run() {
       throw new Error(`Expected support contact at the right side of the header: ${JSON.stringify(brandLogo)}`);
     }
     if (
-      brandLogo.titleFontSize !== "25px" ||
-      !brandLogo.titleFontFamily.includes("Iowan Old Style") ||
+      brandLogo.titleFontSize !== "28px" ||
+      brandLogo.titleFontFamily.includes("Iowan Old Style") ||
       !zeroLetterSpacing(brandLogo.titleLetterSpacing) ||
       brandLogo.subtitleText !== "Salesforce Account and Contact Matching" ||
-      brandLogo.subtitleFontSize !== "12px" ||
-      brandLogo.subtitleFontWeight !== "800" ||
+      brandLogo.subtitleFontSize !== "14px" ||
+      fontWeightNumber(brandLogo.subtitleFontWeight) < 600 ||
       !zeroLetterSpacing(brandLogo.subtitleLetterSpacing)
     ) {
       throw new Error(`Expected Duplicate Reviewer to use shared managed header typography: ${JSON.stringify(brandLogo)}`);
@@ -352,17 +353,20 @@ async function run() {
       throw new Error(`Expected latest JSON dataset to load through Recent files: ${JSON.stringify(latestJsonLoad)}`);
     }
     assertPerformanceBudget("Latest Contacts JSON load", latestJsonLoadElapsedMs, PERFORMANCE_BUDGETS.latestContactsJsonMs);
-    if (latestReportSummary.labels.join("|") !== "Total Records|Match Groups" || latestReportSummary.values.records !== "2" || latestReportSummary.values.groups !== "1" || /Exact|Near/.test(latestReportSummary.text)) {
-      throw new Error(`Expected compact report summary with records and groups only: ${JSON.stringify(latestReportSummary)}`);
+    if (latestReportSummary.labels.join("|") !== "Total Records|Match Groups|Reviewed" || latestReportSummary.values.records !== "2" || latestReportSummary.values.groups !== "1" || latestReportSummary.values.reviewed !== "0%" || /Exact|Near/.test(latestReportSummary.text)) {
+      throw new Error(`Expected compact Hume report summary with records, groups, and reviewed progress: ${JSON.stringify(latestReportSummary)}`);
     }
-    if (!latestReportSummary.typography.sizesAligned || fontWeightNumber(latestReportSummary.typography.titleWeight) >= 600 || fontWeightNumber(latestReportSummary.typography.valueWeight) >= 600) {
-      throw new Error(`Expected summary values and group title to match the match-score size without bold weight: ${JSON.stringify(latestReportSummary.typography)}`);
+    if (latestReportSummary.typography.valueSize < 22 || latestReportSummary.typography.titleSize < 20 || fontWeightNumber(latestReportSummary.typography.titleWeight) < 700 || fontWeightNumber(latestReportSummary.typography.valueWeight) < 700) {
+      throw new Error(`Expected Hume summary and group title hierarchy to be readable and strong: ${JSON.stringify(latestReportSummary.typography)}`);
     }
     if (latestReportSummary.surface.summaryBackground === latestReportSummary.surface.canvasBackground || latestReportSummary.surface.reviewHeaderBackground === latestReportSummary.surface.canvasBackground) {
       throw new Error(`Expected summary and group title to sit on a distinct readable surface: ${JSON.stringify(latestReportSummary.surface)}`);
     }
     if (!leftPaneSmallListLayout.ok) {
       throw new Error(`Expected compact left-pane layout without small-list scroll trap: ${JSON.stringify(leftPaneSmallListLayout)}`);
+    }
+    if (!humeRegionLayout.ok) {
+      throw new Error(`Expected Hume layout regions to avoid overlap and preserve a clear gutter: ${JSON.stringify(humeRegionLayout)}`);
     }
     if (!latestRecentFiles.contacts || !latestRecentFiles.accounts) {
       throw new Error(`Expected latest Contact and Account exports in Recent files: ${JSON.stringify(latestRecentFiles)}`);
@@ -405,8 +409,8 @@ async function run() {
     if (customFilterState.singleFilterIndexCount !== 0 || customFilterState.multipleFilterIndexCount < 2) {
       throw new Error(`Expected filter row numbers only when there is more than one filter: ${JSON.stringify(customFilterState)}`);
     }
-    if (!customFilterState.singleFilterLayout.sameLine || !customFilterState.singleFilterLayout.withinPanel) {
-      throw new Error(`Expected field, operator, and value to stay on one desktop line inside the Match Controls card: ${JSON.stringify(customFilterState.singleFilterLayout)}`);
+    if (!customFilterState.singleFilterLayout.stacked || !customFilterState.singleFilterLayout.withinPanel || customFilterState.singleFilterLayout.horizontalOverflow) {
+      throw new Error(`Expected left-rail filter controls to stack cleanly inside the Match Controls card: ${JSON.stringify(customFilterState.singleFilterLayout)}`);
     }
     if (customFilterState.filteredCount !== 2 || customFilterState.logicValue !== "1 OR 2") {
       throw new Error(`Expected custom boolean filters to narrow the group list: ${JSON.stringify(customFilterState)}`);
@@ -561,6 +565,7 @@ async function run() {
       largeContactPerformance,
       performanceBudgets: PERFORMANCE_BUDGETS,
       leftPaneSmallListLayout,
+      humeRegionLayout,
       topbarImportState,
       fastestSearchDefaultUnchecked,
       thresholdFilteredScores,
@@ -1541,11 +1546,14 @@ async function filterRowLayoutState(page, index) {
       row.querySelector(".filter-value-control")
     ].filter(Boolean);
     const tops = controls.map((control) => Math.round(control.getBoundingClientRect().top));
+    const uniqueTops = [...new Set(tops)];
     return {
       controlCount: controls.length,
       tops,
       sameLine: tops.length >= 3 && Math.max(...tops) - Math.min(...tops) <= 2,
+      stacked: tops.length >= 3 && uniqueTops.length >= 3,
       withinPanel: Boolean(panelRect && rowRect.left >= panelRect.left - 1 && rowRect.right <= panelRect.right + 1),
+      horizontalOverflow: Boolean(panelRect && rowRect.right > panelRect.right + 1),
       rowRight: Math.round(rowRect.right),
       panelRight: Math.round(panelRect?.right || 0)
     };
@@ -1773,6 +1781,53 @@ async function assertLeftPaneSmallListLayout(page) {
   });
 }
 
+async function assertHumeRegionLayout(page) {
+  return page.evaluate(() => {
+    const rectFor = (selector) => {
+      const element = document.querySelector(selector);
+      const rect = element?.getBoundingClientRect();
+      return rect
+        ? { selector, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height }
+        : null;
+    };
+    const overlaps = (a, b) => Boolean(
+      a && b &&
+      a.left < b.right &&
+      a.right > b.left &&
+      a.top < b.bottom &&
+      a.bottom > b.top
+    );
+    const controlPane = rectFor(".control-pane");
+    const workspace = rectFor(".workspace-column");
+    const matchControls = rectFor(".match-controls-panel");
+    const reviewHeader = rectFor(".review-header");
+    const detailSurface = rectFor("#detailSurface");
+    const reportSummary = rectFor("#metrics");
+    const desktop = document.documentElement.clientWidth >= 981;
+    const majorOverlaps = [
+      ["controlPane", controlPane, "workspace", workspace],
+      ["matchControls", matchControls, "reviewHeader", reviewHeader],
+      ["matchControls", matchControls, "detailSurface", detailSurface],
+      ["reportSummary", reportSummary, "detailSurface", detailSurface]
+    ].filter(([, a,, b]) => overlaps(a, b)).map(([aName, a,, bName]) => ({ aName, bName, a, b }));
+    const gutter = desktop && controlPane && workspace ? Math.round(workspace.left - controlPane.right) : null;
+    const matchControlsInRail = Boolean(matchControls && controlPane && matchControls.left >= controlPane.left - 1 && matchControls.right <= controlPane.right + 1);
+    return {
+      ok: majorOverlaps.length === 0 && (!desktop || gutter >= 28) && matchControlsInRail,
+      desktop,
+      gutter,
+      matchControlsInRail,
+      majorOverlaps,
+      controlPane,
+      workspace,
+      matchControls,
+      reviewHeader,
+      detailSurface,
+      reportSummary
+    };
+  });
+}
+
 async function assertRightPaneSingleScrollModel(page) {
   const setup = await page.evaluate(() => {
     const workspace = document.querySelector(".workspace-column");
@@ -1783,6 +1838,7 @@ async function assertRightPaneSingleScrollModel(page) {
       return { ready: false };
     }
 
+    window.scrollTo(0, 0);
     workspace.scrollTop = 0;
     reviewPane.scrollTop = 0;
     const detailRect = detailSurface.getBoundingClientRect();
@@ -1794,6 +1850,7 @@ async function assertRightPaneSingleScrollModel(page) {
       workspaceBefore: workspace.scrollTop,
       reviewBefore: reviewPane.scrollTop,
       matchTopBefore: Math.round(matchRect.top),
+      windowBefore: window.scrollY,
       reviewOverflowY: getComputedStyle(reviewPane).overflowY,
       workspaceOverflowY: getComputedStyle(workspace).overflowY,
       workspaceScrollHeight: workspace.scrollHeight,
@@ -1817,8 +1874,9 @@ async function assertRightPaneSingleScrollModel(page) {
     const workspaceAfterWheel = workspace.scrollTop;
     const reviewAfterWheel = reviewPane.scrollTop;
     const matchTopAfterWheel = Math.round(matchControls.getBoundingClientRect().top);
+    const windowAfterWheel = window.scrollY;
 
-    workspace.scrollTop = workspace.scrollHeight - workspace.clientHeight;
+    mergeSubmit?.scrollIntoView({ block: "center", inline: "nearest" });
     const mergeRect = mergeSubmit?.getBoundingClientRect();
     const mergeSubmitReachable = Boolean(
       mergeRect &&
@@ -1834,15 +1892,16 @@ async function assertRightPaneSingleScrollModel(page) {
 
     return {
       ok:
-        workspaceAfterWheel > before.workspaceBefore &&
+        (workspaceAfterWheel > before.workspaceBefore || windowAfterWheel > before.windowBefore) &&
         reviewAfterWheel <= before.reviewBefore + 1 &&
-        matchTopAfterWheel < before.matchTopBefore &&
+        matchTopAfterWheel <= before.matchTopBefore &&
         !reviewOwnsVerticalScroll &&
         mergeSubmitReachable,
       ...before,
       workspaceAfterWheel,
       reviewAfterWheel,
       matchTopAfterWheel,
+      windowAfterWheel,
       reviewOwnsVerticalScroll,
       mergeSubmitReachable,
       workspaceAtBottom: workspace.scrollTop,

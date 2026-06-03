@@ -54,7 +54,7 @@ body {
 
 .app {
   min-height: 100vh;
-  height: 100vh;
+  height: auto;
   display: flex;
   flex-direction: column;
   background: var(--bg);
@@ -291,54 +291,54 @@ p {
 .main-grid {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(320px, 410px) minmax(0, 1fr);
-  min-height: 0;
+  grid-template-columns: 320px minmax(0, 1fr);
+  align-items: start;
+  gap: 32px;
+  min-height: auto;
+  padding: 24px 28px 32px;
   background: var(--bg);
   overflow: visible;
 }
 
 .workspace-column {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  gap: 22px;
   min-width: 0;
-  min-height: 0;
+  min-height: auto;
   background: var(--bg);
-  overflow: auto;
-  scrollbar-gutter: stable;
+  overflow: visible;
 }
 
 .control-pane {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 18px;
-  border-right: 1px solid var(--line);
+  display: grid;
+  align-content: start;
+  gap: 22px;
+  padding: 0;
+  border-right: 0;
   background: var(--bg);
-  min-height: 0;
-  overflow: auto;
-  scrollbar-gutter: stable;
+  min-height: auto;
+  overflow: visible;
 }
 
 .panel {
   background: var(--surface-panel);
   border: 1px solid var(--line);
-  border-radius: 22px;
-  padding: 14px;
+  border-radius: 12px;
+  padding: 18px;
   box-shadow: var(--shadow-soft);
 }
 
 .match-controls-panel {
-  flex: 0 0 auto;
-  margin: 18px 22px 0;
-  padding: 14px 16px;
-  border-radius: 18px;
+  margin: 0;
+  padding: 18px;
+  border-radius: 12px;
 }
 
 .match-controls-grid {
   display: grid;
-  grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
-  gap: 18px;
+  gap: 16px;
 }
 
 .match-controls-left,
@@ -363,13 +363,13 @@ p {
 }
 
 .match-controls-panel .filter-row-controls {
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.85fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
 }
 
 .match-controls-panel .filter-row-controls .filter-value-control,
 .match-controls-panel .filter-value-placeholder {
-  grid-column: auto;
+  grid-column: 1 / -1;
 }
 
 .filter-row-controls select,
@@ -788,6 +788,11 @@ select:focus {
   gap: 7px;
 }
 
+.muted-inline {
+  color: var(--muted);
+  font-weight: 650;
+}
+
 .check-row input[type="checkbox"] {
   flex: 0 0 auto;
   width: 16px;
@@ -1077,7 +1082,7 @@ select:focus {
   gap: 9px;
   align-items: start;
   border: 1px solid var(--group-label-border);
-  border-radius: 18px;
+  border-radius: 12px;
   background: var(--surface-panel);
   padding: 11px;
   box-shadow: inset 0 0 0 2px var(--group-label-outline), 0 6px 18px rgba(16, 32, 51, 0.05);
@@ -1229,66 +1234,73 @@ select:focus {
 .review-pane {
   flex: 0 0 auto;
   min-width: 0;
-  min-height: 0;
-  padding: 16px 22px 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  min-height: auto;
+  padding: 0;
+  display: grid;
+  gap: 22px;
   background: var(--bg);
   overflow: visible;
 }
 
 .report-summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 20px 32px;
-  padding: 10px 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  padding: 0;
   background: var(--surface-panel);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 12px;
   box-shadow: 0 1px 0 var(--inset-highlight) inset;
+  overflow: hidden;
 }
 
 .report-stat {
-  min-width: 112px;
+  min-width: 0;
   display: grid;
   gap: 3px;
+  padding: 14px 16px;
+  border-right: 1px solid var(--line);
+}
+
+.report-stat:last-child {
+  border-right: 0;
 }
 
 .report-stat-label {
   color: var(--muted);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 750;
 }
 
 .report-stat-value {
   color: var(--ink);
-  font-size: 18px;
-  font-weight: 400;
+  font-size: 24px;
+  font-weight: 850;
   line-height: 1;
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
 
 .review-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 16px;
+  gap: 24px;
   background: var(--surface-panel);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 12px 14px;
+  border-left: 6px solid var(--accent);
+  border-radius: 12px;
+  padding: 18px 20px;
   box-shadow: 0 1px 0 var(--inset-highlight) inset;
   min-width: 0;
 }
 
 .review-header h2 {
-  font-size: 18px;
-  font-weight: 400;
+  font-size: 22px;
+  font-weight: 850;
   line-height: 1.2;
-  margin-top: 3px;
+  margin-top: 5px;
   letter-spacing: 0;
   overflow-wrap: anywhere;
 }
@@ -1360,7 +1372,7 @@ select:focus {
   min-height: 480px;
   background: var(--surface-panel);
   border: 1px solid var(--line);
-  border-radius: 26px;
+  border-radius: 12px;
   box-shadow: var(--shadow);
   overflow: hidden;
 }
@@ -1814,14 +1826,14 @@ select:focus {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 16px;
+  padding: 18px 20px;
   border-bottom: 1px solid var(--line-subtle);
-  background: var(--surface-muted);
+  background: var(--surface-panel);
   min-width: 0;
 }
 
 .pair-summary strong {
-  font-size: 18px;
+  font-size: 22px;
 }
 
 .match-meta {
@@ -1854,7 +1866,7 @@ select:focus {
 .training-labeler {
   display: grid;
   gap: 12px;
-  padding: 16px;
+  padding: 18px 20px;
   border-bottom: 1px solid var(--line-subtle);
   background: var(--surface-muted);
 }
@@ -1907,7 +1919,7 @@ select:focus {
 .training-pair-card {
   min-width: 0;
   border: 1px solid var(--line-subtle);
-  border-radius: 18px;
+  border-radius: 10px;
   background: var(--surface-panel);
   overflow: hidden;
 }
@@ -2000,9 +2012,14 @@ select:focus {
 
 .salesforce-merge-panel {
   display: grid;
-  gap: 12px;
-  padding: 16px;
+  gap: 16px;
+  padding: 18px 20px;
   border-bottom: 1px solid var(--line-subtle);
+  background: var(--amber-soft);
+}
+
+.salesforce-merge-panel.ready,
+.salesforce-merge-panel.success {
   background: var(--selected-surface);
 }
 
@@ -2089,8 +2106,8 @@ select:focus {
   display: grid;
   gap: 3px;
   border: 1px solid var(--line-subtle);
-  border-radius: 16px;
-  padding: 10px 12px;
+  border-radius: 10px;
+  padding: 12px;
   background: var(--surface-muted);
   min-width: 0;
 }
@@ -2192,10 +2209,10 @@ select:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  border: 1px solid var(--amber);
-  border-radius: 16px;
-  padding: 10px 12px;
+  gap: 16px;
+  border: 2px solid var(--amber);
+  border-radius: 10px;
+  padding: 14px;
   background: var(--amber-soft);
 }
 
@@ -2252,7 +2269,7 @@ select:focus {
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   border: 1px solid var(--line-subtle);
-  border-radius: 18px;
+  border-radius: 10px;
   background: var(--surface-panel);
 }
 
@@ -2408,13 +2425,13 @@ select:focus {
   }
 
   .review-header {
+    grid-template-columns: 1fr;
     align-items: stretch;
-    flex-direction: column;
     gap: 12px;
   }
 
   .match-controls-panel {
-    margin: 12px 16px 0;
+    margin: 0;
   }
 
   .match-controls-grid {
@@ -2448,6 +2465,8 @@ select:focus {
 
   .main-grid {
     grid-template-columns: 1fr;
+    gap: 22px;
+    padding: 20px;
     overflow: visible;
   }
 
@@ -2458,12 +2477,12 @@ select:focus {
   .control-pane {
     max-height: none;
     border-right: 0;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 0;
     overflow: visible;
   }
 
   .group-panel {
-    max-height: 420px;
+    max-height: none;
   }
 
   .review-pane {
@@ -2485,9 +2504,12 @@ select:focus {
   }
 
   .review-pane,
-  .control-pane,
+  .control-pane {
+    padding: 0;
+  }
+
   .match-controls-panel {
-    padding: 12px;
+    padding: 14px;
   }
 
   .topbar-actions,
@@ -2598,7 +2620,7 @@ select:focus {
   }
 
   .group-panel {
-    max-height: 70vh;
+    max-height: none;
   }
 
   .filter-row {
@@ -2617,7 +2639,7 @@ select:focus {
   }
 
   .group-item {
-    grid-template-columns: 26px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     padding: 9px;
   }
 
@@ -2652,7 +2674,7 @@ select:focus {
 
   .review-header h2,
   .report-stat-value {
-    font-size: 16px;
+    font-size: 18px;
   }
 
   .detail-surface,
@@ -2713,9 +2735,12 @@ select:focus {
   }
 
   .review-pane,
-  .control-pane,
+  .control-pane {
+    padding: 0;
+  }
+
   .match-controls-panel {
-    padding: 10px;
+    padding: 12px;
   }
 
   .review-header h2 {
@@ -2728,8 +2753,16 @@ select:focus {
   }
 
   .report-summary {
-    gap: 14px 24px;
-    padding: 10px;
+    grid-template-columns: 1fr;
+  }
+
+  .report-stat {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .report-stat:last-child {
+    border-bottom: 0;
   }
 
   .report-stat-value {
