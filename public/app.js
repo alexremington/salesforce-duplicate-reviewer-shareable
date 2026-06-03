@@ -6379,7 +6379,8 @@ function getMergeState(group, activeRecords, currentDecision) {
     mergeRecords,
     alreadyMerged
   });
-  const canRefreshMissingContactIds = invalidRecords.length > 0 && canRefreshLoadedDatasetFromSource();
+  const missingContactIdRefreshSource = resolveContactsRefreshSource({ allowLatestContactsFallback: true });
+  const canRefreshMissingContactIds = invalidRecords.length > 0 && Boolean(missingContactIdRefreshSource);
 
   return {
     acceptedValues,
@@ -6389,6 +6390,7 @@ function getMergeState(group, activeRecords, currentDecision) {
     mergeRecords,
     invalidRecords,
     canRefreshMissingContactIds,
+    missingContactIdRefreshUsesFallback: Boolean(missingContactIdRefreshSource?.isLatestContactsFallback),
     inFlight,
     locked: inFlight || alreadyMerged,
     canSubmit: !blockedReason && !inFlight,
@@ -6429,7 +6431,9 @@ function renderMissingContactIdNotice(group, mergeState) {
         <strong>Contact IDs required</strong>
         <span>${escapeHtml(missingContactIdMergeMessage(mergeState.invalidRecords.length))}</span>
         <em>${escapeHtml(mergeState.canRefreshMissingContactIds
-          ? "The standard latest Contacts pull includes Id, so the app can refresh this dataset automatically."
+          ? mergeState.missingContactIdRefreshUsesFallback
+            ? "The loaded file cannot be refreshed directly, but the app can load the standard Latest Contacts pull with Id included."
+            : "The standard latest Contacts pull includes Id, so the app can refresh this dataset automatically."
           : "This loaded dataset cannot be refreshed automatically. Re-run the Contacts pull/export with Id included, then import it again."
         )}</em>
       </div>
@@ -6439,7 +6443,7 @@ function renderMissingContactIdNotice(group, mergeState) {
           type="button"
           data-merge-action="refresh-contact-ids"
           data-group-key="${escapeHtml(group.key)}"
-        >Refresh Contacts</button>
+        >${mergeState.missingContactIdRefreshUsesFallback ? "Load Latest Contacts" : "Refresh Contacts"}</button>
       ` : ""}
     </div>
   `;
@@ -7123,18 +7127,20 @@ async function handleMissingContactIdRefresh(button) {
   const activeRecords = getActiveGroupRecords(group);
   const mergeState = getMergeState(group, activeRecords, state.decisions.get(group.key) || "");
   const message = missingContactIdMergeMessage(mergeState.invalidRecords.length);
-  if (!canRefreshLoadedDatasetFromSource()) {
+  const refreshSource = resolveContactsRefreshSource({ allowLatestContactsFallback: true });
+  if (!refreshSource) {
     window.alert(`${message}\n\nThis dataset was loaded from a local file or an unknown source, so the app cannot re-pull it automatically. Re-run the Contacts pull/export with the Id field included, then import the fresh file.`);
     return;
   }
 
-  const sourceLabel = state.datasetSource.displayName || state.datasetSource.fileName || state.fileName || "Latest Contacts";
-  const confirmed = window.confirm(`${message}\n\nRefresh ${sourceLabel} from Salesforce now?`);
+  const sourceLabel = refreshSource.displayName || refreshSource.fileName || "Latest Contacts";
+  const confirmed = window.confirm(`${message}\n\n${refreshSource.isLatestContactsFallback ? "Load" : "Refresh"} ${sourceLabel} from Salesforce now?`);
   if (!confirmed) return;
 
   await refreshLoadedDatasetFromSource({
+    source: refreshSource,
     title: "Refreshing Contacts",
-    startMessage: `Fetching ${sourceLabel} with Contact IDs included.`,
+    startMessage: `${refreshSource.isLatestContactsFallback ? "Loading" : "Fetching"} ${sourceLabel} with Contact IDs included.`,
     matchMessage: `Matching refreshed ${sourceLabel}.`
   });
 }
@@ -7194,23 +7200,58 @@ function confirmPreMergeDatasetRefresh(check) {
 }
 
 function confirmPreMergeDatasetRefreshFromMessage(message) {
-  if (!canRefreshLoadedDatasetFromSource()) {
+  const refreshSource = resolveContactsRefreshSource();
+  if (!refreshSource) {
     window.alert(
       `${message}\n\nThis dataset was loaded from a local file or an unknown source, so the app cannot refresh it automatically. Load a fresh Contacts export before merging.`
     );
     return false;
   }
 
-  const sourceLabel = state.datasetSource.displayName || state.datasetSource.fileName || state.fileName || "the current Contacts dataset";
+  const sourceLabel = refreshSource.displayName || refreshSource.fileName || state.fileName || "the current Contacts dataset";
   return window.confirm(`${message}\n\nRefresh ${sourceLabel} from Salesforce now?`);
 }
 
-function canRefreshLoadedDatasetFromSource() {
-  return state.objectType === "contact" && isServerBackedApp() && Boolean(state.datasetSource?.endpoint);
+function canRefreshLoadedDatasetFromSource(options = {}) {
+  return Boolean(resolveContactsRefreshSource(options));
+}
+
+function resolveContactsRefreshSource({ allowLatestContactsFallback = false } = {}) {
+  if (state.objectType !== "contact" || !isServerBackedApp()) return null;
+  if (state.datasetSource?.endpoint) {
+    return {
+      ...state.datasetSource,
+      isLatestContactsFallback: false
+    };
+  }
+  if (!allowLatestContactsFallback) return null;
+
+  const latestContacts = latestContactsSourceFromRecentFiles();
+  return latestContacts ? {
+    ...latestContacts,
+    isLatestContactsFallback: true
+  } : null;
+}
+
+function latestContactsSourceFromRecentFiles() {
+  const recent = (state.recentFiles || []).find((record) => {
+    if (!record?.endpoint || normalizeObjectType(record.objectType) !== "contact") return false;
+    const text = `${record.endpoint} ${record.displayName || ""} ${record.name || ""}`.toLowerCase();
+    return text.includes("staging-contacts") || text.includes("latest contacts");
+  });
+  if (!recent) return null;
+
+  return {
+    endpoint: String(recent.endpoint || ""),
+    fileName: String(recent.name || "salesforce-report-latest.json"),
+    displayName: String(recent.displayName || recent.name || "Latest Contacts"),
+    objectType: "contact",
+    format: String(recent.format || datasetFormatFromFileName(recent.name || recent.endpoint || "salesforce-report-latest.json"))
+  };
 }
 
 async function refreshLoadedDatasetFromSource(options = {}) {
-  const source = { ...(state.datasetSource || {}) };
+  const source = { ...(options.source || state.datasetSource || {}) };
   if (!source.endpoint || !isServerBackedApp()) {
     window.alert("Automatic refresh is unavailable for this loaded dataset.");
     return;
