@@ -4,6 +4,8 @@ A Duplicate Reviewer change is done when the implementation, verification, and s
 
 ## Required
 
+- Development started only after repo guidance was reviewed and any required preflight artifact was created for the change scope.
+- Visible feature work did not begin until the Hume-first design pass and tracked feature brief were in place.
 - The change is scoped to the requested workflow and avoids unrelated refactors.
 - Evaluation and merge flows remain separate where their user stories differ.
 - Account review remains available in Evaluate mode.

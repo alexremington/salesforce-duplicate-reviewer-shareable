@@ -1083,10 +1083,10 @@ async function getSalesforceAuth(options = {}) {
     env: salesforceCliEnv()
   });
   const result = display.result || {};
-  if (!result.accessToken) throw httpError(500, `Salesforce CLI did not return an access token for ${SF_ORG_ALIAS}.`);
+  const accessToken = await getSalesforceCliAccessToken();
 
   const auth = {
-    accessToken: result.accessToken,
+    accessToken,
     instanceUrl: normalizeInstanceUrl(SF_INSTANCE_URL || result.instanceUrl),
     apiVersion: normalizeApiVersion(SF_API_VERSION),
     orgAlias: SF_ORG_ALIAS
@@ -1102,8 +1102,20 @@ function clearSalesforceAuthCache() {
   salesforceAuthCache = null;
 }
 
+async function getSalesforceCliAccessToken() {
+  const tokenResult = await execFileJson(salesforceCliCommand(), ["org", "auth", "show-access-token", "--target-org", SF_ORG_ALIAS, "--json"], {
+    env: salesforceCliEnv()
+  });
+  const accessToken = String(tokenResult?.result?.accessToken || tokenResult?.result?.token || "").trim();
+  if (!accessToken) throw httpError(500, `Salesforce CLI did not return an access token for ${SF_ORG_ALIAS}.`);
+  if (/^\[redacted\]/i.test(accessToken)) {
+    throw httpError(500, `Salesforce CLI returned a redacted access token for ${SF_ORG_ALIAS}.`);
+  }
+  return accessToken;
+}
+
 function isSalesforceAuthRejected(error) {
-  return Number(error?.status) === 401 || /401|unauthorized|invalid session/i.test(String(error?.message || ""));
+  return Number(error?.status) === 401 || /401|unauthorized|invalid session|invalid_auth_header|invalid auth header/i.test(String(error?.message || ""));
 }
 
 function execFileJson(command, args, options = {}) {

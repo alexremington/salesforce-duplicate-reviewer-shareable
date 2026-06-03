@@ -8,6 +8,14 @@ These instructions apply to this repository and its subdirectories.
 - Keep the private branch and shareable branch in sync when changes are intended for both audiences.
 - Keep the app portable for both macOS and Windows users.
 
+## Feature Preflight
+
+- Before development starts, read this file and the current repo guidance that governs visible work: `docs/HUME-DESIGN-REVIEW.md`, `docs/DEFINITION-OF-DONE.md`, `docs/features/README.md`, and any feature-specific brief already in scope.
+- State the applicable gates before implementation. For visible UI or workflow changes, that must include the Hume-first requirement, required docs, and the validation commands that will be used later.
+- Any new visible feature request must go through Hume design before build. Create or update the tracked feature brief and capture the Hume design pass before editing app code.
+- Do not begin implementation for a visible feature until the design artifact exists in the repo.
+- If the request touches an existing visible feature without changing the UI or workflow, still perform the preflight read and state whether a new Hume pass is required.
+
 ## Front-End Design
 
 - Prioritize clean, legible UI and familiar controls.

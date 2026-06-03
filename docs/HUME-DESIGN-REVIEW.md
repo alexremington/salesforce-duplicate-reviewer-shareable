@@ -23,6 +23,20 @@ Every Duplicate Reviewer feature request should include a Hume pass before code 
 - Provide accessible labels, visible focus states, keyboard behavior, and clear error/recovery copy.
 - Include empty, loading, success, warning, disabled, and error states when relevant.
 
+## Feature Notes
+
+### Multi-Group Merge Preview Confirmation
+
+- This feature belongs in the existing `Merge` workflow and should preserve the same left-rail navigation mental model as `Evaluate`.
+- The editable `Contact Merge` section should give way to a read-only `Review before confirming` surface once the queued merge set is ready for confirmation.
+- The confirmation surface should appear only after the Salesforce pre-merge freshness checks succeed for the queued groups.
+- The operator should be able to move through queued group previews with the left rail and inline `Previous` / `Next` controls, without being forced to confirm each group individually.
+- The preview for the current group should summarize the surviving master Contact, the duplicate Contacts that will be deleted, and the resulting retained values in a compact, readable card.
+- The final destructive action should be a single overall onscreen primary button paired with an overall cancel action for the queued merge set.
+- The review surface must be read-only, with no master or field-retention editing while in confirmation mode.
+- The preview must preserve the existing page and pane scroll model, with no overlap between navigation, summary, value preview, and overall action area on desktop or mobile.
+- Any preview content that reflects review-only accepted values rather than actual Salesforce write-back fields must be labeled clearly.
+
 ## Build And Test Gate
 
 Before a Duplicate Reviewer change is ready:
