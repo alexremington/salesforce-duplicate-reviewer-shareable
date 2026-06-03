@@ -228,6 +228,7 @@ async function run() {
     const staleRefreshState = await captureStaleRefreshFlow(page, contactSmokeCsv());
     const staleFailureCardRefreshState = await captureStaleFailureCardRefreshFlow(page, contactSmokeCsv());
     const missingContactIdRefreshState = await captureMissingContactIdRefreshFlow(page, missingContactIdCsvPath, contactSmokeCsv());
+    const missingContactIdFallbackRefreshState = await captureMissingContactIdFallbackRefreshFlow(page, missingContactIdCsvPath, contactSmokeCsv());
     await page.locator(".group-item-main").first().click();
     await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
     await page.locator('[data-review-mode="merge"]').click();
@@ -479,6 +480,18 @@ async function run() {
     ) {
       throw new Error(`Expected missing Contact IDs to block merge and offer a Contacts refresh: ${JSON.stringify(missingContactIdRefreshState)}`);
     }
+    if (
+      !missingContactIdFallbackRefreshState.noticeVisible ||
+      !missingContactIdFallbackRefreshState.refreshButtonVisible ||
+      missingContactIdFallbackRefreshState.refreshButtonText !== "Load Latest Contacts" ||
+      !missingContactIdFallbackRefreshState.refreshCalled ||
+      missingContactIdFallbackRefreshState.preMergeCalled ||
+      missingContactIdFallbackRefreshState.mergeCalled ||
+      !missingContactIdFallbackRefreshState.dialogMessage.includes("Load Latest Contacts") ||
+      !missingContactIdFallbackRefreshState.refreshedHasIds
+    ) {
+      throw new Error(`Expected local Contacts without IDs to offer loading Latest Contacts: ${JSON.stringify(missingContactIdFallbackRefreshState)}`);
+    }
     if (mergePayload.masterFields?.LeadSource !== "Web") {
       throw new Error(`Expected Salesforce merge payload to preserve oldest Lead Source: ${JSON.stringify(mergePayload)}`);
     }
@@ -568,6 +581,7 @@ async function run() {
       staleRefreshState,
       staleFailureCardRefreshState,
       missingContactIdRefreshState,
+      missingContactIdFallbackRefreshState,
       mergePayload,
       accountMergeDisabled,
       shortcutsVisible,
@@ -1212,6 +1226,95 @@ async function captureMissingContactIdRefreshFlow(page, missingIdCsvPath, refres
   await refreshResponsePromise;
   await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
   await waitForFirstGroup(page, "Missing Contact ID refresh");
+  state.refreshedHasIds = await page.evaluate(() => {
+    return state.objectType === "contact" && state.rows.length > 0 && state.rows.every((record) => /^003/.test(salesforceId(record)));
+  });
+
+  await page.unroute("**/api/salesforce/premerge-check");
+  await page.unroute("**/api/salesforce/merge");
+  await page.unroute(`**${refreshEndpoint}`);
+  return state;
+}
+
+async function captureMissingContactIdFallbackRefreshFlow(page, missingIdCsvPath, refreshedCsv) {
+  const refreshEndpoint = "/api/smoke/missing-contact-ids-fallback/latest.csv";
+  const state = {
+    noticeVisible: false,
+    refreshButtonVisible: false,
+    refreshButtonText: "",
+    refreshCalled: false,
+    preMergeCalled: false,
+    mergeCalled: false,
+    dialogMessage: "",
+    refreshedHasIds: false
+  };
+
+  await importContactsThroughMenu(page, missingIdCsvPath);
+  await page.evaluate((endpoint) => {
+    state.datasetSource = {
+      endpoint: "",
+      fileName: "contacts-missing-ids.csv",
+      displayName: "contacts-missing-ids.csv",
+      objectType: "contact",
+      format: "csv"
+    };
+    state.recentFiles = [
+      {
+        id: "contact:salesforce-report-latest.csv",
+        name: "salesforce-report-latest.csv",
+        displayName: "Latest Contacts",
+        objectType: "contact",
+        format: "csv",
+        endpoint,
+        size: 1200,
+        updatedAt: Date.now()
+      },
+      ...state.recentFiles.filter((record) => record.displayName !== "Latest Contacts")
+    ];
+  }, refreshEndpoint);
+  await waitForFirstGroup(page, "Missing Contact ID fallback dataset load");
+  await page.locator(".group-item-main").first().click();
+  await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
+  await page.locator('[data-review-mode="merge"]').click();
+  await page.locator(".merge-repair-notice").waitFor({ state: "visible", timeout: 5000 });
+  state.noticeVisible = await page.locator(".merge-repair-notice").isVisible();
+  state.refreshButtonVisible = await page.locator(".merge-refresh-contact-ids-button").isVisible();
+  state.refreshButtonText = (await page.locator(".merge-refresh-contact-ids-button").textContent())?.trim() || "";
+
+  await page.route("**/api/salesforce/premerge-check", async (route) => {
+    state.preMergeCalled = true;
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { message: "Pre-merge should not run without Contact IDs" } })
+    });
+  });
+  await page.route("**/api/salesforce/merge", async (route) => {
+    state.mergeCalled = true;
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { message: "Merge should not run without Contact IDs" } })
+    });
+  });
+  await page.route(`**${refreshEndpoint}`, async (route) => {
+    state.refreshCalled = true;
+    await route.fulfill({
+      status: 200,
+      contentType: "text/csv",
+      body: refreshedCsv
+    });
+  });
+
+  const refreshResponsePromise = page.waitForResponse((response) => response.url().endsWith(refreshEndpoint));
+  page.once("dialog", async (dialog) => {
+    state.dialogMessage = dialog.message();
+    await dialog.accept();
+  });
+  await page.locator(".merge-refresh-contact-ids-button").click();
+  await refreshResponsePromise;
+  await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
+  await waitForFirstGroup(page, "Missing Contact ID fallback refresh");
   state.refreshedHasIds = await page.evaluate(() => {
     return state.objectType === "contact" && state.rows.length > 0 && state.rows.every((record) => /^003/.test(salesforceId(record)));
   });
