@@ -14,6 +14,7 @@ A Duplicate Reviewer change is done when the implementation, verification, and s
 - Interactive controls touched by the change are covered by smoke tests or a focused manual pass.
 - Cross-app smoke-test mechanics use the shared managed harness in `vendor/managed-app/scripts/smoke-test-harness.js`.
 - Large local dataset and worker-backed workflow changes include lightweight performance-budget assertions.
+- Hume's minimalist, high-contrast, accessibility-first design review is reflected in `docs/HUME-DESIGN-REVIEW.md` before visible UI changes are implemented.
 - Every fixed user-visible bug has a named regression assertion in the check or smoke harness.
 - `npm run check` passes, including live server contract checks for current health and API routes.
 - `npm run smoke:ui:local` passes after UI changes.
