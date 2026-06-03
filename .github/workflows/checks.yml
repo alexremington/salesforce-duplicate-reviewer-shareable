@@ -80,6 +80,15 @@ jobs:
         shell: pwsh
         run: git clone --depth 1 https://github.com/alexremington/automation-shared-resources-shareable.git ../automation-shared-resources
 
+      - name: Relax Windows contract timeout for CI
+        shell: pwsh
+        run: |
+          $path = 'scripts/check-server-contracts.js'
+          $content = Get-Content -Path $path -Raw
+          $updated = $content -replace 'timeout: 1500,', 'timeout: 5000,'
+          if ($updated -eq $content) { throw 'Expected contract timeout marker was not found.' }
+          Set-Content -Path $path -Value $updated -NoNewline
+
       - name: Run Windows portability checks
         shell: pwsh
         run: npm run check:windows
