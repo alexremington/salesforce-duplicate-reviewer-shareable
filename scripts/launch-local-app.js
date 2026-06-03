@@ -4,8 +4,8 @@ const childProcess = require("node:child_process");
 const fs = require("node:fs");
 const http = require("node:http");
 const net = require("node:net");
-const os = require("node:os");
 const path = require("node:path");
+const managedPlatform = require("../vendor/managed-app/scripts/platform");
 
 const PROJECT_DIR = path.resolve(__dirname, "..");
 const APP_ID = "salesforce-duplicate-reviewer";
@@ -47,9 +47,11 @@ async function main() {
   loadDotEnv(path.join(PROJECT_DIR, ".env"));
 
   const configuredPort = String(process.env.DUPLICATE_REVIEWER_PORT || process.env.PORT || "").trim();
-  const appSupportDir = process.env.DUPLICATE_REVIEWER_APP_SUPPORT_DIR || defaultAppSupportDir();
+  const appSupportDir = process.env.DUPLICATE_REVIEWER_APP_SUPPORT_DIR ||
+    managedPlatform.defaultAppSupportDir("Salesforce Duplicate Reviewer", "salesforce-duplicate-reviewer");
   const staticDir = process.env.DUPLICATE_REVIEWER_STATIC_DIR || path.join(appSupportDir, "static");
-  const logDir = process.env.DUPLICATE_REVIEWER_LOG_DIR || defaultLogRoot();
+  const logDir = process.env.DUPLICATE_REVIEWER_LOG_DIR ||
+    managedPlatform.defaultLogRoot("Salesforce Duplicate Reviewer", "salesforce-duplicate-reviewer");
 
   fs.mkdirSync(staticDir, { recursive: true });
   fs.mkdirSync(logDir, { recursive: true });
@@ -75,7 +77,7 @@ async function main() {
   console.log(`Waiting for ${url}...`);
   await waitForReady({ port, logDir });
   console.log(`Opening ${url}`);
-  await openUrl(url);
+  managedPlatform.openUrl(url, { noOpen: process.env.DUPLICATE_REVIEWER_NO_OPEN === "1" });
 }
 
 function loadDotEnv(filePath) {
@@ -130,7 +132,7 @@ function readServerFeatureVersion() {
 }
 
 function launchEnvironment({ port, staticDir }) {
-  const defaultPath = defaultCommandPath();
+  const defaultPath = managedPlatform.defaultCommandPath();
   return {
     ...process.env,
     ...(defaultPath ? { PATH: defaultPath, Path: process.platform === "win32" ? defaultPath : process.env.Path } : {}),
@@ -336,22 +338,6 @@ async function pidForPort(port) {
   return Number(String(result.stdout || "").trim().split(/\s+/)[0]) || null;
 }
 
-async function openUrl(url) {
-  if (process.env.DUPLICATE_REVIEWER_NO_OPEN === "1") return;
-
-  if (process.platform === "darwin") {
-    childProcess.spawn("open", [url], { detached: true, stdio: "ignore" }).unref();
-    return;
-  }
-
-  if (process.platform === "win32") {
-    childProcess.spawn("cmd.exe", ["/d", "/s", "/c", "start", '""', url], { detached: true, stdio: "ignore", windowsHide: true }).unref();
-    return;
-  }
-
-  childProcess.spawn("xdg-open", [url], { detached: true, stdio: "ignore" }).unref();
-}
-
 function recentLogText(filePath) {
   try {
     const lines = fs.readFileSync(filePath, "utf8").trimEnd().split(/\r?\n/);
@@ -359,68 +345,6 @@ function recentLogText(filePath) {
   } catch {
     return "(log file not created)";
   }
-}
-
-function defaultCommandPath() {
-  if (process.platform === "win32") {
-    return uniquePathParts([
-      process.env.Path,
-      process.env.PATH,
-      path.dirname(process.execPath),
-      process.env.ProgramFiles && path.join(process.env.ProgramFiles, "nodejs"),
-      process.env["ProgramFiles(x86)"] && path.join(process.env["ProgramFiles(x86)"], "nodejs"),
-      process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs", "nodejs"),
-      process.env.ProgramFiles && path.join(process.env.ProgramFiles, "sf", "bin"),
-      process.env.ProgramFiles && path.join(process.env.ProgramFiles, "Salesforce CLI", "bin"),
-      process.env["ProgramFiles(x86)"] && path.join(process.env["ProgramFiles(x86)"], "sf", "bin"),
-      process.env["ProgramFiles(x86)"] && path.join(process.env["ProgramFiles(x86)"], "Salesforce CLI", "bin"),
-      process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs", "sf", "bin"),
-      process.env.APPDATA && path.join(process.env.APPDATA, "npm"),
-      path.join(os.homedir(), "AppData", "Roaming", "npm")
-    ].filter(Boolean).join(path.delimiter)).join(path.delimiter);
-  }
-
-  return uniquePathParts([
-    process.env.PATH,
-    "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-  ].filter(Boolean).join(path.delimiter)).join(path.delimiter);
-}
-
-function uniquePathParts(value) {
-  const seen = new Set();
-  const parts = [];
-  for (const rawPart of String(value || "").split(path.delimiter)) {
-    const part = rawPart.trim();
-    const key = process.platform === "win32" ? part.toLowerCase() : part;
-    if (!part || seen.has(key)) continue;
-    seen.add(key);
-    parts.push(part);
-  }
-  return parts;
-}
-
-function defaultAppSupportDir() {
-  if (process.platform === "darwin") {
-    return path.join(os.homedir(), "Library", "Application Support", "salesforce-duplicate-reviewer");
-  }
-
-  if (process.platform === "win32") {
-    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "Salesforce Duplicate Reviewer");
-  }
-
-  return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "salesforce-duplicate-reviewer");
-}
-
-function defaultLogRoot() {
-  if (process.platform === "darwin") {
-    return path.join(os.homedir(), "Library", "Logs", "salesforce-duplicate-reviewer");
-  }
-
-  if (process.platform === "win32") {
-    return path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "Salesforce Duplicate Reviewer", "Logs");
-  }
-
-  return path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"), "salesforce-duplicate-reviewer", "logs");
 }
 
 function delay(ms) {

@@ -6600,13 +6600,37 @@ function renderMergeResult(result) {
   const message = result.status === "success"
     ? `Merged ${formatNumber(mergedIds.length)} ${mergedIds.length === 1 ? "record" : "records"}${relatedCount ? ` and updated ${formatNumber(relatedCount)} related ${relatedCount === 1 ? "record" : "records"}` : ""}.`
     : result.message || "Salesforce merge failed.";
+  const canRefresh = canOfferPreMergeDatasetRefresh(result);
   return `
     <div class="merge-result ${escapeHtml(result.status || "")}">
       <strong>${escapeHtml(result.status === "success" ? "Last merge succeeded" : "Last merge failed")}</strong>
       <span>${escapeHtml(message)}</span>
       ${when ? `<em>${escapeHtml(when)}</em>` : ""}
+      ${canRefresh ? `
+        <div class="merge-result-actions">
+          <button
+            class="button button-secondary merge-refresh-stale-data-button"
+            type="button"
+            data-merge-action="refresh-stale-data"
+          >Refresh Contacts</button>
+        </div>
+      ` : ""}
     </div>
   `;
+}
+
+function canOfferPreMergeDatasetRefresh(result) {
+  if (!result || result.status !== "failed" || !canRefreshLoadedDatasetFromSource()) return false;
+  if (hasStalePreMergeCheck(result.preMergeCheck)) return true;
+  return isPreMergeFreshnessFailureMessage(result.message);
+}
+
+function hasStalePreMergeCheck(check) {
+  return Boolean(check && check.status && check.status !== "fresh");
+}
+
+function isPreMergeFreshnessFailureMessage(message) {
+  return /pre-merge freshness check failed/i.test(String(message || ""));
 }
 
 function getTrainingPairContext(group = getSelectedGroup()) {
@@ -6978,6 +7002,10 @@ async function handleMergeAction(button) {
     await handleMissingContactIdRefresh(button);
     return;
   }
+  if (button.dataset.mergeAction === "refresh-stale-data") {
+    await handleStalePreMergeRefresh(button);
+    return;
+  }
   if (button.dataset.mergeAction !== "merge") return;
   const groupKey = button.dataset.groupKey;
   const group = findGroupByKey(groupKey);
@@ -7050,12 +7078,16 @@ async function handleMergeAction(button) {
         })
       });
       const payload = await readApiJson(response);
-      if (!response.ok) throw new Error(payload.error?.message || "Salesforce merge failed.");
+      if (!response.ok) throw createApiError(payload, "Salesforce merge failed.");
 
       state.mergeResults.set(groupKey, sanitizeMergeResult({ ...payload, status: "success" }));
       state.decisions.set(groupKey, "duplicate");
     }
   } catch (error) {
+    const preMergeCheck = sanitizePreMergeCheck(error.preMergeCheck);
+    const message = hasStalePreMergeCheck(preMergeCheck)
+      ? preMergeFreshnessSummary(preMergeCheck)
+      : error.message || "Salesforce merge failed.";
     state.mergeResults.set(
       groupKey,
       sanitizeMergeResult({
@@ -7063,10 +7095,14 @@ async function handleMergeAction(button) {
         objectType: state.objectType,
         masterId: mergeState.selectedId,
         mergedRecordIds: mergeIds,
-        message: error.message || "Salesforce merge failed.",
+        message,
+        preMergeCheck,
         mergedAt: new Date().toISOString()
       })
     );
+    if (canOfferPreMergeDatasetRefresh({ status: "failed", message, preMergeCheck })) {
+      refreshAfterStaleCheck = confirmPreMergeDatasetRefreshFromMessage(message);
+    }
   } finally {
     mergeInFlightGroupKeys.delete(groupKey);
     scheduleReviewStateSave();
@@ -7103,6 +7139,14 @@ async function handleMissingContactIdRefresh(button) {
   });
 }
 
+async function handleStalePreMergeRefresh(button) {
+  const message = button.closest(".merge-result")?.querySelector("span")?.textContent?.trim()
+    || "Pre-merge freshness check failed. Salesforce has changed since this dataset was loaded.";
+  const confirmed = confirmPreMergeDatasetRefreshFromMessage(message);
+  if (!confirmed) return;
+  await refreshLoadedDatasetFromSource();
+}
+
 async function checkSalesforcePreMergeFreshness({ groupKey, mergeState, mergeIds, records }) {
   const response = await fetch("/api/salesforce/premerge-check", {
     method: "POST",
@@ -7116,7 +7160,7 @@ async function checkSalesforcePreMergeFreshness({ groupKey, mergeState, mergeIds
     })
   });
   const payload = await readApiJson(response);
-  if (!response.ok) throw new Error(payload.error?.message || "Pre-merge freshness check failed.");
+  if (!response.ok) throw createApiError(payload, "Pre-merge freshness check failed.");
   return payload;
 }
 
@@ -7146,7 +7190,10 @@ function shouldIncludeSalesforcePreMergeField(field) {
 }
 
 function confirmPreMergeDatasetRefresh(check) {
-  const message = preMergeFreshnessSummary(check);
+  return confirmPreMergeDatasetRefreshFromMessage(preMergeFreshnessSummary(check));
+}
+
+function confirmPreMergeDatasetRefreshFromMessage(message) {
   if (!canRefreshLoadedDatasetFromSource()) {
     window.alert(
       `${message}\n\nThis dataset was loaded from a local file or an unknown source, so the app cannot refresh it automatically. Load a fresh Contacts export before merging.`
@@ -7262,6 +7309,14 @@ async function readApiJson(response) {
   } catch {
     return {};
   }
+}
+
+function createApiError(payload, fallbackMessage) {
+  const apiError = payload?.error && typeof payload.error === "object" ? payload.error : {};
+  const error = new Error(apiError.message || fallbackMessage);
+  const preMergeCheck = apiError.preMergeCheck || apiError.details?.preMergeCheck || payload?.preMergeCheck || null;
+  if (preMergeCheck) error.preMergeCheck = sanitizePreMergeCheck(preMergeCheck);
+  return error;
 }
 
 function getFieldResolution(group, field, resolutionContext = null) {

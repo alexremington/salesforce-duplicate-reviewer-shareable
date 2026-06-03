@@ -4,9 +4,9 @@ const childProcess = require("node:child_process");
 const fsSync = require("node:fs");
 const fs = require("node:fs/promises");
 const http = require("node:http");
-const os = require("node:os");
 const path = require("node:path");
 const { URL } = require("node:url");
+const managedPlatform = require("../vendor/managed-app/scripts/platform");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 loadDotEnv(path.join(ROOT_DIR, ".env"));
@@ -33,7 +33,7 @@ const SF_API_VERSION = process.env.SF_API_VERSION || "v67.0";
 const SF_CLI_BIN = String(process.env.SF_CLI_BIN || "").trim();
 const FEATURE_VERSION = "duplicate-reviewer-cli-warning-safe-v1";
 const API_CONTRACT_VERSION = "duplicate-reviewer-api-contract-v2";
-const DEFAULT_PATH = defaultCommandPath();
+const DEFAULT_PATH = managedPlatform.defaultCommandPath();
 let salesforceCliCommandCache = null;
 const MERGE_AUDIT_LOG = path.join(OUTPUT_DIR, "salesforce-merge-log.jsonl");
 const MAX_MERGE_VICTIMS = 20;
@@ -982,8 +982,15 @@ async function getSalesforceAuth() {
 
 function execFileJson(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const invocation = salesforceCliInvocation(command, args);
-    childProcess.execFile(invocation.command, invocation.args, { maxBuffer: 10 * 1024 * 1024, ...options }, (error, stdout, stderr) => {
+    const invocation = managedPlatform.commandInvocation(command, args, { envPrefix: "DUPLICATE_REVIEWER_SF" });
+    childProcess.execFile(invocation.command, invocation.args, {
+      maxBuffer: 10 * 1024 * 1024,
+      ...options,
+      env: {
+        ...(options.env || process.env),
+        ...(invocation.env || {})
+      }
+    }, (error, stdout, stderr) => {
       const parsed = parseSalesforceCliJson(stdout);
       if (parsed && isSalesforceCliJsonSuccess(parsed)) {
         resolve(parsed);
@@ -1029,24 +1036,6 @@ function salesforceCliEnv() {
   return env;
 }
 
-function salesforceCliInvocation(command, args) {
-  if (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command)) {
-    const commandLine = [command, ...args].map(cmdQuote).join(" ");
-    return {
-      command: process.env.ComSpec || "cmd.exe",
-      args: ["/d", "/s", "/c", commandLine]
-    };
-  }
-
-  return { command, args };
-}
-
-function cmdQuote(value) {
-  const text = String(value ?? "");
-  if (!text) return '""';
-  return `"${text.replace(/"/g, '\\"')}"`;
-}
-
 function parseSalesforceCliJson(stdout) {
   const text = String(stdout || "").trim();
   if (!text) return null;
@@ -1078,97 +1067,17 @@ function isSalesforceCliJsonFailure(payload) {
 function salesforceCliCommand() {
   if (salesforceCliCommandCache) return salesforceCliCommandCache;
 
-  const candidates = SF_CLI_BIN ? [SF_CLI_BIN] : salesforceCliCandidates();
+  const candidates = SF_CLI_BIN ? [SF_CLI_BIN] : managedPlatform.salesforceCliCandidates();
   for (const candidate of candidates) {
-    const resolved = resolveExecutable(candidate);
+    const resolved = managedPlatform.resolveExecutable(candidate, { defaultPath: DEFAULT_PATH });
     if (resolved) {
       salesforceCliCommandCache = resolved;
       return salesforceCliCommandCache;
     }
   }
 
-  salesforceCliCommandCache = SF_CLI_BIN || defaultSalesforceCliName();
+  salesforceCliCommandCache = SF_CLI_BIN || managedPlatform.defaultSalesforceCliName();
   return salesforceCliCommandCache;
-}
-
-function salesforceCliCandidates() {
-  if (process.platform === "win32") {
-    return [
-      "sf.cmd",
-      "sf.exe",
-      "sf",
-      process.env.ProgramFiles && path.join(process.env.ProgramFiles, "sf", "bin", "sf.cmd"),
-      process.env.ProgramFiles && path.join(process.env.ProgramFiles, "Salesforce CLI", "bin", "sf.cmd"),
-      process.env["ProgramFiles(x86)"] && path.join(process.env["ProgramFiles(x86)"], "sf", "bin", "sf.cmd"),
-      process.env["ProgramFiles(x86)"] && path.join(process.env["ProgramFiles(x86)"], "Salesforce CLI", "bin", "sf.cmd"),
-      process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs", "sf", "bin", "sf.cmd"),
-      process.env.APPDATA && path.join(process.env.APPDATA, "npm", "sf.cmd"),
-      path.join(os.homedir(), "AppData", "Roaming", "npm", "sf.cmd")
-    ].filter(Boolean);
-  }
-
-  return [
-    "sf",
-    "/usr/local/bin/sf",
-    "/opt/homebrew/bin/sf"
-  ];
-}
-
-function defaultSalesforceCliName() {
-  return process.platform === "win32" ? "sf.cmd" : "sf";
-}
-
-function resolveExecutable(command) {
-  const candidate = String(command || "").trim().replace(/^["']|["']$/g, "");
-  if (!candidate) return "";
-
-  if (isPathLike(candidate)) {
-    return executablePath(candidate);
-  }
-
-  for (const folder of commandSearchPaths()) {
-    for (const executableName of executableNames(candidate)) {
-      const resolved = executablePath(path.join(folder, executableName));
-      if (resolved) return resolved;
-    }
-  }
-
-  return "";
-}
-
-function executablePath(filePath) {
-  for (const candidate of executablePathCandidates(expandHome(filePath))) {
-    try {
-      const stat = fsSync.statSync(candidate);
-      if (stat.isFile()) return candidate;
-    } catch {
-      // Keep trying candidate executable paths.
-    }
-  }
-
-  return "";
-}
-
-function executablePathCandidates(filePath) {
-  if (process.platform !== "win32" || path.extname(filePath)) return [filePath];
-  return [`${filePath}.cmd`, `${filePath}.exe`, `${filePath}.bat`, filePath];
-}
-
-function executableNames(command) {
-  if (process.platform !== "win32" || path.extname(command)) return [command];
-  return [`${command}.cmd`, `${command}.exe`, `${command}.bat`, command];
-}
-
-function commandSearchPaths() {
-  return uniquePathParts([
-    process.env.Path,
-    process.env.PATH,
-    DEFAULT_PATH
-  ].filter(Boolean).join(path.delimiter));
-}
-
-function isPathLike(value) {
-  return path.isAbsolute(value) || /[\\/]/.test(value);
 }
 
 function salesforceCliError(message, error, stdout = "", stderr = "", parsed = null) {
@@ -1551,50 +1460,6 @@ function httpError(status, message, details = null) {
   error.status = status;
   if (details) error.details = details;
   return error;
-}
-
-function expandHome(value) {
-  if (value === "~") return os.homedir();
-  if (value.startsWith("~/")) return path.join(os.homedir(), value.slice(2));
-  return value;
-}
-
-function defaultCommandPath() {
-  if (process.platform === "win32") {
-    return uniquePathParts([
-      process.env.Path,
-      process.env.PATH,
-      path.dirname(process.execPath),
-      process.env.ProgramFiles && path.join(process.env.ProgramFiles, "nodejs"),
-      process.env["ProgramFiles(x86)"] && path.join(process.env["ProgramFiles(x86)"], "nodejs"),
-      process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs", "nodejs"),
-      process.env.ProgramFiles && path.join(process.env.ProgramFiles, "sf", "bin"),
-      process.env.ProgramFiles && path.join(process.env.ProgramFiles, "Salesforce CLI", "bin"),
-      process.env["ProgramFiles(x86)"] && path.join(process.env["ProgramFiles(x86)"], "sf", "bin"),
-      process.env["ProgramFiles(x86)"] && path.join(process.env["ProgramFiles(x86)"], "Salesforce CLI", "bin"),
-      process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs", "sf", "bin"),
-      process.env.APPDATA && path.join(process.env.APPDATA, "npm"),
-      path.join(os.homedir(), "AppData", "Roaming", "npm")
-    ].filter(Boolean).join(path.delimiter)).join(path.delimiter);
-  }
-
-  return uniquePathParts([
-    process.env.PATH,
-    "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-  ].filter(Boolean).join(path.delimiter)).join(path.delimiter);
-}
-
-function uniquePathParts(value) {
-  const seen = new Set();
-  const parts = [];
-  for (const rawPart of String(value || "").split(path.delimiter)) {
-    const part = rawPart.trim();
-    const key = process.platform === "win32" ? part.toLowerCase() : part;
-    if (!part || seen.has(key)) continue;
-    seen.add(key);
-    parts.push(part);
-  }
-  return parts;
 }
 
 function contentTypeFor(filePath) {
