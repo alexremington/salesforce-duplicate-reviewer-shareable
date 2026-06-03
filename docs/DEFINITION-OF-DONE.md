@@ -12,6 +12,8 @@ A Duplicate Reviewer change is done when the implementation, verification, and s
 - User-facing state is visible for duplicate decisions, merge readiness, loading, errors, and empty datasets.
 - Content that extends beyond the viewport remains reachable by page-level or pane-level scrolling.
 - Interactive controls touched by the change are covered by smoke tests or a focused manual pass.
+- Cross-app smoke-test mechanics use the shared managed harness in `vendor/managed-app/scripts/smoke-test-harness.js`.
+- Large local dataset and worker-backed workflow changes include lightweight performance-budget assertions.
 - Every fixed user-visible bug has a named regression assertion in the check or smoke harness.
 - `npm run check` passes, including live server contract checks for current health and API routes.
 - `npm run smoke:ui:local` passes after UI changes.

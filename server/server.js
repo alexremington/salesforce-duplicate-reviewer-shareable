@@ -34,6 +34,7 @@ const SF_CLI_BIN = String(process.env.SF_CLI_BIN || "").trim();
 const FEATURE_VERSION = "duplicate-reviewer-cli-warning-safe-v1";
 const API_CONTRACT_VERSION = "duplicate-reviewer-api-contract-v2";
 const DEFAULT_PATH = managedPlatform.defaultCommandPath();
+const salesforceMergeService = createSalesforceMergeService();
 let salesforceCliCommandCache = null;
 const MERGE_AUDIT_LOG = path.join(OUTPUT_DIR, "salesforce-merge-log.jsonl");
 const MAX_MERGE_VICTIMS = 20;
@@ -225,14 +226,14 @@ async function handleRequest(request, response) {
 
   if (request.method === "POST" && url.pathname === "/api/salesforce/merge") {
     const body = await readJsonBody(request, 128 * 1024);
-    const result = await mergeSalesforceRecords(body);
+    const result = await salesforceMergeService.mergeRecords(body);
     sendJson(response, result);
     return;
   }
 
   if (request.method === "POST" && url.pathname === "/api/salesforce/premerge-check") {
     const body = await readJsonBody(request, 256 * 1024);
-    const result = await checkSalesforcePreMergeFreshness(body);
+    const result = await salesforceMergeService.checkPreMergeFreshness(body);
     sendJson(response, result);
     return;
   }
@@ -610,6 +611,13 @@ async function readJsonBody(request, maxBytes = 32 * 1024) {
   } catch {
     throw httpError(400, "Request body must be JSON");
   }
+}
+
+function createSalesforceMergeService() {
+  return {
+    checkPreMergeFreshness: checkSalesforcePreMergeFreshness,
+    mergeRecords: mergeSalesforceRecords
+  };
 }
 
 async function checkSalesforcePreMergeFreshness(body) {
@@ -1451,15 +1459,45 @@ function fileModeCorsHeaders(request) {
 
 function sendError(response, error) {
   const status = error.status || 500;
-  if (status >= 500) console.error(error);
-  sendJson(response, { error: { message: error.message || "Internal server error", ...(error.details || {}) } }, status);
+  const details = error.details && typeof error.details === "object" ? error.details : {};
+  const code = error.code || details.code || defaultErrorCode(status);
+  if (status >= 500) logServerError(error, { status, code, detailKeys: Object.keys(details) });
+  const { code: _ignoredCode, ...responseDetails } = details;
+  sendJson(response, { error: { code, message: error.message || "Internal server error", ...responseDetails } }, status);
 }
 
 function httpError(status, message, details = null) {
   const error = new Error(message);
   error.status = status;
+  if (details?.code) error.code = details.code;
   if (details) error.details = details;
   return error;
+}
+
+function defaultErrorCode(status) {
+  return {
+    400: "BAD_REQUEST",
+    401: "UNAUTHORIZED",
+    403: "FORBIDDEN",
+    404: "NOT_FOUND",
+    405: "METHOD_NOT_ALLOWED",
+    409: "CONFLICT",
+    413: "PAYLOAD_TOO_LARGE",
+    500: "INTERNAL_ERROR",
+    502: "UPSTREAM_ERROR"
+  }[status] || "APP_ERROR";
+}
+
+function logServerError(error, context = {}) {
+  console.error(JSON.stringify({
+    level: "error",
+    at: new Date().toISOString(),
+    appId: "salesforce-duplicate-reviewer",
+    code: context.code || defaultErrorCode(error.status || 500),
+    status: context.status || error.status || 500,
+    message: error.message || "Internal server error",
+    detailKeys: context.detailKeys || []
+  }));
 }
 
 function contentTypeFor(filePath) {

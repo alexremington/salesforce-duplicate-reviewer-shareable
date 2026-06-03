@@ -2,11 +2,21 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
-const { loadPlaywright } = require("../vendor/managed-app/scripts/playwright-loader");
+const {
+  assertPerformanceBudget,
+  loadChromium,
+  visibleInteractiveReachability: sharedVisibleInteractiveReachability
+} = require("../vendor/managed-app/scripts/smoke-test-harness");
+const {
+  accountSmokeCsv,
+  contactMissingIdSmokeCsv,
+  contactSmokeCsv,
+  largeContactSmokeCsv
+} = require("./fixtures/duplicate-reviewer-workflows");
 
 let chromium;
 try {
-  ({ chromium } = loadPlaywright());
+  chromium = loadChromium();
 } catch (error) {
   console.error(error.message);
   process.exit(2);
@@ -14,21 +24,32 @@ try {
 
 const baseUrl = process.env.DUPLICATE_REVIEWER_URL || "http://127.0.0.1:5180";
 const outDir = process.env.PLAYWRIGHT_SMOKE_OUT_DIR || path.join(os.tmpdir(), "duplicate-reviewer-playwright");
+const REACHABILITY_OPTIONS = {
+  intentionallyHiddenIds: ["csvInput", "trainingImportInput"],
+  pointerEventsAllowedClassNames: ["threshold-slider-input"],
+  sharedHitAncestorSelectors: [".threshold-slider"]
+};
+const PERFORMANCE_BUDGETS = {
+  emptyImportContactsMs: 15000,
+  latestContactsJsonMs: 10000,
+  topbarImportContactsMs: 15000,
+  largeContactCsvWorkerMs: 30000
+};
 
 async function run() {
   await fs.mkdir(outDir, { recursive: true });
   const csvPath = path.join(outDir, "contacts-smoke.csv");
   const missingContactIdCsvPath = path.join(outDir, "contacts-missing-ids.csv");
   const accountCsvPath = path.join(outDir, "accounts-smoke.csv");
+  const largeContactCsvPath = path.join(outDir, "contacts-large-smoke.csv");
   const contactCsv = contactSmokeCsv();
+  const largeContactCsv = largeContactSmokeCsv();
   const contactSmokeRowCount = csvDataRowCount(contactCsv);
+  const largeContactSmokeRowCount = csvDataRowCount(largeContactCsv);
   await fs.writeFile(csvPath, contactCsv);
   await fs.writeFile(missingContactIdCsvPath, contactMissingIdSmokeCsv());
-  await fs.writeFile(accountCsvPath, [
-    "Id,Name,Website,Billing Street,Billing City,Billing State,Billing Postal Code,Billing Country",
-    "001T00000000001,Northstar Analytics Inc.,northstar.example,125 Market St,San Francisco,CA,94105,United States",
-    "001T00000000002,Northstar Analytics,https://northstar.example,125 Market Street,San Francisco,California,94105,US"
-  ].join("\n"));
+  await fs.writeFile(accountCsvPath, accountSmokeCsv());
+  await fs.writeFile(largeContactCsvPath, largeContactCsv);
 
   const browser = await chromium.launch();
   const messages = [];
@@ -36,6 +57,7 @@ async function run() {
   try {
     const fileModeRedirect = await assertFileModeRedirect(browser);
     const emptyImportButtonState = await assertEmptyImportButtonOpensFileChooser(browser, csvPath);
+    const largeContactPerformance = await assertLargeContactCsvPerformance(browser, largeContactCsvPath);
 
     const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
     page.on("console", (message) => {
@@ -71,9 +93,11 @@ async function run() {
     const hideLabeledRemoved = await page.locator("#hideLabeledGroups").count() === 0;
     const loadingProgressbar = await loadingProgressbarState(page);
     const loadingStatusSamples = await loadingStatusRotationState(page);
+    const latestJsonLoadStartedAt = Date.now();
     await page.locator(".recent-file").filter({ hasText: "Latest Contacts" }).first().click();
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    const latestJsonLoadElapsedMs = Date.now() - latestJsonLoadStartedAt;
     const latestJsonLoad = await datasetLoadState(page);
     const latestReportSummary = await reportSummaryState(page);
     const leftPaneSmallListLayout = await assertLeftPaneSmallListLayout(page);
@@ -253,6 +277,11 @@ async function run() {
     if (!emptyImportButtonState.fileChooserOpened || emptyImportButtonState.rowCount !== contactSmokeRowCount || !emptyImportButtonState.groupCount) {
       throw new Error(`Expected empty-state Import to open a file picker and load a dataset: ${JSON.stringify(emptyImportButtonState)}`);
     }
+    assertPerformanceBudget("empty-state Contact import", emptyImportButtonState.elapsedMs, PERFORMANCE_BUDGETS.emptyImportContactsMs);
+    if (largeContactPerformance.rowCount !== largeContactSmokeRowCount || !largeContactPerformance.groupCount || largeContactPerformance.processingMode !== "worker") {
+      throw new Error(`Expected large Contact CSV fixture to load through worker-backed matching: ${JSON.stringify(largeContactPerformance)}`);
+    }
+    assertPerformanceBudget("large Contact CSV worker import", largeContactPerformance.elapsedMs, PERFORMANCE_BUDGETS.largeContactCsvWorkerMs);
     if (!lightTheme.colorScheme.includes("light") || !darkTheme.colorScheme.includes("dark") || lightTheme.bodyBg === darkTheme.bodyBg) {
       throw new Error(`Expected the UI theme to follow system light/dark mode: ${JSON.stringify({ lightTheme, darkTheme })}`);
     }
@@ -321,6 +350,7 @@ async function run() {
     if (latestJsonLoad.fileName !== "salesforce-report-latest.json" || latestJsonLoad.rowCount !== 2 || latestJsonLoad.groupCount !== 1 || latestJsonLoad.processingMode !== "worker") {
       throw new Error(`Expected latest JSON dataset to load through Recent files: ${JSON.stringify(latestJsonLoad)}`);
     }
+    assertPerformanceBudget("Latest Contacts JSON load", latestJsonLoadElapsedMs, PERFORMANCE_BUDGETS.latestContactsJsonMs);
     if (latestReportSummary.labels.join("|") !== "Total Records|Match Groups" || latestReportSummary.values.records !== "2" || latestReportSummary.values.groups !== "1" || /Exact|Near/.test(latestReportSummary.text)) {
       throw new Error(`Expected compact report summary with records and groups only: ${JSON.stringify(latestReportSummary)}`);
     }
@@ -343,6 +373,10 @@ async function run() {
     if (!topbarImportState.fileChooserOpened || topbarImportState.rowCount !== contactSmokeRowCount || !topbarImportState.groupCount) {
       throw new Error(`Expected topbar Import > Contacts to open a file picker and load a dataset: ${JSON.stringify(topbarImportState)}`);
     }
+    if (topbarImportState.processingMode !== "worker") {
+      throw new Error(`Expected topbar Contact import to use worker-backed matching: ${JSON.stringify(topbarImportState)}`);
+    }
+    assertPerformanceBudget("topbar Contact import", topbarImportState.elapsedMs, PERFORMANCE_BUDGETS.topbarImportContactsMs);
     if (matchControlsExpanded !== "true") throw new Error("Expected Match Controls panel to expand.");
     if (thresholdReadout !== "80-99") throw new Error(`Expected threshold readout to update to 80-99, got ${thresholdReadout}.`);
     if (thresholdControl.minRange !== "80" || thresholdControl.maxRange !== "99" || thresholdControl.minNumber !== "80" || thresholdControl.maxNumber !== "99") {
@@ -510,6 +544,9 @@ async function run() {
       loadingProgressbar,
       loadingStatusSamples,
       latestJsonLoad,
+      latestJsonLoadElapsedMs,
+      largeContactPerformance,
+      performanceBudgets: PERFORMANCE_BUDGETS,
       leftPaneSmallListLayout,
       topbarImportState,
       fastestSearchDefaultUnchecked,
@@ -575,6 +612,7 @@ async function assertEmptyImportButtonOpensFileChooser(browser, filePath) {
   try {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.locator('[data-empty-action="choose-csv"]').waitFor({ state: "visible", timeout: 5000 });
+    const startedAt = Date.now();
     const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
     await page.locator('[data-empty-action="choose-csv"]').click();
     const fileChooser = await fileChooserPromise;
@@ -583,6 +621,7 @@ async function assertEmptyImportButtonOpensFileChooser(browser, filePath) {
     await waitForFirstGroup(page, "Empty-state Import load");
     return {
       fileChooserOpened: true,
+      elapsedMs: Date.now() - startedAt,
       ...(await datasetLoadState(page))
     };
   } finally {
@@ -590,9 +629,37 @@ async function assertEmptyImportButtonOpensFileChooser(browser, filePath) {
   }
 }
 
-async function waitForLoadingModalHidden(page, context, diagnostics = []) {
+async function assertLargeContactCsvPerformance(browser, filePath) {
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const diagnostics = [];
+  page.on("console", (message) => {
+    if (["error", "warning"].includes(message.type())) {
+      diagnostics.push(`${message.type()}: ${message.text()}`);
+    }
+  });
+  page.on("pageerror", (error) => diagnostics.push(`pageerror: ${error.message}`));
   try {
-    await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('[data-empty-action="choose-csv"]').waitFor({ state: "visible", timeout: 5000 });
+    const startedAt = Date.now();
+    const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
+    await page.locator('[data-empty-action="choose-csv"]').click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles(filePath);
+    await waitForLoadingModalHidden(page, "Large Contact CSV performance load", diagnostics, PERFORMANCE_BUDGETS.largeContactCsvWorkerMs);
+    await waitForFirstGroup(page, "Large Contact CSV performance load");
+    return {
+      elapsedMs: Date.now() - startedAt,
+      ...(await datasetLoadState(page))
+    };
+  } finally {
+    await page.close();
+  }
+}
+
+async function waitForLoadingModalHidden(page, context, diagnostics = [], timeout = 10000) {
+  try {
+    await page.locator("#loadingModal").waitFor({ state: "hidden", timeout });
   } catch (error) {
     const debugState = await page.evaluate(() => ({
       loadingModalHidden: document.querySelector("#loadingModal")?.hidden ?? null,
@@ -615,6 +682,7 @@ async function waitForLoadingModalHidden(page, context, diagnostics = []) {
 async function importContactsThroughMenu(page, filePath) {
   await page.locator("#chooseCsvButton").click();
   await page.getByRole("menuitem", { name: "Contacts" }).waitFor({ state: "visible", timeout: 5000 });
+  const startedAt = Date.now();
   const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
   await page.getByRole("menuitem", { name: "Contacts" }).click();
   const fileChooser = await fileChooserPromise;
@@ -623,12 +691,17 @@ async function importContactsThroughMenu(page, filePath) {
   await waitForFirstGroup(page, "Topbar Import Contacts load");
   return {
     fileChooserOpened: true,
+    elapsedMs: Date.now() - startedAt,
     ...(await datasetLoadState(page))
   };
 }
 
 function csvDataRowCount(csvText) {
   return csvText.trim().split(/\r?\n/).length - 1;
+}
+
+function visibleInteractiveReachability(page) {
+  return sharedVisibleInteractiveReachability(page, REACHABILITY_OPTIONS);
 }
 
 async function waitForFirstGroup(page, label) {
@@ -801,59 +874,6 @@ async function assertFileModeRedirect(browser) {
   } finally {
     await page.close();
   }
-}
-
-function contactSmokeCsv() {
-  const rows = [["Id", "First Name", "Last Name", "Company", "Email", "Lead Source", "Created Date", "Phone", "Mobile"]];
-  const names = [
-    ["Maya", "Rodriguez"],
-    ["John", "Pierce"],
-    ["Priya", "Shah"],
-    ["Daniel", "Kim"],
-    ["Aisha", "Johnson"],
-    ["Lucas", "Martin"],
-    ["Nora", "Bennett"],
-    ["Ethan", "Cole"],
-    ["Sofia", "Rivera"],
-    ["Caleb", "Morgan"],
-    ["Leah", "Patel"],
-    ["Owen", "Reed"],
-    ["Amelia", "Stone"],
-    ["Noah", "Brooks"],
-    ["Grace", "Chen"],
-    ["Isaac", "Turner"],
-    ["Emma", "Walker"],
-    ["Liam", "Foster"],
-    ["Zoe", "Carter"],
-    ["Henry", "Morris"],
-    ["Mia", "Hayes"],
-    ["Leo", "Parker"],
-    ["Chloe", "Bailey"],
-    ["Miles", "Cooper"]
-  ];
-  for (let index = 1; index <= 24; index += 1) {
-    const firstId = `003T${String(index * 2 - 1).padStart(11, "0")}`;
-    const secondId = `003T${String(index * 2).padStart(11, "0")}`;
-    const nearMatch = index % 3 === 0;
-    const email = nearMatch ? "" : `contact${index}@example.com`;
-    const [firstName, lastName] = names[index - 1];
-    const company = index % 2 ? `Northstar Analytics ${index}` : `CivicWire ${index}`;
-    const firstPhone = `(555) 010-${String(index).padStart(4, "0")}`;
-    const secondMobile = nearMatch ? `(555) 990-${String(index).padStart(4, "0")}` : `(555) 020-${String(index).padStart(4, "0")}`;
-    const day = String((index % 28) + 1).padStart(2, "0");
-    rows.push([firstId, firstName, lastName, company, email, "Web", `2024-01-${day}T09:00:00.000Z`, firstPhone, ""]);
-    rows.push([secondId, firstName, lastName, `${company} Inc.`, email, "Referral", `2025-01-${day}T09:00:00.000Z`, "", secondMobile]);
-  }
-  return rows.map((row) => row.map(csvCell).join(",")).join("\n");
-}
-
-function contactMissingIdSmokeCsv() {
-  const rows = [
-    ["Full Name", "Company", "Email", "Lead Source", "Created Date", "Phone", "Mobile"],
-    ["Ada Lovelace", "Northstar Analytics", "ada@example.com", "Web", "2024-01-01", "(555) 111-0101", ""],
-    ["Ada Lovelace", "Northstar Analytics Inc.", "ada@example.com", "Referral", "2024-02-01", "", "(555) 222-0101"]
-  ];
-  return rows.map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
 async function mergeLeadSourceRuleState(page) {
@@ -1490,11 +1510,6 @@ async function groupListTopState(page) {
   });
 }
 
-function csvCell(value) {
-  const text = String(value ?? "");
-  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
-
 async function assertRootScrollPolicy(page) {
   return page.evaluate(() => {
     const root = document.scrollingElement || document.documentElement;
@@ -1771,112 +1786,6 @@ async function assertWindowScrollAvailable(page) {
       after,
       scrollHeight: root.scrollHeight,
       clientHeight: root.clientHeight
-    };
-  });
-}
-
-async function visibleInteractiveReachability(page) {
-  return page.evaluate(() => {
-    const intentionallyHidden = new Set(["csvInput", "trainingImportInput"]);
-    const controls = [...document.querySelectorAll("button, input, select, textarea, a[href], [role='button'], [role='menuitem']")];
-    const controlLabel = (element) => String(
-      element.textContent ||
-      element.getAttribute("aria-label") ||
-      element.getAttribute("title") ||
-      element.getAttribute("placeholder") ||
-      element.value ||
-      ""
-    ).trim().replace(/\s+/g, " ").slice(0, 80);
-    const elementDescriptor = (element) => ({
-      tag: element.tagName.toLowerCase(),
-      id: element.id || "",
-      className: String(element.className || ""),
-      text: controlLabel(element)
-    });
-    const isCoveredByOwnClickableSurface = (element, hitTarget) => {
-      if (!hitTarget) return false;
-      if (element === hitTarget || element.contains(hitTarget)) return true;
-      if (
-        element.classList.contains("threshold-slider-input") &&
-        hitTarget.classList?.contains("threshold-slider-input") &&
-        element.closest(".threshold-slider") === hitTarget.closest(".threshold-slider")
-      ) {
-        return true;
-      }
-      if (element.id) {
-        const label = hitTarget.closest?.("label");
-        if (label?.htmlFor === element.id || label?.contains(element)) return true;
-      }
-      const parentLabel = element.closest("label");
-      return Boolean(parentLabel && parentLabel.contains(hitTarget));
-    };
-    const hitPointForElement = (element) => {
-      const rects = [...element.getClientRects()].filter((rect) => (
-        rect.width > 0 &&
-        rect.height > 0 &&
-        rect.bottom > 0 &&
-        rect.right > 0 &&
-        rect.top < window.innerHeight &&
-        rect.left < window.innerWidth
-      ));
-      const rect = rects[0];
-      if (!rect) return null;
-      return {
-        x: Math.min(Math.max(rect.left + rect.width / 2, 1), window.innerWidth - 1),
-        y: Math.min(Math.max(rect.top + rect.height / 2, 1), window.innerHeight - 1)
-      };
-    };
-    const pointIsInsideClippingAncestors = (element, point) => {
-      if (!point) return false;
-      for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
-        const style = getComputedStyle(ancestor);
-        if (!/(auto|scroll|hidden|clip)/.test(`${style.overflowX} ${style.overflowY}`)) continue;
-        const rect = ancestor.getBoundingClientRect();
-        if (
-          point.x < rect.left ||
-          point.x > rect.right ||
-          point.y < rect.top ||
-          point.y > rect.bottom
-        ) {
-          return false;
-        }
-      }
-      return true;
-    };
-    const visibleControls = controls.filter((element) => {
-      if (intentionallyHidden.has(element.id)) return false;
-      if (element.disabled || element.hidden || element.getAttribute("aria-hidden") === "true") return false;
-      const style = getComputedStyle(element);
-      const rect = element.getBoundingClientRect();
-      const hitPoint = hitPointForElement(element);
-      return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0 && pointIsInsideClippingAncestors(element, hitPoint);
-    });
-    const broken = visibleControls
-      .filter((element) => {
-        const style = getComputedStyle(element);
-        const rect = element.getBoundingClientRect();
-        const pointerEventsHandledByThumb = element.classList.contains("threshold-slider-input");
-        if ((style.pointerEvents === "none" && !pointerEventsHandledByThumb) || rect.width < 8 || rect.height < 8) {
-          return true;
-        }
-        const hitPoint = hitPointForElement(element);
-        if (!hitPoint) return false;
-        const hitTarget = document.elementFromPoint(hitPoint.x, hitPoint.y);
-        return !isCoveredByOwnClickableSurface(element, hitTarget);
-      })
-      .map((element) => {
-        const hitPoint = hitPointForElement(element);
-        const hitTarget = hitPoint ? document.elementFromPoint(hitPoint.x, hitPoint.y) : null;
-        return {
-          ...elementDescriptor(element),
-          hitPoint,
-          hitTarget: hitTarget ? elementDescriptor(hitTarget) : null
-        };
-      });
-
-    return {
-      count: visibleControls.length,
-      broken
     };
   });
 }
