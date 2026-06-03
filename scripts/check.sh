@@ -27,6 +27,9 @@ find . \
 echo "Checking package metadata..."
 node -e 'JSON.parse(require("node:fs").readFileSync("package.json", "utf8"))'
 
+echo "Checking feature manifest..."
+node ../automation-shared-resources/scripts/check-feature-manifest.js .
+
 echo "Checking server contracts..."
 node scripts/check-server-contracts.js
 
