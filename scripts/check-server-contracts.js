@@ -124,6 +124,7 @@ async function assertUnsupportedMergeRoute(baseUrl, routePath) {
   if (response.statusCode !== 400 || !response.body.includes("Only Contact merges are supported")) {
     throw new Error(`${routePath} contract failed: HTTP ${response.statusCode}: ${response.body}`);
   }
+  assertErrorCode(response, "BAD_REQUEST", routePath);
 }
 
 async function assertSalesforcePreMergeWithWarningCli(baseUrl) {
@@ -206,6 +207,13 @@ function smokeMergePayload() {
       }
     ]
   };
+}
+
+function assertErrorCode(response, expectedCode, label) {
+  const body = JSON.parse(response.body);
+  if (body.error?.code !== expectedCode) {
+    throw new Error(`${label} expected error code ${expectedCode}: ${response.body}`);
+  }
 }
 
 function startFakeSalesforceServer() {
