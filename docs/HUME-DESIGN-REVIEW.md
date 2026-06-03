@@ -10,6 +10,7 @@ Duplicate Reviewer should keep current functionality while moving toward a minim
 - The current merge flow now exposes missing Contact ID blockers inline and smoke-tests the `Load Latest Contacts` recovery path.
 - The UI uses shared typography, visible focus styling, accessible labels, and Playwright checks for clickable controls.
 - Content below the viewport must remain reachable by page-level or pane-level scroll. Scroll lock is treated as a release-blocking defect.
+- Unintentional overlap between controls, side rails, comparison panes, text, and action areas is treated as a release-blocking defect.
 - Current functionality must be preserved when Hume-inspired visual simplification is implemented.
 
 ## Feature Request Review
@@ -29,4 +30,5 @@ Before a Duplicate Reviewer change is ready:
 - The shared Hume design check must pass in the managed app pipeline.
 - Smoke tests must cover any visible interactive control touched by the change.
 - Smoke tests must verify scrolling remains available when content exceeds the viewport.
+- Smoke tests or review screenshots must verify that visible controls and panes do not overlap at supported viewport sizes.
 - Any Hume design proposal that changes layout must preserve current functionality and add regression coverage for the new interaction model.
