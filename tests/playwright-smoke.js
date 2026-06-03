@@ -39,6 +39,7 @@ async function run() {
 
     const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
     page.on("console", (message) => {
+      if (isExpectedBrowserConsoleMessage(message)) return;
       if (["error", "warning"].includes(message.type())) {
         messages.push(`${message.type()}: ${message.text()}`);
       }
@@ -201,6 +202,7 @@ async function run() {
     }
     await page.locator(".merge-confirmation-input").fill("MERGE");
     const staleRefreshState = await captureStaleRefreshFlow(page, contactSmokeCsv());
+    const staleFailureCardRefreshState = await captureStaleFailureCardRefreshFlow(page, contactSmokeCsv());
     const missingContactIdRefreshState = await captureMissingContactIdRefreshFlow(page, missingContactIdCsvPath, contactSmokeCsv());
     await page.locator(".group-item-main").first().click();
     await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
@@ -422,6 +424,17 @@ async function run() {
       throw new Error(`Expected stale pre-merge data to prompt and refresh without merging: ${JSON.stringify(staleRefreshState)}`);
     }
     if (
+      !staleFailureCardRefreshState.preMergeCalled ||
+      !staleFailureCardRefreshState.cardVisible ||
+      !staleFailureCardRefreshState.refreshButtonVisible ||
+      !staleFailureCardRefreshState.refreshCalled ||
+      staleFailureCardRefreshState.mergeCalled ||
+      !staleFailureCardRefreshState.dismissedDialogMessage.includes("Refresh Latest Contacts") ||
+      !staleFailureCardRefreshState.buttonDialogMessage.includes("Refresh Latest Contacts")
+    ) {
+      throw new Error(`Expected stale pre-merge failure card to offer a Contacts refresh: ${JSON.stringify(staleFailureCardRefreshState)}`);
+    }
+    if (
       !missingContactIdRefreshState.noticeVisible ||
       !missingContactIdRefreshState.refreshButtonVisible ||
       !missingContactIdRefreshState.refreshCalled ||
@@ -515,6 +528,8 @@ async function run() {
       mergeMasterCanChange,
       leadSourceRule,
       mergeFieldCanChange,
+      staleRefreshState,
+      staleFailureCardRefreshState,
       missingContactIdRefreshState,
       mergePayload,
       accountMergeDisabled,
@@ -542,6 +557,10 @@ async function run() {
   } finally {
     await browser.close();
   }
+}
+
+function isExpectedBrowserConsoleMessage(message) {
+  return message.type() === "error" && /server responded with a status of 409 \(Conflict\)/i.test(message.text());
 }
 
 async function assertEmptyImportButtonOpensFileChooser(browser, filePath) {
@@ -986,6 +1005,123 @@ async function captureStaleRefreshFlow(page, refreshedCsv) {
   await refreshResponsePromise;
   await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
   await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+  await page.unroute("**/api/salesforce/premerge-check");
+  await page.unroute("**/api/salesforce/merge");
+  await page.unroute(`**${refreshEndpoint}`);
+  return state;
+}
+
+async function captureStaleFailureCardRefreshFlow(page, refreshedCsv) {
+  const refreshEndpoint = "/api/smoke/stale-failure-card-refresh/latest.csv";
+  const state = {
+    preMergeCalled: false,
+    refreshCalled: false,
+    mergeCalled: false,
+    cardVisible: false,
+    refreshButtonVisible: false,
+    dismissedDialogMessage: "",
+    buttonDialogMessage: ""
+  };
+
+  await page.evaluate((endpoint) => {
+    state.datasetSource = {
+      endpoint,
+      fileName: "contacts-smoke.csv",
+      displayName: "Latest Contacts",
+      objectType: "contact",
+      format: "csv"
+    };
+  }, refreshEndpoint);
+  await page.locator(".group-item-main").first().click();
+  await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
+  await page.locator('[data-review-mode="merge"]').click();
+  await page.locator(".merge-master-radio").first().waitFor({ state: "visible", timeout: 5000 });
+  if (await page.locator(".merge-master-radio").count() > 1) {
+    await page.locator(".merge-master-radio").nth(1).check();
+  }
+  await page.locator(".merge-confirmation-input").fill("MERGE");
+  await page.evaluate(() => {
+    window.__smokeOriginalConfirm = window.__smokeOriginalConfirm || window.confirm;
+    window.__smokeConfirmMessages = [];
+    window.__smokeConfirmResponses = [false, true];
+    window.confirm = (message) => {
+      window.__smokeConfirmMessages.push(String(message || ""));
+      return window.__smokeConfirmResponses.length ? Boolean(window.__smokeConfirmResponses.shift()) : true;
+    };
+  });
+
+  await page.route("**/api/salesforce/premerge-check", async (route) => {
+    const payload = JSON.parse(route.request().postData() || "{}");
+    state.preMergeCalled = true;
+    await route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: {
+          message: "Pre-merge freshness check failed (1 changed field). Refresh Contacts before merging.",
+          preMergeCheck: {
+            ok: false,
+            status: "stale",
+            checkedAt: new Date().toISOString(),
+            objectType: "Contact",
+            groupKey: payload.groupKey,
+            masterId: payload.masterId,
+            mergeIds: payload.mergeIds || [],
+            ids: [payload.masterId, ...(payload.mergeIds || [])].filter(Boolean),
+            missingIds: [],
+            deletedIds: [],
+            changedFields: [
+              {
+                id: payload.masterId,
+                recordName: "Ada Lovelace",
+                field: "email",
+                label: "Email",
+                loadedValue: "ada@example.com",
+                currentValue: "ada.updated@example.com"
+              }
+            ],
+            currentRecords: [],
+            loadedRecords: payload.records || []
+          }
+        }
+      })
+    });
+  });
+  await page.route("**/api/salesforce/merge", async (route) => {
+    state.mergeCalled = true;
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { message: "Merge should not run with stale data" } })
+    });
+  });
+  await page.route(`**${refreshEndpoint}`, async (route) => {
+    state.refreshCalled = true;
+    await route.fulfill({
+      status: 200,
+      contentType: "text/csv",
+      body: refreshedCsv
+    });
+  });
+
+  await page.locator(".merge-submit-button").click();
+  await page.locator(".merge-result.failed").waitFor({ state: "visible", timeout: 5000 });
+  state.cardVisible = await page.locator(".merge-result.failed").isVisible();
+  state.refreshButtonVisible = await page.locator(".merge-refresh-stale-data-button").isVisible();
+
+  const refreshResponsePromise = page.waitForResponse((response) => response.url().endsWith(refreshEndpoint));
+  await page.locator(".merge-refresh-stale-data-button").click();
+  await refreshResponsePromise;
+  await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
+  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+  const confirmMessages = await page.evaluate(() => {
+    const messages = window.__smokeConfirmMessages || [];
+    if (window.__smokeOriginalConfirm) window.confirm = window.__smokeOriginalConfirm;
+    return messages;
+  });
+  state.dismissedDialogMessage = confirmMessages[0] || "";
+  state.buttonDialogMessage = confirmMessages[1] || "";
+
   await page.unroute("**/api/salesforce/premerge-check");
   await page.unroute("**/api/salesforce/merge");
   await page.unroute(`**${refreshEndpoint}`);

@@ -2241,6 +2241,12 @@ select:focus {
   background: var(--red-soft);
 }
 
+.merge-result-actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 6px;
+}
+
 .merge-matrix-wrap {
   overflow: auto;
   overscroll-behavior: contain;
