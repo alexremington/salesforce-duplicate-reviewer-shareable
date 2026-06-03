@@ -7226,11 +7226,11 @@ function resolveContactsRefreshSource({ allowLatestContactsFallback = false } = 
   }
   if (!allowLatestContactsFallback) return null;
 
-  const latestContacts = latestContactsSourceFromRecentFiles();
-  return latestContacts ? {
+  const latestContacts = latestContactsSourceFromRecentFiles() || defaultLatestContactsSource();
+  return {
     ...latestContacts,
     isLatestContactsFallback: true
-  } : null;
+  };
 }
 
 function latestContactsSourceFromRecentFiles() {
@@ -7247,6 +7247,16 @@ function latestContactsSourceFromRecentFiles() {
     displayName: String(recent.displayName || recent.name || "Latest Contacts"),
     objectType: "contact",
     format: String(recent.format || datasetFormatFromFileName(recent.name || recent.endpoint || "salesforce-report-latest.json"))
+  };
+}
+
+function defaultLatestContactsSource() {
+  return {
+    endpoint: "/api/staging-contacts/latest.csv",
+    fileName: "salesforce-report-latest.csv",
+    displayName: "Latest Contacts",
+    objectType: "contact",
+    format: "csv"
   };
 }
 

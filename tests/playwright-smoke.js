@@ -1237,7 +1237,7 @@ async function captureMissingContactIdRefreshFlow(page, missingIdCsvPath, refres
 }
 
 async function captureMissingContactIdFallbackRefreshFlow(page, missingIdCsvPath, refreshedCsv) {
-  const refreshEndpoint = "/api/smoke/missing-contact-ids-fallback/latest.csv";
+  const refreshEndpoint = "/api/staging-contacts/latest.csv";
   const state = {
     noticeVisible: false,
     refreshButtonVisible: false,
@@ -1250,7 +1250,7 @@ async function captureMissingContactIdFallbackRefreshFlow(page, missingIdCsvPath
   };
 
   await importContactsThroughMenu(page, missingIdCsvPath);
-  await page.evaluate((endpoint) => {
+  await page.evaluate(() => {
     state.datasetSource = {
       endpoint: "",
       fileName: "contacts-missing-ids.csv",
@@ -1258,20 +1258,11 @@ async function captureMissingContactIdFallbackRefreshFlow(page, missingIdCsvPath
       objectType: "contact",
       format: "csv"
     };
-    state.recentFiles = [
-      {
-        id: "contact:salesforce-report-latest.csv",
-        name: "salesforce-report-latest.csv",
-        displayName: "Latest Contacts",
-        objectType: "contact",
-        format: "csv",
-        endpoint,
-        size: 1200,
-        updatedAt: Date.now()
-      },
-      ...state.recentFiles.filter((record) => record.displayName !== "Latest Contacts")
-    ];
-  }, refreshEndpoint);
+    state.recentFiles = state.recentFiles.filter((record) => {
+      const text = `${record.endpoint || ""} ${record.displayName || ""} ${record.name || ""}`.toLowerCase();
+      return !text.includes("staging-contacts") && !text.includes("latest contacts");
+    });
+  });
   await waitForFirstGroup(page, "Missing Contact ID fallback dataset load");
   await page.locator(".group-item-main").first().click();
   await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
