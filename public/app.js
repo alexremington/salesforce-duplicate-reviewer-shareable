@@ -6721,11 +6721,11 @@ function getMergeState(group, activeRecords, currentDecision) {
     inFlight,
     locked: inFlight || alreadyMerged,
     canSubmit: !blockedReason && !inFlight,
-    buttonLabel: inFlight ? "Merging..." : alreadyMerged ? "Merged" : "Preview Merge",
+    buttonLabel: inFlight ? "Preparing review..." : alreadyMerged ? "Merged" : "Review before confirming",
     title: alreadyMerged
       ? `Merged into ${result.masterId || selectedId}`
       : `${formatNumber(activeRecords.length)} ${activeRecords.length === 1 ? "Contact" : "Contacts"}: 1 master, ${formatNumber(mergeRecords.length)} ${mergeRecords.length === 1 ? "duplicate" : "duplicates"}`,
-    description: blockedReason || "Mark this group Duplicate, choose a master Contact, review field overrides, then type MERGE.",
+    description: blockedReason || "Mark this group Duplicate, choose a master Contact, review field overrides, then open the read-only review queue.",
     statusClass: mergeStatusClass(result, blockedReason, inFlight),
     statusLabel: mergeStatusLabel(result, blockedReason, inFlight)
   };
