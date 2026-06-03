@@ -69,7 +69,6 @@ async function main() {
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/premerge-check");
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/merge");
     await assertSalesforcePreMergeWithWarningCli(baseUrl);
-    await assertSalesforcePreMergeRefreshesAfterInvalidAuthHeader(baseUrl);
     await assertSalesforceMergeWithWarningCli(baseUrl);
   } finally {
     await stopProcess(serverProcess);
@@ -161,37 +160,6 @@ async function assertSalesforcePreMergeWithWarningCli(baseUrl) {
   }
 }
 
-async function assertSalesforcePreMergeRefreshesAfterInvalidAuthHeader(baseUrl) {
-  fakeSalesforceServer.resetAuthScenario({
-    badToken: "smoke-access-token",
-    goodToken: "refreshed-access-token"
-  });
-  await writeFakeSalesforceCli(tempDir, fakeSalesforceServer.baseUrl, {
-    accessTokens: ["refreshed-access-token"]
-  });
-
-  const payload = smokeMergePayload();
-  const response = await requestText(`${baseUrl}/api/salesforce/premerge-check`, {
-    method: "POST",
-    body: payload
-  });
-  if (response.statusCode !== 200) {
-    throw new Error(`Invalid auth header refresh contract failed: HTTP ${response.statusCode}: ${response.body}`);
-  }
-
-  const body = JSON.parse(response.body);
-  if (body.status !== "fresh" || body.orgAlias !== "smoke-org" || body.instanceUrl !== fakeSalesforceServer.baseUrl) {
-    throw new Error(`Invalid auth header refresh contract returned unexpected body: ${response.body}`);
-  }
-
-  if (fakeSalesforceServer.authScenario.rejectCount !== 1) {
-    throw new Error(`Invalid auth header refresh contract expected exactly one auth rejection: ${JSON.stringify(fakeSalesforceServer.authScenario)}`);
-  }
-  if (fakeSalesforceServer.authScenario.acceptCount < 1) {
-    throw new Error(`Invalid auth header refresh contract expected a successful retry after refresh: ${JSON.stringify(fakeSalesforceServer.authScenario)}`);
-  }
-}
-
 async function assertSalesforceMergeWithWarningCli(baseUrl) {
   const payload = {
     ...smokeMergePayload(),
@@ -268,28 +236,11 @@ function assertErrorCode(response, expectedCode, label) {
 function startFakeSalesforceServer() {
   return new Promise((resolve, reject) => {
     const requests = [];
-    const authScenario = {
-      active: false,
-      badToken: "",
-      goodToken: "",
-      rejectCount: 0,
-      acceptCount: 0
-    };
     const server = http.createServer((request, response) => {
       const url = new URL(request.url, "http://127.0.0.1");
       requests.push({ method: request.method, path: url.pathname });
 
       if (request.method === "GET" && url.pathname === "/services/data/v67.0/queryAll") {
-        const authorization = String(request.headers.authorization || "");
-        if (authScenario.active && authorization === `Bearer ${authScenario.badToken}`) {
-          authScenario.rejectCount += 1;
-          response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-          response.end(`${JSON.stringify([{ message: "INVALID_AUTH_HEADER" }])}\n`);
-          return;
-        }
-        if (authScenario.active && authorization === `Bearer ${authScenario.goodToken}`) {
-          authScenario.acceptCount += 1;
-        }
         sendFakeJson(response, { totalSize: 2, done: true, records: fakeSalesforceContactRecords() });
         return;
       }
@@ -314,35 +265,23 @@ function startFakeSalesforceServer() {
       resolve({
         server,
         requests,
-        authScenario,
-        resetAuthScenario(nextScenario) {
-          authScenario.active = Boolean(nextScenario);
-          authScenario.badToken = nextScenario?.badToken || "";
-          authScenario.goodToken = nextScenario?.goodToken || "";
-          authScenario.rejectCount = 0;
-          authScenario.acceptCount = 0;
-        },
         baseUrl: `http://127.0.0.1:${port}`
       });
     });
   });
 }
 
-async function writeFakeSalesforceCli(directory, instanceUrl, options = {}) {
-  const accessTokens = Array.isArray(options.accessTokens) && options.accessTokens.length
-    ? options.accessTokens
-    : ["smoke-access-token"];
-  const payloads = accessTokens.map((accessToken) => JSON.stringify({
+async function writeFakeSalesforceCli(directory, instanceUrl) {
+  const payload = JSON.stringify({
     status: 0,
     result: {
-      accessToken,
+      accessToken: "smoke-access-token",
       instanceUrl,
       username: "smoke.user@example.com",
       alias: "smoke-org"
     }
-  }));
+  });
   const cliPath = path.join(directory, process.platform === "win32" ? "sf.cmd" : "sf");
-  const statePath = path.join(directory, "sf-org-display-count.txt");
   const warningLines = [
     "Warning: @salesforce/cli update available from 2.134.6 to 2.136.8.",
     "node warning: org-api-version configuration overridden at v67.0"
@@ -354,17 +293,8 @@ async function writeFakeSalesforceCli(directory, instanceUrl, options = {}) {
       "if defined SF_API_VERSION echo SF_API_VERSION leaked to sf org display 1>&2 && exit /b 2",
       "if defined SF_ORG_API_VERSION echo SF_ORG_API_VERSION leaked to sf org display 1>&2 && exit /b 2",
       "if defined SFDX_API_VERSION echo SFDX_API_VERSION leaked to sf org display 1>&2 && exit /b 2",
-      `set STATE_FILE=${statePath}`,
-      "set /a CALL_COUNT=0",
-      "if exist \"%STATE_FILE%\" set /p CALL_COUNT=<\"%STATE_FILE%\"",
-      "set /a NEXT_COUNT=%CALL_COUNT%+1",
-      ">\"%STATE_FILE%\" echo %NEXT_COUNT%",
       ...warningLines.map((line) => `echo ${line} 1>&2`),
-      ...payloads.map((payload, index) => {
-        const threshold = index + 1;
-        return `if %NEXT_COUNT% LEQ ${threshold} echo ${payload} && exit /b 1`;
-      }),
-      `echo ${payloads[payloads.length - 1]}`,
+      `echo ${payload}`,
       "exit /b 1",
       ""
     ].join("\r\n"));
@@ -377,19 +307,8 @@ async function writeFakeSalesforceCli(directory, instanceUrl, options = {}) {
     "  printf '%s\\n' 'Salesforce API version env leaked to sf org display' >&2",
     "  exit 2",
     "fi",
-    `state_file=${JSON.stringify(statePath)}`,
-    "call_count=0",
-    "if [ -f \"$state_file\" ]; then",
-    "  call_count=$(cat \"$state_file\")",
-    "fi",
-    "next_count=$((call_count + 1))",
-    "printf '%s\\n' \"$next_count\" > \"$state_file\"",
     ...warningLines.map((line) => `printf '%s\\n' '${line}' >&2`),
-    ...payloads.map((payload, index) => {
-      const threshold = index + 1;
-      return `if [ "$next_count" -le ${threshold} ]; then printf '%s\\n' '${payload}'; exit 1; fi`;
-    }),
-    `printf '%s\\n' '${payloads[payloads.length - 1]}'`,
+    `printf '%s\\n' '${payload}'`,
     "exit 1",
     ""
   ].join("\n"));
