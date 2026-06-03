@@ -5,6 +5,9 @@ A Duplicate Reviewer change is done when the implementation, verification, and s
 ## Required
 
 - Development started only after repo guidance was reviewed and any required preflight artifact was created for the change scope.
+- Development started only after the work was labeled `low`, `medium`, or `high`, and that label was stated to the user.
+- `gpt-5.4 mini` was used for `low` and `medium` work when model selection was available, or the inability to switch models was stated before proceeding.
+- `High`-cost work did not proceed until the user explicitly approved it after the cost warning.
 - Visible feature work did not begin until the Hume-first design pass and tracked feature brief were in place.
 - The change is scoped to the requested workflow and avoids unrelated refactors.
 - Evaluation and merge flows remain separate where their user stories differ.
