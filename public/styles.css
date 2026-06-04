@@ -678,6 +678,26 @@ p {
   z-index: 3;
 }
 
+#thresholdSlider[data-dragging-thumb="min"] .threshold-slider-input-min {
+  z-index: 5;
+  pointer-events: auto;
+}
+
+#thresholdSlider[data-dragging-thumb="min"] .threshold-slider-input-max {
+  z-index: 4;
+  pointer-events: none;
+}
+
+#thresholdSlider[data-dragging-thumb="max"] .threshold-slider-input-max {
+  z-index: 5;
+  pointer-events: auto;
+}
+
+#thresholdSlider[data-dragging-thumb="max"] .threshold-slider-input-min {
+  z-index: 4;
+  pointer-events: none;
+}
+
 #thresholdSlider[data-collapsed-edge="min"] .threshold-slider-input-max {
   z-index: 4;
   pointer-events: auto;

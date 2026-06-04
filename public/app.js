@@ -910,6 +910,12 @@ async function loadDemoData() {
   }
 }
 
+attachThresholdSliderDragState(els.threshold, "min");
+attachThresholdSliderDragState(els.maxThreshold, "max");
+document.addEventListener("pointerup", clearThresholdSliderDragState);
+document.addEventListener("pointercancel", clearThresholdSliderDragState);
+document.addEventListener("mouseup", clearThresholdSliderDragState);
+
 els.threshold.addEventListener("input", () => syncThresholdInputs("min"));
 els.maxThreshold.addEventListener("input", () => syncThresholdInputs("max"));
 els.thresholdMinNumber.addEventListener("input", () => syncThresholdNumberInput("min-number"));
@@ -2443,6 +2449,25 @@ function syncThresholdSliderInteractionState(minScore, maxScore) {
   } else {
     delete els.thresholdSlider.dataset.collapsedEdge;
   }
+}
+
+function attachThresholdSliderDragState(input, thumb) {
+  if (!input) return;
+  const mark = () => setThresholdSliderDragThumb(thumb);
+  input.addEventListener("pointerdown", mark);
+  input.addEventListener("mousedown", mark);
+  input.addEventListener("focus", mark);
+  input.addEventListener("blur", clearThresholdSliderDragState);
+}
+
+function setThresholdSliderDragThumb(thumb) {
+  if (!els.thresholdSlider) return;
+  els.thresholdSlider.dataset.draggingThumb = thumb;
+}
+
+function clearThresholdSliderDragState() {
+  if (!els.thresholdSlider) return;
+  delete els.thresholdSlider.dataset.draggingThumb;
 }
 
 function parseDatasetText(text, { format = "csv", fileName = "", objectType = state.objectType } = {}) {
