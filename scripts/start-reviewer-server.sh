@@ -10,6 +10,9 @@ LOG_DIR="${HOME}/Library/Logs/salesforce-duplicate-reviewer"
 OUT_LOG="${LOG_DIR}/duplicate-reviewer-server.out.log"
 ERR_LOG="${LOG_DIR}/duplicate-reviewer-server.err.log"
 STATIC_DIR="${DUPLICATE_REVIEWER_STATIC_DIR:-${HOME}/Library/Application Support/salesforce-duplicate-reviewer/static}"
+STAGING_ROOT="${DUPLICATE_REVIEWER_STAGING_ROOT:-${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging}"
+STAGING_CONTACTS_CSV="${STAGING_CONTACTS_CSV:-${STAGING_ROOT}/Output/staging-contacts/salesforce-report-latest.csv}"
+STAGING_ACCOUNTS_CSV="${STAGING_ACCOUNTS_CSV:-${STAGING_ROOT}/Output/staging-accounts/salesforce-report-latest.csv}"
 LABEL="com.salesforce-duplicate-reviewer.server"
 PLIST_PATH="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 USER_DOMAIN="gui/$(/usr/bin/id -u)"
@@ -70,6 +73,12 @@ write_server_plist() {
     <string>${PORT}</string>
     <key>DUPLICATE_REVIEWER_STATIC_DIR</key>
     <string>${STATIC_DIR}</string>
+    <key>DUPLICATE_REVIEWER_STAGING_ROOT</key>
+    <string>${STAGING_ROOT}</string>
+    <key>STAGING_CONTACTS_CSV</key>
+    <string>${STAGING_CONTACTS_CSV}</string>
+    <key>STAGING_ACCOUNTS_CSV</key>
+    <string>${STAGING_ACCOUNTS_CSV}</string>
     <key>SF_USE_GENERIC_UNIX_KEYCHAIN</key>
     <string>true</string>
     <key>SF_ORG_ALIAS</key>

@@ -83,6 +83,22 @@ if ($LASTEXITCODE -ne 0) {
   throw 'Server contract checks failed.'
 }
 
+Write-Host 'Checking staging routing defaults...'
+$contactsDryRun = (& scripts/run-staging-contacts-bulk-query.sh --dry-run) -join "`n"
+if ($contactsDryRun -notmatch '/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts') {
+  Write-Host $contactsDryRun
+  throw 'Staging Contacts did not resolve to the canonical Salesforce Pulls staging folder.'
+}
+$bulkQueryWrapper = Get-Content scripts/run-salesforce-bulk-query.sh -Raw
+if ($bulkQueryWrapper -notmatch 'sf org auth show-access-token') {
+  throw 'Bulk query wrapper did not use sf org auth show-access-token.'
+}
+$accountsDryRun = (& scripts/run-staging-accounts-bulk-query.sh --dry-run) -join "`n"
+if ($accountsDryRun -notmatch '/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-accounts') {
+  Write-Host $accountsDryRun
+  throw 'Staging Accounts did not resolve to the canonical Salesforce Pulls staging folder.'
+}
+
 Write-Host 'Checking Windows server startup...'
 $port = Get-FreePort
 $env:PORT = [string]$port

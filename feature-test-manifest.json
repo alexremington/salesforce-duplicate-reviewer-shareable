@@ -1,8 +1,67 @@
 {
   "version": 1,
   "app": "salesforce-duplicate-reviewer",
-  "updatedAt": "2026-06-03T21:15:03.022Z",
+  "updatedAt": "2026-06-04T19:07:19Z",
   "features": [
+    {
+      "id": "dataset-export-with-scores",
+      "title": "Dataset Export With Scores",
+      "app": "salesforce-duplicate-reviewer",
+      "status": "in-progress",
+      "visibleUi": true,
+      "brief": "docs/features/dataset-export-with-scores.md",
+      "requirements": [
+        "Keep the export shape aligned with the imported dataset rather than exporting only group summaries.",
+        "Add group and score as appended columns for each original record.",
+        "Preserve the source column order and values exactly as loaded.",
+        "Use the current computed group assignment and group score from the duplicate matching run.",
+        "Keep the export in the existing Export menu so the workflow stays familiar."
+      ],
+      "acceptanceCriteria": [
+        "The Export menu includes a Dataset + Scores action.",
+        "The exported CSV contains one row per original record.",
+        "The exported CSV preserves the original imported columns and appends group and score.",
+        "The group value reflects the current duplicate group identifier for each row, or blank when the record is not in a duplicate group.",
+        "The score value reflects the current duplicate group score for each row, or blank when the record is not in a duplicate group.",
+        "The exported CSV can be re-imported by the existing loader without schema loss."
+      ],
+      "fixtures": [
+        "At least one loaded Contacts and one loaded Accounts dataset with duplicate groups and non-duplicate rows so group assignment and blank-group cases can be checked.",
+        "Demo data should also produce a valid dataset export with appended group and score columns.",
+        "No Salesforce write action is required; this is a local export of the current in-memory dataset state."
+      ],
+      "tests": [
+        {
+          "name": "Fast checks",
+          "command": "npm run check",
+          "status": "todo",
+          "evidence": ""
+        },
+        {
+          "name": "Targeted Playwright smoke",
+          "command": "npm run smoke:ui:local",
+          "status": "todo",
+          "evidence": ""
+        },
+        {
+          "name": "Release pipeline",
+          "command": "npm run verify:release",
+          "status": "todo",
+          "evidence": ""
+        }
+      ],
+      "crossPlatform": {
+        "mac": "todo",
+        "windows": "todo"
+      },
+      "risks": [],
+      "humeDesign": {
+        "reviewed": true,
+        "notes": "Reviewed in docs/HUME-DESIGN-REVIEW.md under the existing Export workflow. Keep the new Dataset + Scores action inside the current export menu, preserve the minimalist layout, and avoid adding a new panel or workflow branch."
+      },
+      "createdAt": "2026-06-04T18:54:01.327Z",
+      "updatedAt": "2026-06-04T19:07:19Z"
+    },
     {
       "id": "merge-preview-confirmation",
       "title": "Multi-Group Merge Preview Confirmation",

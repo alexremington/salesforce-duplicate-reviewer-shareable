@@ -824,6 +824,7 @@ const els = {
   groupNavigationStatus: document.getElementById("groupNavigationStatus"),
   duplicateButton: document.getElementById("duplicateButton"),
   notDuplicateButton: document.getElementById("notDuplicateButton"),
+  datasetExportButton: document.getElementById("datasetExportButton"),
   exportButton: document.getElementById("exportButton"),
   exportMenuButton: document.getElementById("exportMenuButton"),
   exportMenu: document.getElementById("exportMenu"),
@@ -933,6 +934,10 @@ els.rerunButton.addEventListener("click", () => {
 
 els.duplicateButton.addEventListener("click", () => markDecision("duplicate"));
 els.notDuplicateButton.addEventListener("click", () => markDecision("not-duplicate"));
+els.datasetExportButton.addEventListener("click", () => {
+  setExportMenuOpen(false);
+  exportScoredDataset();
+});
 els.exportButton.addEventListener("click", () => {
   setExportMenuOpen(false);
   exportDecisions();
@@ -4762,6 +4767,7 @@ function render() {
   renderSource();
   renderMapping();
   renderMetrics();
+  renderDatasetExportButton();
   renderTrainingExportButton();
   renderGroups();
   renderDetail();
@@ -4997,8 +5003,21 @@ function renderTrainingExportButton() {
   updateExportMenuButtonState();
 }
 
+function renderDatasetExportButton() {
+  const loadedCount = state.rows.length;
+  els.datasetExportButton.disabled = !loadedCount;
+  els.datasetExportButton.textContent = "Dataset + Scores";
+  els.datasetExportButton.setAttribute(
+    "aria-label",
+    loadedCount ? `Export dataset with scores (${formatNumber(loadedCount)} records)` : "Export dataset with scores"
+  );
+  els.datasetExportButton.classList.toggle("is-active", loadedCount > 0);
+  updateExportMenuButtonState();
+}
+
 function updateExportMenuButtonState() {
-  const hasExports = !els.exportButton.disabled || !els.trainingExportButton.disabled;
+  const hasExports =
+    !els.datasetExportButton.disabled || !els.exportButton.disabled || !els.trainingExportButton.disabled;
   els.exportMenuButton.classList.toggle("is-active", hasExports);
 }
 
@@ -8378,9 +8397,42 @@ function exportDecisions() {
   downloadCsv(`${state.objectType}-duplicate-decisions.csv`, rows);
 }
 
+function exportScoredDataset() {
+  if (!state.rows.length) return;
+  downloadCsv(`${state.objectType}-dataset-with-scores.csv`, buildScoredDatasetRows());
+}
+
 function exportTrainingLabels() {
   if (!state.trainingLabels.size) return;
   downloadCsv(`${state.objectType}-training-labels.csv`, buildTrainingLabelRows());
+}
+
+function buildScoredDatasetRows() {
+  const headers = Array.isArray(state.headers) && state.headers.length ? [...state.headers] : inferHeaders(state.rows);
+  const exportHeaders = [...headers];
+  if (!exportHeaders.includes("group")) exportHeaders.push("group");
+  if (!exportHeaders.includes("score")) exportHeaders.push("score");
+
+  const groupByRowIndex = new Map();
+  state.groups.forEach((group) => {
+    group.records.forEach((record) => {
+      groupByRowIndex.set(record.__rowIndex, group);
+    });
+  });
+
+  const rows = [exportHeaders];
+  state.rows.forEach((record) => {
+    const group = groupByRowIndex.get(record.__rowIndex) || null;
+    rows.push(
+      exportHeaders.map((header) => {
+        if (header === "group") return group ? group.id : "";
+        if (header === "score") return group ? group.score : "";
+        return record[header] ?? "";
+      })
+    );
+  });
+
+  return rows;
 }
 
 function buildTrainingLabelRows() {

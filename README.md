@@ -167,8 +167,9 @@ instance: https://politico--staging.sandbox.my.salesforce.com
 report ID: 00OVZ000003DjaH2AS
 report name: New All Contacts Report
 query: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/queries/report-00OVZ000003DjaH2AS.soql
-latest JSON: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/Output/staging-contacts/salesforce-report-latest.json
-compatibility CSV: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/Output/staging-contacts/salesforce-report-latest.csv
+canonical output root: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging
+latest JSON: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.json
+compatibility CSV: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.csv
 ```
 
 The staging report has nearly one million Contact rows, so use the staging Bulk API wrapper rather than the Reports API:
@@ -187,8 +188,9 @@ instance: https://politico--staging.sandbox.my.salesforce.com
 report ID: 00OVZ000003Dm572AC
 report name: New Accounts Report
 query: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/queries/report-00OVZ000003Dm572AC.soql
-latest JSON: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/Output/staging-accounts/salesforce-report-latest.json
-compatibility CSV: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Apps/salesforce-duplicate-reviewer/Output/staging-accounts/salesforce-report-latest.csv
+canonical output root: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging
+latest JSON: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-accounts/salesforce-report-latest.json
+compatibility CSV: /Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-accounts/salesforce-report-latest.csv
 ```
 
 ```bash
@@ -206,6 +208,14 @@ http://127.0.0.1:5180
 Use `DUPLICATE_REVIEWER_PORT` in `.env` to choose a different Duplicate Reviewer port. The launcher intentionally uses this app-specific setting so it can run alongside Launch Scheduler.
 
 It then opens the app with the latest staging JSON dataset auto-loaded. The app sends a macOS Notification Center alert after it finishes loading and matching the dataset, so the alert means the file is ready to review. The staging wrappers use a 60-second Bulk API polling interval by default to reduce Salesforce API calls for large exports.
+
+The canonical staging root for these two jobs is:
+
+```text
+/Users/aremington/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging
+```
+
+Legacy compatibility copies have been archived out of the active OneDrive paths. New runs write to the Salesforce Pulls staging root.
 
 Opening `public/index.html` directly remains supported for manual JSON or CSV uploads. If it is opened from disk while the local server is already running, the page redirects itself to the server-backed URL so the latest Scheduler exports and staging auto-load URLs keep working. If the server is not running, the static page stays open as a manual-upload fallback.
 

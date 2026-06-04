@@ -119,6 +119,43 @@ async function run() {
     const exportMenuClosed = await page.locator("#exportMenu").isHidden();
     await page.locator("#demoButton").click();
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    await page.locator("#exportMenuButton").click();
+    const datasetExportMenuState = await exportMenuStateForSmoke(page);
+    if (datasetExportMenuState.options.join("|") !== "Dataset + Scores|Decisions|Labels") {
+      throw new Error(`Expected Export menu to include Dataset + Scores, Decisions, and Labels after loading demo data: ${JSON.stringify(datasetExportMenuState)}`);
+    }
+    await page.evaluate(() => {
+      window.__smokeExportBlob = null;
+      window.__smokeExportFilename = "";
+      window.__smokeOriginalCreateObjectURL = window.__smokeOriginalCreateObjectURL || URL.createObjectURL;
+      window.__smokeOriginalAnchorClick = window.__smokeOriginalAnchorClick || HTMLAnchorElement.prototype.click;
+      URL.createObjectURL = function(blob) {
+        window.__smokeExportBlob = blob;
+        return window.__smokeOriginalCreateObjectURL.call(this, blob);
+      };
+      HTMLAnchorElement.prototype.click = function() {
+        if (this.download) window.__smokeExportFilename = String(this.download || "");
+        return window.__smokeOriginalAnchorClick.call(this);
+      };
+    });
+    await page.locator("#datasetExportButton").click();
+    await page.waitForFunction(() => Boolean(window.__smokeExportBlob), null, { timeout: 5000 });
+    const datasetExportCsv = await page.evaluate(async () => {
+      return window.__smokeExportBlob ? window.__smokeExportBlob.text() : "";
+    });
+    const datasetExportFilename = await page.evaluate(() => window.__smokeExportFilename || "");
+    await page.evaluate(() => {
+      if (window.__smokeOriginalCreateObjectURL) URL.createObjectURL = window.__smokeOriginalCreateObjectURL;
+      if (window.__smokeOriginalAnchorClick) HTMLAnchorElement.prototype.click = window.__smokeOriginalAnchorClick;
+      window.__smokeExportBlob = null;
+      window.__smokeExportFilename = "";
+    });
+    const datasetExportRows = datasetExportCsv.trim().split(/\r?\n/);
+    const datasetExportHeader = datasetExportRows[0].split(",");
+    const demoReportSummary = await reportSummaryState(page);
+    if (!datasetExportFilename.endsWith("-dataset-with-scores.csv") || datasetExportHeader.slice(-2).join("|") !== "group|score" || csvDataRowCount(datasetExportCsv) !== Number(demoReportSummary.values.records || 0)) {
+      throw new Error(`Expected Dataset + Scores export to preserve the dataset shape and append group/score columns: ${JSON.stringify({ datasetExportFilename, header: datasetExportHeader, rowCount: csvDataRowCount(datasetExportCsv), demoRecords: demoReportSummary.values.records })}`);
+    }
 
     const topbarImportState = await importContactsThroughMenu(page, csvPath);
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
@@ -392,8 +429,8 @@ async function run() {
       throw new Error(`Expected latest Contact and Account exports in Recent files: ${JSON.stringify(latestRecentFiles)}`);
     }
     if (!csvMenuClosed) throw new Error("Expected Import menu to close with Escape.");
-    if (!exportMenuClosed || exportMenuState.options.join("|") !== "Decisions|Labels") {
-      throw new Error(`Expected Export menu to show Decisions and Labels and close with Escape: ${JSON.stringify({ exportMenuClosed, exportMenuState })}`);
+    if (!exportMenuClosed || exportMenuState.options.join("|") !== "Dataset + Scores|Decisions|Labels") {
+      throw new Error(`Expected Export menu to show Dataset + Scores, Decisions, and Labels and close with Escape: ${JSON.stringify({ exportMenuClosed, exportMenuState })}`);
     }
     if (!topbarImportState.fileChooserOpened || topbarImportState.rowCount !== contactSmokeRowCount || !topbarImportState.groupCount) {
       throw new Error(`Expected topbar Import > Contacts to open a file picker and load a dataset: ${JSON.stringify(topbarImportState)}`);

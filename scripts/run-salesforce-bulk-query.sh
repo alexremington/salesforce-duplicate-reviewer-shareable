@@ -51,8 +51,8 @@ latest_file="${OUT_DIR}/${LATEST_CSV_NAME}"
 latest_json_file="${OUT_DIR}/${LATEST_JSON_NAME}"
 
 access_token="$(
-  env -u SF_API_VERSION sf org display --target-org "${ORG_ALIAS}" --json \
-    | node -e 'let s=""; process.stdin.on("data", d => s += d); process.stdin.on("end", () => { const result = JSON.parse(s).result || {}; if (!result.accessToken) process.exit(2); process.stdout.write(result.accessToken); });'
+  sf org auth show-access-token --target-org "${ORG_ALIAS}" --json \
+    | node -e 'let s=""; process.stdin.on("data", d => s += d); process.stdin.on("end", () => { const result = JSON.parse(s).result || {}; const token = String(result.accessToken || result.token || "").trim(); if (!token) process.exit(2); process.stdout.write(token); });'
 )"
 
 SF_ACCESS_TOKEN="${access_token}" \
