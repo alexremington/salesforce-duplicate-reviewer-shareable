@@ -7009,9 +7009,7 @@ function renderMergePreviewChip(chip) {
 }
 
 function renderMergePreviewFieldRow(field) {
-  const effectText = field.kind === "review-only"
-    ? `Review only: ${field.reviewOnlyValue || "—"}`
-    : field.kindLabel;
+  const effectText = field.kindLabel;
   return `
     <tr class="merge-preview-row ${escapeHtml(field.kind)}" data-merge-preview-kind="${escapeHtml(field.kind)}">
       <th scope="row">${escapeHtml(field.label)}</th>
@@ -7877,7 +7875,6 @@ function buildMergePreviewState({ group, activeRecords, mergeState, mergeIds, pr
         kind: "salesforce-writeback",
         kindLabel: "Written to Salesforce",
         resultValue: "",
-        note: "This field will be cleared on the surviving master Contact.",
         reviewOnlyValue: null
       };
     }
@@ -7889,7 +7886,6 @@ function buildMergePreviewState({ group, activeRecords, mergeState, mergeIds, pr
         kind: "salesforce-writeback",
         kindLabel: "Written to Salesforce",
         resultValue: String(masterFieldPayload.masterFields[apiName] || "").trim(),
-        note: "This field will be updated on the surviving master Contact during merge.",
         reviewOnlyValue: null
       };
     }
@@ -7901,7 +7897,7 @@ function buildMergePreviewState({ group, activeRecords, mergeState, mergeIds, pr
       field,
       label,
       kind: reviewOnlyValue != null ? "review-only" : "master-kept",
-      kindLabel: reviewOnlyValue != null ? "Review only" : "Master kept",
+      kindLabel: reviewOnlyValue != null ? "Review only" : "Kept",
       resultValue: masterValue,
       reviewOnlyValue
     };

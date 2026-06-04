@@ -1105,17 +1105,31 @@ async function captureMergePayload(page) {
     const panel = document.querySelector(".merge-confirmation-preview");
     const meta = [...document.querySelectorAll(".merge-confirmation-meta div")];
     const reviewOnlyRows = [...document.querySelectorAll('[data-merge-preview-kind="review-only"]')].map((node) => node.textContent.trim());
+    const fieldNames = [...document.querySelectorAll(".merge-preview-table tbody th")].map((node) => node.textContent.trim());
+    const effectTexts = [...document.querySelectorAll(".merge-preview-table tbody td:last-child")].map((node) => node.textContent.trim());
     return {
       title: panel?.querySelector("strong")?.textContent?.trim() || "",
       masterId: meta[0]?.querySelector("dd span")?.textContent?.trim() || "",
       duplicateCount: document.querySelectorAll(".merge-confirmation-preview .merge-id-chip").length,
       duplicateListCount: document.querySelectorAll(".merge-preview-list-item").length,
       reviewOnlyRows,
+      fieldNames,
+      effectTexts,
+      previewNoteCount: document.querySelectorAll(".merge-confirmation-preview .merge-preview-note").length,
       reviewGroupCount: document.querySelectorAll(".group-item").length,
       currentPreviewLabel: document.querySelector(".merge-review-nav-status strong")?.textContent?.trim() || "",
       readOnly: !document.querySelector(".merge-master-radio") && !document.querySelector(".merge-field-radio")
     };
   });
+  if (previewState.fieldNames.some((text) => /Master survives|Master kept/i.test(text))) {
+    throw new Error(`Expected compact merge preview labels, found legacy copy: ${JSON.stringify(previewState.fieldNames)}`);
+  }
+  if (previewState.effectTexts.some((text) => /Review only:/i.test(text) || /Master survives|Master kept/i.test(text))) {
+    throw new Error(`Expected compact merge preview status text, found legacy copy: ${JSON.stringify(previewState.effectTexts)}`);
+  }
+  if (previewState.previewNoteCount !== 0) {
+    throw new Error(`Expected no explanatory merge preview notes, found ${previewState.previewNoteCount}.`);
+  }
   const mergeSentBeforeConfirm = mergePayloads.length > 0;
 
   const firstPreviewLabel = previewState.currentPreviewLabel;
