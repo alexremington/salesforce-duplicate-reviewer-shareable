@@ -44,3 +44,4 @@ These instructions apply to this repository and its subdirectories.
 - Launcher changes must reject or restart stale runtime processes when feature or API contract versions do not match the current source.
 - Use Playwright for smoke testing. Do not attempt to use the Codex in-app browser for smoke tests; the repo Playwright harness is the source of truth for rendered smoke validation.
 - Smoke coverage should exercise primary buttons and fail on scroll traps, hidden overflowing content, layout overlap, and nonfunctional controls.
+- For pointer-driven controls like sliders, drag handles, and scrubbers, do not treat `input.value` assignments, synthesized `input` events, or screenshots alone as proof of a fix. Regression coverage must exercise the exact pointer gesture from the failure state and verify the control still moves after the edge case is reached.

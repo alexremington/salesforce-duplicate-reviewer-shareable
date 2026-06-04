@@ -786,6 +786,7 @@ let groupListRenderCache = null;
 let detailRenderCache = "";
 let groupListRenderFrame = 0;
 let matchingWorkerRunner = null;
+let thresholdSliderDragState = null;
 
 const els = {
   csvInput: document.getElementById("csvInput"),
@@ -2453,10 +2454,12 @@ function syncThresholdSliderInteractionState(minScore, maxScore) {
 
 function attachThresholdSliderDragState(input, thumb) {
   if (!input) return;
-  const mark = () => setThresholdSliderDragThumb(thumb);
-  input.addEventListener("pointerdown", mark);
-  input.addEventListener("mousedown", mark);
-  input.addEventListener("focus", mark);
+  input.addEventListener("pointerdown", (event) => beginThresholdSliderDrag(event, thumb), true);
+  input.addEventListener("pointermove", handleThresholdSliderDragMove);
+  input.addEventListener("pointerup", handleThresholdSliderDragEnd);
+  input.addEventListener("pointercancel", handleThresholdSliderDragEnd);
+  input.addEventListener("lostpointercapture", handleThresholdSliderDragEnd);
+  input.addEventListener("focus", () => setThresholdSliderDragThumb(thumb));
   input.addEventListener("blur", clearThresholdSliderDragState);
 }
 
@@ -2465,9 +2468,68 @@ function setThresholdSliderDragThumb(thumb) {
   els.thresholdSlider.dataset.draggingThumb = thumb;
 }
 
+function beginThresholdSliderDrag(event, thumb) {
+  if (event.button != null && event.button !== 0) return;
+  const input = event.currentTarget;
+  if (!input) return;
+  event.preventDefault();
+  event.stopPropagation();
+  setThresholdSliderDragThumb(thumb);
+  thresholdSliderDragState = {
+    input,
+    thumb,
+    pointerId: event.pointerId ?? null
+  };
+  if (typeof input.setPointerCapture === "function" && event.pointerId != null) {
+    try {
+      input.setPointerCapture(event.pointerId);
+    } catch {
+      // Ignore capture failures and fall back to the move handlers already attached.
+    }
+  }
+  updateThresholdSliderFromPointerEvent(event, thumb);
+}
+
+function handleThresholdSliderDragMove(event) {
+  if (!thresholdSliderDragState) return;
+  if (thresholdSliderDragState.pointerId != null && event.pointerId != null && event.pointerId !== thresholdSliderDragState.pointerId) return;
+  event.preventDefault();
+  updateThresholdSliderFromPointerEvent(event, thresholdSliderDragState.thumb);
+}
+
+function handleThresholdSliderDragEnd(event) {
+  if (!thresholdSliderDragState) return;
+  if (event?.pointerId != null && thresholdSliderDragState.pointerId != null && event.pointerId !== thresholdSliderDragState.pointerId) return;
+  clearThresholdSliderDragState();
+}
+
+function updateThresholdSliderFromPointerEvent(event, thumb) {
+  const input = thresholdSliderDragState?.input || event.currentTarget;
+  if (!input) return;
+  const bounds = input.getBoundingClientRect();
+  if (!bounds.width) return;
+  const value = pointerEventValue(event, bounds);
+  if (thumb === "min") {
+    els.threshold.value = String(value);
+    syncThresholdInputs("min");
+  } else {
+    els.maxThreshold.value = String(value);
+    syncThresholdInputs("max");
+  }
+}
+
+function pointerEventValue(event, bounds) {
+  const { min, max } = thresholdBounds();
+  const x = Number(event.clientX);
+  const normalized = Number.isFinite(x) ? (x - bounds.left) / (bounds.width || 1) : 0;
+  const clamped = Math.max(0, Math.min(1, normalized));
+  return clampThresholdScore(Math.round(min + clamped * (max - min)), { min, max });
+}
+
 function clearThresholdSliderDragState() {
   if (!els.thresholdSlider) return;
   delete els.thresholdSlider.dataset.draggingThumb;
+  thresholdSliderDragState = null;
 }
 
 function parseDatasetText(text, { format = "csv", fileName = "", objectType = state.objectType } = {}) {
