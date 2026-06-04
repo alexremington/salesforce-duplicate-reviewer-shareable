@@ -6956,7 +6956,6 @@ function renderMergeConfirmationPreview(previewState) {
       <div class="merge-confirmation-header">
         <div>
           <span>Review before confirming</span>
-          <strong>Review the surviving Contact before sending the Salesforce merge</strong>
         </div>
       </div>
       <dl class="merge-confirmation-meta">
@@ -7897,7 +7896,7 @@ function buildMergePreviewState({ group, activeRecords, mergeState, mergeIds, pr
       field,
       label,
       kind: reviewOnlyValue != null ? "review-only" : "master-kept",
-      kindLabel: reviewOnlyValue != null ? "Review only" : "Kept",
+      kindLabel: reviewOnlyValue != null ? "Retained for review/export" : "Kept",
       resultValue: masterValue,
       reviewOnlyValue
     };

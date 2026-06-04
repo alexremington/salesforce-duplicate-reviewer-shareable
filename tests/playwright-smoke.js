@@ -1130,6 +1130,9 @@ async function captureMergePayload(page) {
   if (previewState.previewNoteCount !== 0) {
     throw new Error(`Expected no explanatory merge preview notes, found ${previewState.previewNoteCount}.`);
   }
+  if (!previewState.effectTexts.includes("Retained for review/export")) {
+    throw new Error(`Expected the review-only merge effect label to explain the value is retained for review/export: ${JSON.stringify(previewState.effectTexts)}`);
+  }
   const mergeSentBeforeConfirm = mergePayloads.length > 0;
 
   const firstPreviewLabel = previewState.currentPreviewLabel;
