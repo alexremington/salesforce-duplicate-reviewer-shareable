@@ -2391,6 +2391,7 @@ function syncThresholdInputs(changed = "") {
   els.thresholdMinNumber.value = String(minScore);
   els.thresholdMaxNumber.value = String(maxScore);
   syncThresholdSliderFill(minScore, maxScore, bounds);
+  syncThresholdSliderInteractionState(minScore, maxScore);
   els.thresholdValue.textContent = thresholdRangeLabel(minScore, maxScore);
 }
 
@@ -2429,6 +2430,19 @@ function syncThresholdSliderFill(minScore, maxScore, { min, max } = thresholdBou
   const maxPercent = ((maxScore - min) / range) * 100;
   els.thresholdSlider?.style.setProperty("--threshold-min-pct", `${minPercent}%`);
   els.thresholdSlider?.style.setProperty("--threshold-max-pct", `${maxPercent}%`);
+}
+
+function syncThresholdSliderInteractionState(minScore, maxScore) {
+  if (!els.thresholdSlider) return;
+  const bounds = thresholdBounds();
+  const collapsed = Number(minScore) === Number(maxScore);
+  if (collapsed && Number(minScore) <= bounds.min) {
+    els.thresholdSlider.dataset.collapsedEdge = "min";
+  } else if (collapsed && Number(maxScore) >= bounds.max) {
+    els.thresholdSlider.dataset.collapsedEdge = "max";
+  } else {
+    delete els.thresholdSlider.dataset.collapsedEdge;
+  }
 }
 
 function parseDatasetText(text, { format = "csv", fileName = "", objectType = state.objectType } = {}) {

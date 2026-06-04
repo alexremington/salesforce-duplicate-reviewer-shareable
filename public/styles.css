@@ -667,6 +667,7 @@ p {
   appearance: none;
   background: transparent;
   pointer-events: none;
+  touch-action: none;
 }
 
 .threshold-slider-input-min {
@@ -675,6 +676,26 @@ p {
 
 .threshold-slider-input-max {
   z-index: 3;
+}
+
+.threshold-slider[data-collapsed-edge="min"] .threshold-slider-input-max {
+  z-index: 4;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.threshold-slider[data-collapsed-edge="min"] .threshold-slider-input-max:active {
+  cursor: grabbing;
+}
+
+.threshold-slider[data-collapsed-edge="max"] .threshold-slider-input-min {
+  z-index: 4;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.threshold-slider[data-collapsed-edge="max"] .threshold-slider-input-min:active {
+  cursor: grabbing;
 }
 
 .threshold-slider-input:focus {

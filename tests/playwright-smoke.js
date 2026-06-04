@@ -450,6 +450,20 @@ async function run() {
     if (thresholdTypedState.minRange !== "80" || thresholdTypedState.maxRange !== "99") {
       throw new Error(`Expected typed min threshold to update the slider: ${JSON.stringify(thresholdTypedState)}`);
     }
+    await setRangeValue(page, "#threshold", "70");
+    await setRangeValue(page, "#maxThreshold", "70");
+    await dragRangeToValue(page, "#maxThreshold", 80);
+    const thresholdCollapsedMinDragState = await thresholdControlState(page);
+    if (thresholdCollapsedMinDragState.minRange !== "70" || Number(thresholdCollapsedMinDragState.maxRange) <= 70) {
+      throw new Error(`Expected collapsed minimum threshold slider to remain draggable: ${JSON.stringify(thresholdCollapsedMinDragState)}`);
+    }
+    await setRangeValue(page, "#threshold", "100");
+    await setRangeValue(page, "#maxThreshold", "100");
+    await dragRangeToValue(page, "#threshold", 90);
+    const thresholdCollapsedMaxDragState = await thresholdControlState(page);
+    if (Number(thresholdCollapsedMaxDragState.minRange) >= 100 || thresholdCollapsedMaxDragState.maxRange !== "100") {
+      throw new Error(`Expected collapsed maximum threshold slider to remain draggable: ${JSON.stringify(thresholdCollapsedMaxDragState)}`);
+    }
     if (!fastestSearchDefaultUnchecked) {
       throw new Error("Expected fastest search to be opt-in so broader candidate search is the default.");
     }
@@ -1614,6 +1628,29 @@ async function setRangeValue(page, selector, value) {
     input.value = nextValue;
     input.dispatchEvent(new Event("input", { bubbles: true }));
   }, value);
+}
+
+async function dragRangeToValue(page, selector, targetValue) {
+  const locator = page.locator(selector);
+  await locator.scrollIntoViewIfNeeded();
+  const bounds = await locator.boundingBox();
+  if (!bounds) throw new Error(`Expected ${selector} to have a bounding box`);
+  const metrics = await locator.evaluate((input) => {
+    const min = Number(input.min || 0);
+    const max = Number(input.max || 100);
+    const value = Number(input.value || 0);
+    return { min, max, value };
+  });
+  const trackRange = Math.max(metrics.max - metrics.min, 1);
+  const startX = bounds.x + ((metrics.value - metrics.min) / trackRange) * bounds.width;
+  const endX = bounds.x + ((targetValue - metrics.min) / trackRange) * bounds.width;
+  const y = bounds.y + bounds.height / 2;
+  const start = Math.min(Math.max(startX, bounds.x + 1), bounds.x + bounds.width - 1);
+  const end = Math.min(Math.max(endX, bounds.x + 1), bounds.x + bounds.width - 1);
+  await page.mouse.move(start, y);
+  await page.mouse.down();
+  await page.mouse.move(end, y, { steps: 12 });
+  await page.mouse.up();
 }
 
 async function themeColorState(page) {
