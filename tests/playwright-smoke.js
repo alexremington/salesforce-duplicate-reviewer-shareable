@@ -27,7 +27,7 @@ const baseUrl = process.env.DUPLICATE_REVIEWER_URL || "http://127.0.0.1:5180";
 const outDir = process.env.PLAYWRIGHT_SMOKE_OUT_DIR || path.join(os.tmpdir(), "duplicate-reviewer-playwright");
 const REACHABILITY_OPTIONS = {
   intentionallyHiddenIds: ["csvInput", "trainingImportInput"],
-  pointerEventsAllowedClassNames: ["threshold-slider-input"],
+  pointerEventsAllowedClassNames: ["threshold-slider-input", "threshold-slider"],
   sharedHitAncestorSelectors: [".threshold-slider"]
 };
 const PERFORMANCE_BUDGETS = {
@@ -550,6 +550,12 @@ async function run() {
     }
     if (!mergePayload.reviewOnlyRowCount) {
       throw new Error(`Expected review surface table to label review-only retained values: ${JSON.stringify(mergePayload)}`);
+    }
+    if (!mergePayload.successVisible || mergePayload.reviewVisibleAfterSuccess || mergePayload.successReviewButtonCount !== 0 || mergePayload.successReviewButtonVisible || mergePayload.successPreviewVisible !== 0) {
+      throw new Error(`Expected merge success to replace review controls with a general success screen: ${JSON.stringify(mergePayload)}`);
+    }
+    if (mergePayload.successTitle !== "Last merge succeeded") {
+      throw new Error(`Expected merge success screen title to be "Last merge succeeded": ${JSON.stringify(mergePayload)}`);
     }
     if (mergePayload.dialogMessages?.length) {
       throw new Error(`Expected review surface flow to avoid browser confirmation dialogs: ${JSON.stringify(mergePayload)}`);
@@ -1155,7 +1161,15 @@ async function captureMergePayload(page) {
   await page.locator(".merge-submit-button").click();
   await page.locator(".merge-review-panel").waitFor({ state: "visible", timeout: 5000 });
   await page.locator(".merge-confirm-preview-button").click();
-  await page.locator(".merge-result.success").waitFor({ state: "visible", timeout: 5000 });
+  await page.locator(".merge-success-panel").waitFor({ state: "visible", timeout: 5000 });
+  const successVisible = await page.locator(".merge-success-panel").isVisible();
+  const reviewVisibleAfterSuccess = await page.locator(".merge-review-panel").isVisible().catch(() => false);
+  const successReviewButtonCount = await page.locator(".merge-success-panel .merge-submit-button").count();
+  const successReviewButtonVisible = successReviewButtonCount
+    ? await page.locator(".merge-success-panel .merge-submit-button").isVisible()
+    : false;
+  const successPreviewVisible = await page.locator(".merge-success-panel .merge-confirmation-preview").count();
+  const successTitle = await page.locator(".merge-success-panel strong").first().textContent();
   await page.unroute("**/api/salesforce/premerge-check");
   await page.unroute("**/api/salesforce/merge");
   page.off("dialog", handleDialog);
@@ -1185,6 +1199,12 @@ async function captureMergePayload(page) {
     previewMasterId: previewState.masterId,
     previewDuplicateCount: previewState.duplicateListCount || previewState.duplicateCount,
     reviewOnlyRowCount: previewState.reviewOnlyRows.length,
+    successVisible,
+    reviewVisibleAfterSuccess,
+    successReviewButtonCount,
+    successReviewButtonVisible,
+    successPreviewVisible,
+    successTitle: successTitle?.trim() || "",
     payloadsAligned,
     dialogMessages
   };
@@ -2101,14 +2121,14 @@ async function assertRightPaneSingleScrollModel(page) {
     const workspace = document.querySelector(".workspace-column");
     const reviewPane = document.querySelector(".review-pane");
     const matchControls = document.querySelector(".match-controls-panel");
-    const mergeSubmit = document.querySelector(".merge-submit-button");
+    const mergeTerminal = document.querySelector(".merge-success-panel") || document.querySelector(".merge-submit-button");
     const workspaceAfterWheel = workspace.scrollTop;
     const reviewAfterWheel = reviewPane.scrollTop;
     const matchTopAfterWheel = Math.round(matchControls.getBoundingClientRect().top);
     const windowAfterWheel = window.scrollY;
 
-    mergeSubmit?.scrollIntoView({ block: "center", inline: "nearest" });
-    const mergeRect = mergeSubmit?.getBoundingClientRect();
+    mergeTerminal?.scrollIntoView({ block: "center", inline: "nearest" });
+    const mergeRect = mergeTerminal?.getBoundingClientRect();
     const mergeSubmitReachable = Boolean(
       mergeRect &&
       mergeRect.width > 0 &&

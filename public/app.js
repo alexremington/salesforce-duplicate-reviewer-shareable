@@ -6479,6 +6479,9 @@ function renderSalesforceMergePanel(group, activeRecords, currentDecision) {
 
   const mergeState = getMergeState(group, activeRecords, currentDecision);
   const result = state.mergeResults.get(group.key);
+  if (result?.status === "success") {
+    return renderMergeSuccessPanel(group, activeRecords, mergeState, result);
+  }
   const resolutionContext = createFieldResolutionContext(group, activeRecords);
   const overrideCount = countMergeFieldOverrides(group, activeRecords, mergeState, resolutionContext);
   const queueGroups = getMergeReviewQueueCandidates();
@@ -6947,6 +6950,59 @@ function renderMergeResult(result) {
         </div>
       ` : ""}
     </div>
+  `;
+}
+
+function renderMergeSuccessPanel(group, activeRecords, mergeState, result) {
+  const mergedIds = Array.isArray(result.mergedRecordIds) ? result.mergedRecordIds : [];
+  const relatedCount = Array.isArray(result.updatedRelatedIds) ? result.updatedRelatedIds.length : 0;
+  const when = result.mergedAt ? new Date(result.mergedAt).toLocaleString() : "";
+  const mergedSummary = mergedIds.length
+    ? `Merged ${formatNumber(mergedIds.length)} ${mergedIds.length === 1 ? "record" : "records"}${relatedCount ? ` and updated ${formatNumber(relatedCount)} related ${relatedCount === 1 ? "record" : "records"}` : ""}.`
+    : result.message || "Salesforce merge completed.";
+  const mergedRecordSummary = mergedIds.length
+    ? mergedIds.map((id) => `
+        <div class="merge-preview-list-item">
+          <strong>${escapeHtml(id)}</strong>
+          <span>merged record</span>
+        </div>
+      `).join("")
+    : '<em class="merge-empty">No merged record IDs available</em>';
+
+  return `
+    <section class="salesforce-merge-panel success merge-success-panel" aria-label="Merge completed">
+      <div class="salesforce-merge-header">
+        <div>
+          <span>Merge completed</span>
+          <strong>Last merge succeeded</strong>
+          <em>${escapeHtml(mergedSummary)}</em>
+        </div>
+        <span class="merge-status-pill success">Done</span>
+      </div>
+      <div class="merge-confirmation-summary">
+        <div class="merge-readiness-card">
+          <span>Surviving master</span>
+          <strong>${escapeHtml(mergeState.selectedRecord ? displayName(mergeState.selectedRecord) : "Unnamed Contact")}</strong>
+          <em>${escapeHtml(mergeState.selectedId || result.masterId || "Merged master")}</em>
+        </div>
+        <div class="merge-readiness-card">
+          <span>Duplicate Contacts removed</span>
+          <strong>${formatNumber(mergedIds.length)}</strong>
+          <em>${mergedIds.length === 1 ? "record merged" : "records merged"}</em>
+        </div>
+        <div class="merge-readiness-card">
+          <span>Completed at</span>
+          <strong>${escapeHtml(when || "Just now")}</strong>
+          <em>${relatedCount ? `${formatNumber(relatedCount)} related ${relatedCount === 1 ? "record" : "records"} updated` : "No related records updated"}</em>
+        </div>
+      </div>
+      <div class="merge-preview merge-preview-list">
+        <span>This group is complete. Select another duplicate group from the list to continue.</span>
+        <div class="merge-id-list merge-id-list-plain">
+          ${mergedRecordSummary}
+        </div>
+      </div>
+    </section>
   `;
 }
 
