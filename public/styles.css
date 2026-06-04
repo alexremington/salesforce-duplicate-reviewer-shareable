@@ -678,24 +678,32 @@ p {
   z-index: 3;
 }
 
-.threshold-slider[data-collapsed-edge="min"] .threshold-slider-input-max {
+#thresholdSlider[data-collapsed-edge="min"] .threshold-slider-input-max {
   z-index: 4;
   pointer-events: auto;
   cursor: grab;
 }
 
-.threshold-slider[data-collapsed-edge="min"] .threshold-slider-input-max:active {
+#thresholdSlider[data-collapsed-edge="min"] .threshold-slider-input-max:active {
   cursor: grabbing;
 }
 
-.threshold-slider[data-collapsed-edge="max"] .threshold-slider-input-min {
+#thresholdSlider[data-collapsed-edge="min"] .threshold-slider-input-min {
+  opacity: 0;
+}
+
+#thresholdSlider[data-collapsed-edge="max"] .threshold-slider-input-min {
   z-index: 4;
   pointer-events: auto;
   cursor: grab;
 }
 
-.threshold-slider[data-collapsed-edge="max"] .threshold-slider-input-min:active {
+#thresholdSlider[data-collapsed-edge="max"] .threshold-slider-input-min:active {
   cursor: grabbing;
+}
+
+#thresholdSlider[data-collapsed-edge="max"] .threshold-slider-input-max {
+  opacity: 0;
 }
 
 .threshold-slider-input:focus {

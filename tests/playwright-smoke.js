@@ -457,8 +457,13 @@ async function run() {
     if (thresholdCollapsedMinDragState.minRange !== "70" || Number(thresholdCollapsedMinDragState.maxRange) <= 70) {
       throw new Error(`Expected collapsed minimum threshold slider to remain draggable: ${JSON.stringify(thresholdCollapsedMinDragState)}`);
     }
-    await setRangeValue(page, "#threshold", "100");
+    await setRangeValue(page, "#threshold", "70");
     await setRangeValue(page, "#maxThreshold", "100");
+    await dragRangeToValue(page, "#threshold", 100);
+    const thresholdCollapsedMaxSetupState = await thresholdControlState(page);
+    if (thresholdCollapsedMaxSetupState.minRange !== "100" || thresholdCollapsedMaxSetupState.maxRange !== "100") {
+      throw new Error(`Expected dragging the minimum threshold to the far right to collapse at 100: ${JSON.stringify(thresholdCollapsedMaxSetupState)}`);
+    }
     await dragRangeToValue(page, "#threshold", 90);
     const thresholdCollapsedMaxDragState = await thresholdControlState(page);
     if (Number(thresholdCollapsedMaxDragState.minRange) >= 100 || thresholdCollapsedMaxDragState.maxRange !== "100") {
