@@ -660,8 +660,8 @@ p {
 
 .threshold-slider-input {
   position: absolute;
-  inset: 0;
-  width: 100%;
+  inset: 0 12px;
+  width: auto;
   height: 34px;
   margin: 0;
   appearance: none;

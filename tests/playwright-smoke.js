@@ -464,6 +464,18 @@ async function run() {
     if (thresholdCollapsedMaxSetupState.minRange !== "100" || thresholdCollapsedMaxSetupState.maxRange !== "100") {
       throw new Error(`Expected dragging the minimum threshold to the far right to collapse at 100: ${JSON.stringify(thresholdCollapsedMaxSetupState)}`);
     }
+    const thresholdCollapsedMaxInputBox = await page.locator("#threshold").boundingBox();
+    if (!thresholdCollapsedMaxInputBox) throw new Error("Expected the threshold slider input to be visible for the 100/100 click regression.");
+    await page.mouse.click(
+      thresholdCollapsedMaxInputBox.x + Math.max(4, thresholdCollapsedMaxInputBox.width - 18),
+      thresholdCollapsedMaxInputBox.y + thresholdCollapsedMaxInputBox.height / 2
+    );
+    const thresholdCollapsedMaxClickState = await thresholdControlState(page);
+    if (Number(thresholdCollapsedMaxClickState.minRange) === 100 && Number(thresholdCollapsedMaxClickState.maxRange) === 100) {
+      throw new Error(`Expected clicking the collapsed maximum threshold slider to move it off 100: ${JSON.stringify(thresholdCollapsedMaxClickState)}`);
+    }
+    await setRangeValue(page, "#threshold", "100");
+    await setRangeValue(page, "#maxThreshold", "100");
     await dragRangeToValue(page, "#threshold", 90);
     const thresholdCollapsedMaxDragState = await thresholdControlState(page);
     if (Number(thresholdCollapsedMaxDragState.minRange) >= 100 || thresholdCollapsedMaxDragState.maxRange !== "100") {
