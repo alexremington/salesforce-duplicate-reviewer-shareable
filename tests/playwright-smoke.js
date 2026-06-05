@@ -300,6 +300,10 @@ async function run() {
     await page.locator("#csvInput").setInputFiles(accountCsvPath);
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
     await waitForFirstGroup(page, "Account CSV load");
+    const accountDebugState = await duplicateReviewerDebugState(page);
+    if (accountDebugState.groupCount !== 1) {
+      throw new Error(`Expected the account scorer to keep the near-exact name-only pair out of the duplicate set: ${JSON.stringify(accountDebugState)}`);
+    }
     const accountMergeDisabled = await page.locator('[data-review-mode="merge"]').isDisabled();
     await page.screenshot({ path: path.join(outDir, "desktop-account-evaluate.png"), fullPage: false });
 

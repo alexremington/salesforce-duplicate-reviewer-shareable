@@ -445,6 +445,7 @@ const TRAINING_PAIR_FIELDS = {
 };
 const ACCOUNT_CONTRADICTION_THRESHOLD = 0.5;
 const ACCOUNT_EXACT_NAME_WEAK_WEBSITE_CAP = 85;
+const ACCOUNT_UNCORROBORATED_NEAR_EXACT_NAME_CAP = 85;
 const ACCOUNT_WEAK_WEBSITE_CONFLICT_MAX = 0.55;
 const ACCOUNT_SCOPE_DIVERGENCE_CAP = 85;
 const ACCOUNT_SCOPE_DIVERGENCE_TOKENS = new Set([
@@ -3843,6 +3844,7 @@ function scoreAccountPair(left, right, fieldStats = null) {
   if (scoreResult.parentBranchDivergenceCapApplied) reasons.push("Different branch or department under parent");
   if (scoreResult.scopeDivergenceCapApplied) reasons.push("Different account scope");
   if (scoreResult.exactNameWeakWebsiteCapApplied) reasons.push("Exact name with conflicting website");
+  if (scoreResult.uncorroboratedNearExactNameCapApplied) reasons.push("Near-exact name without corroboration");
 
   return {
     left: left.row,
@@ -3929,7 +3931,8 @@ function scoreAccountFields(fieldScores, left, right, fieldStats) {
       nameDivergenceCapApplied: false,
       parentBranchDivergenceCapApplied: false,
       scopeDivergenceCapApplied: false,
-      exactNameWeakWebsiteCapApplied: false
+      exactNameWeakWebsiteCapApplied: false,
+      uncorroboratedNearExactNameCapApplied: false
     };
   }
 
@@ -3946,14 +3949,16 @@ function scoreAccountFields(fieldScores, left, right, fieldStats) {
     ACCOUNT_CONTRADICTION_THRESHOLD
   );
   const cappedScore = applyAccountNameDivergenceCap(penalizedScore, fieldScores, left, right);
+  const corroborationCap = applyAccountNearExactNameCorroborationCap(cappedScore.value, fieldScores, left, right);
 
   return {
-    value: cappedScore.value,
+    value: corroborationCap.value,
     commonEvidenceDiscounted,
     nameDivergenceCapApplied: cappedScore.nameDivergenceApplied,
     parentBranchDivergenceCapApplied: cappedScore.parentBranchApplied,
     scopeDivergenceCapApplied: cappedScore.scopeDivergenceApplied,
-    exactNameWeakWebsiteCapApplied: cappedScore.exactNameWeakWebsiteApplied
+    exactNameWeakWebsiteCapApplied: cappedScore.exactNameWeakWebsiteApplied,
+    uncorroboratedNearExactNameCapApplied: corroborationCap.applied
   };
 }
 
@@ -4058,6 +4063,10 @@ function hasAccountExactNameWeakWebsiteConflict(fieldScores, left, right) {
 }
 
 function hasStrongExactNameCorroboration(fieldScores, left, right) {
+  return hasStrongAccountCorroboration(fieldScores, left, right);
+}
+
+function hasStrongAccountCorroboration(fieldScores, left, right) {
   if (left.hasStatusMarker || right.hasStatusMarker) return true;
   if ((fieldScores.website || 0) >= MATCHED_FIELD_THRESHOLD) return true;
   if (fieldScores.billingPostalCode === 1 && fieldScores.billingCountry === 1) return true;
@@ -4067,6 +4076,42 @@ function hasStrongExactNameCorroboration(fieldScores, left, right) {
     return true;
   }
   return fieldScores.ultimateParentAccount === 1 && hasDifferentUltimateParent(left) && hasDifferentUltimateParent(right);
+}
+
+function applyAccountNearExactNameCorroborationCap(value, fieldScores, left, right) {
+  const nameScore = fieldScores.name;
+  if (nameScore == null || nameScore < 0.9 || nameScore >= 1) {
+    return {
+      value,
+      applied: false
+    };
+  }
+
+  if (hasStrongAccountCorroboration(fieldScores, left, right)) {
+    return {
+      value,
+      applied: false
+    };
+  }
+
+  if (hasSharedDistinctiveEntityAnchor(left.name, right.name)) {
+    return {
+      value,
+      applied: false
+    };
+  }
+
+  const cap = accountNearExactNameUncorroboratedCap(nameScore);
+  return {
+    value: Math.min(value, cap),
+    applied: value > cap
+  };
+}
+
+function accountNearExactNameUncorroboratedCap(nameScore) {
+  if (nameScore < 0.92) return 83;
+  if (nameScore < 0.97) return ACCOUNT_UNCORROBORATED_NEAR_EXACT_NAME_CAP;
+  return 86;
 }
 
 function accountNameTokenCount(left, right) {
