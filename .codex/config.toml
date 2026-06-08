@@ -1,0 +1,10 @@
+[features]
+hooks = true
+
+[[hooks.UserPromptSubmit]]
+
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = '/usr/bin/env python3 "$(git rev-parse --show-toplevel)/plugins/agentic-workflow-policy/scripts/agentic_entry_engine.py" "$(git rev-parse --show-toplevel)/plugins/agentic-workflow-policy/config/salesforce-duplicate-reviewer.json"'
+timeout = 10
+statusMessage = "Applying lean workflow guidance"

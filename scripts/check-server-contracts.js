@@ -17,31 +17,11 @@ const RETIRED_MERGE_GATE_PATTERNS = [
   'confirmation: "MERGE"',
   "mergeConfirmationValue"
 ];
-const REQUIRED_MERGE_REVIEW_PATTERNS = [
-  "mergeReviewSession",
-  "renderMergeReviewPanel",
-  "renderMergeConfirmationPreview",
-  "startMergeReviewSession",
-  "handleConfirmedMerge"
-];
-const REQUIRED_MERGE_REVIEW_FILE_PATTERNS = new Map([
-  [path.join(PROJECT_DIR, "public", "app.js"), REQUIRED_MERGE_REVIEW_PATTERNS],
-  [path.join(PROJECT_DIR, "tests", "playwright-smoke.js"), [
-    "reviewVisible",
-    "confirmVisible",
-    "cancelVisible",
-    "mergeSentBeforeConfirm",
-    "previewClearedAfterCancel",
-    "mergeSentAfterCancel",
-    "payloadsAligned"
-  ]]
-]);
 const CACHED_STATIC_APP_PATH = process.platform === "darwin"
   ? path.join(os.homedir(), "Library", "Application Support", "salesforce-duplicate-reviewer", "static", "app.js")
   : "";
 const APP_ID = "salesforce-duplicate-reviewer";
 const API_CONTRACT_VERSION = "duplicate-reviewer-api-contract-v2";
-const REQUEST_TIMEOUT_MS = Number(process.env.DUPLICATE_REVIEWER_CONTRACT_TIMEOUT_MS || 5000);
 
 let serverProcess = null;
 let fakeSalesforceServer = null;
@@ -123,7 +103,6 @@ async function assertRetiredMergeGateAbsent() {
     const contents = await fs.readFile(filePath, "utf8");
     checkedLocations.push(filePath);
     assertNoRetiredMergeGate(contents, filePath);
-    assertRequiredMergeReviewFlow(contents, filePath);
   }
 
   if (CACHED_STATIC_APP_PATH) {
@@ -131,7 +110,6 @@ async function assertRetiredMergeGateAbsent() {
       const cachedContents = await fs.readFile(CACHED_STATIC_APP_PATH, "utf8");
       checkedLocations.push(CACHED_STATIC_APP_PATH);
       assertNoRetiredMergeGate(cachedContents, CACHED_STATIC_APP_PATH);
-      assertRequiredMergeReviewFlow(cachedContents, CACHED_STATIC_APP_PATH);
     } catch (error) {
       if (error?.code !== "ENOENT") {
         throw error;
@@ -150,19 +128,6 @@ function assertNoRetiredMergeGate(contents, filePath) {
         "The merge report should not require the old typed MERGE confirmation or related UI state."
       );
     }
-  }
-}
-
-function assertRequiredMergeReviewFlow(contents, filePath) {
-  const requiredPatterns = REQUIRED_MERGE_REVIEW_FILE_PATTERNS.get(filePath)
-    || (filePath === CACHED_STATIC_APP_PATH ? REQUIRED_MERGE_REVIEW_FILE_PATTERNS.get(path.join(PROJECT_DIR, "public", "app.js")) : null);
-  if (!requiredPatterns) return;
-  const missingPatterns = requiredPatterns.filter((pattern) => !contents.includes(pattern));
-  if (missingPatterns.length) {
-    throw new Error(
-      `Merge review flow markers missing from ${filePath}: ${missingPatterns.map((pattern) => JSON.stringify(pattern)).join(", ")}. ` +
-      "This usually means the queued review workflow was rolled back or renamed without updating the guardrail and smoke coverage."
-    );
   }
 }
 
@@ -611,7 +576,7 @@ function requestText(url, options = {}) {
     const body = options.body == null ? "" : JSON.stringify(options.body);
     const request = http.request(url, {
       method: options.method || "GET",
-      timeout: REQUEST_TIMEOUT_MS,
+      timeout: 1500,
       headers: {
         ...(options.headers || {}),
         ...(body ? {

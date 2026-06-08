@@ -67,9 +67,11 @@ Account matching remains available in `Evaluate`. Account merge is intentionally
 
 ## Salesforce Merge
 
-When the local reviewer server is running, Contact duplicate groups can be handled in the `Merge` workflow. Mark the group as `Duplicate`, choose the master Contact, review field-level retained-value overrides, type `MERGE`, and confirm the browser prompt to send the merge to Salesforce.
+When the local reviewer server is running, Contact duplicate groups can be handled in the `Merge` workflow. Mark the group as `Duplicate`, choose the master Contact, review field-level retained-value overrides, review the queued merge preview, and then confirm the merge to send it to Salesforce.
 
 Merges run server-side through the Salesforce SOAP API so access tokens are not exposed in the browser. The server uses `SF_ACCESS_TOKEN` when present; otherwise it gets a token from Salesforce CLI with `sf org display --target-org "$SF_ORG_ALIAS" --json`.
+After a successful merge, the merge result card exposes a CSV status report and the server writes the same report to `Output/salesforce-merge-report-latest.csv` for later review.
+The CSV now keeps the Salesforce ID and the record snapshot fields for the master and duplicate Contacts so the report can serve as a usable merge log.
 
 Current app-enforced rules:
 
@@ -77,8 +79,8 @@ Current app-enforced rules:
 - Every active record in the merge group must be a Contact with a valid `003` Salesforce ID. If the loaded Contacts dataset is missing IDs, the app blocks merge and, for server-backed latest Contacts data, offers to refresh the Contacts pull that includes the `Id` field.
 - One Contact is selected as the master. The selected master keeps its field values by default, and Salesforce reparents related records from duplicate Contacts to that master.
 - `Lead Source` is locked to the oldest created Contact when both `Lead Source` and `Created Date` are available. If the selected master has a different Lead Source, the merge payload updates the master to the oldest-created value.
-- The browser collects intent and confirmation, but merge execution stays server-side so Salesforce access tokens are not exposed to the browser.
-- The user must type `MERGE` and accept the browser confirmation before a merge is sent to Salesforce.
+- The browser collects intent and preview confirmation, but merge execution stays server-side so Salesforce access tokens are not exposed to the browser.
+- The user must review the queued merge preview before the merge is sent to Salesforce.
 - Before every merge, the server re-reads the selected Contacts from Salesforce and blocks the merge if any selected record is missing, deleted, or changed from the loaded reviewer data.
 
 Field-retention policy for merges:

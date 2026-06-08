@@ -7,13 +7,11 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${PROJECT_DIR}"
 
 echo "Checking JavaScript syntax..."
-find . \
-  -path './.git' -prune -o \
-  -path './Output' -prune -o \
-  -path './incoming' -prune -o \
-  -path './logs' -prune -o \
-  -path './node_modules' -prune -o \
-  -type f -name '*.js' -exec node --check {} \;
+node ../automation-shared-resources/scripts/check-js-syntax.js . \
+  --exclude Output \
+  --exclude incoming \
+  --exclude logs \
+  --exclude node_modules
 
 echo "Checking shell syntax..."
 find . \
@@ -32,6 +30,30 @@ node ../automation-shared-resources/scripts/check-feature-manifest.js .
 
 echo "Checking server contracts..."
 node scripts/check-server-contracts.js
+
+echo "Checking staging routing defaults..."
+contactsDryRun="$(scripts/run-staging-contacts-bulk-query.sh --dry-run)"
+case "${contactsDryRun}" in
+  *"/Output/staging-contacts"*) ;;
+  *)
+    echo "${contactsDryRun}"
+    echo "Staging Contacts did not resolve to the public-safe staging output folder."
+    exit 1
+    ;;
+esac
+if ! grep -Fq "sf org display" scripts/run-salesforce-bulk-query.sh; then
+  echo "Bulk query wrapper did not use sf org display."
+  exit 1
+fi
+accountsDryRun="$(scripts/run-staging-accounts-bulk-query.sh --dry-run)"
+case "${accountsDryRun}" in
+  *"/Output/staging-accounts"*) ;;
+  *)
+    echo "${accountsDryRun}"
+    echo "Staging Accounts did not resolve to the public-safe staging output folder."
+    exit 1
+    ;;
+esac
 
 if git rev-parse --verify shareable >/dev/null 2>&1; then
   echo "Checking shareable branch safety..."

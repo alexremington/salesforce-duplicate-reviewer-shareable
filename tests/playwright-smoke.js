@@ -9,6 +9,7 @@ const {
 } = require("../vendor/managed-app/scripts/smoke-test-harness");
 const {
   accountSmokeCsv,
+  contactLastNameChangeSmokeCsv,
   contactMissingIdSmokeCsv,
   contactSmokeCsv,
   largeContactSmokeCsv
@@ -33,13 +34,15 @@ const PERFORMANCE_BUDGETS = {
   emptyImportContactsMs: 15000,
   latestContactsJsonMs: 10000,
   topbarImportContactsMs: 15000,
-  largeContactCsvWorkerMs: 30000
+  largeContactCsvWorkerMs: 30000,
+  largeContactCandidateAttempts: 500000
 };
 
 async function run() {
   await fs.mkdir(outDir, { recursive: true });
   const csvPath = path.join(outDir, "contacts-smoke.csv");
   const missingContactIdCsvPath = path.join(outDir, "contacts-missing-ids.csv");
+  const lastNameChangeCsvPath = path.join(outDir, "contacts-last-name-change.csv");
   const accountCsvPath = path.join(outDir, "accounts-smoke.csv");
   const largeContactCsvPath = path.join(outDir, "contacts-large-smoke.csv");
   const contactCsv = contactSmokeCsv();
@@ -48,6 +51,7 @@ async function run() {
   const largeContactSmokeRowCount = csvDataRowCount(largeContactCsv);
   await fs.writeFile(csvPath, contactCsv);
   await fs.writeFile(missingContactIdCsvPath, contactMissingIdSmokeCsv());
+  await fs.writeFile(lastNameChangeCsvPath, contactLastNameChangeSmokeCsv());
   await fs.writeFile(accountCsvPath, accountSmokeCsv());
   await fs.writeFile(largeContactCsvPath, largeContactCsv);
 
@@ -57,6 +61,7 @@ async function run() {
   try {
     const fileModeRedirect = await assertFileModeRedirect(browser);
     const emptyImportButtonState = await assertEmptyImportButtonOpensFileChooser(browser, csvPath);
+    const lastNameChangeCandidateState = await assertLastNameChangeCandidateMatch(browser, lastNameChangeCsvPath);
     const largeContactPerformance = await assertLargeContactCsvPerformance(browser, largeContactCsvPath);
 
     const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
@@ -175,10 +180,7 @@ async function run() {
       fieldResolutionSelectable = optionCount > 0;
     }
 
-    const trainingMatchButton = page.locator('[data-label-action="match"]').first();
-    if (await trainingMatchButton.isVisible()) {
-      await trainingMatchButton.click();
-    }
+    const trainingLabelRerenderState = await exerciseTrainingLabelRerender(page);
     await page.locator(".group-item.is-label-full .label-status-indicator.full").first().waitFor({ state: "visible", timeout: 5000 });
     const fullLabelIndicators = await page.locator(".group-item.is-label-full .label-status-indicator.full").count();
     const trainingExportEnabled = await page.locator("#trainingExportButton").isEnabled();
@@ -225,7 +227,6 @@ async function run() {
           .some((radio) => radio.name === name && radio.value === value && radio.checked);
       }, mergeFieldSelection);
     }
-    await page.locator(".merge-confirmation-input").fill("MERGE");
     const staleRefreshState = await captureStaleRefreshFlow(page, contactSmokeCsv());
     const staleFailureCardRefreshState = await captureStaleFailureCardRefreshFlow(page, contactSmokeCsv());
     const missingContactIdRefreshState = await captureMissingContactIdRefreshFlow(page, missingContactIdCsvPath, contactSmokeCsv());
@@ -237,9 +238,8 @@ async function run() {
     if (await page.locator(".merge-master-radio").count() > 1) {
       await page.locator(".merge-master-radio").nth(1).check();
     }
-    await page.locator(".merge-confirmation-input").fill("MERGE");
-    const mergeConfirmationValue = await page.locator(".merge-confirmation-input").inputValue();
     const mergePayload = await captureMergePayload(page);
+    const mergeReportDownloadState = await captureMergeReportDownload(page);
     await page.setViewportSize({ width: 1280, height: 560 });
     const workspaceColumnScroll = await assertVerticalScrollAvailable(page, ".workspace-column", "workspace column");
     const rightPaneScrollModel = await assertRightPaneSingleScrollModel(page);
@@ -253,6 +253,10 @@ async function run() {
     await page.locator("#csvInput").setInputFiles(accountCsvPath);
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
     await waitForFirstGroup(page, "Account CSV load");
+    const accountDebugState = await duplicateReviewerDebugState(page);
+    if (accountDebugState.groupCount !== 1) {
+      throw new Error(`Expected the account scorer to keep the near-exact name-only pair out of the duplicate set: ${JSON.stringify(accountDebugState)}`);
+    }
     const accountMergeDisabled = await page.locator('[data-review-mode="merge"]').isDisabled();
     await page.screenshot({ path: path.join(outDir, "desktop-account-evaluate.png"), fullPage: false });
 
@@ -282,6 +286,16 @@ async function run() {
     assertPerformanceBudget("empty-state Contact import", emptyImportButtonState.elapsedMs, PERFORMANCE_BUDGETS.emptyImportContactsMs);
     if (largeContactPerformance.rowCount !== largeContactSmokeRowCount || !largeContactPerformance.groupCount || largeContactPerformance.processingMode !== "worker") {
       throw new Error(`Expected large Contact CSV fixture to load through worker-backed matching: ${JSON.stringify(largeContactPerformance)}`);
+    }
+    if (!largeContactPerformance.matchingStats || largeContactPerformance.matchingStats.candidateAttempts > PERFORMANCE_BUDGETS.largeContactCandidateAttempts) {
+      throw new Error(`Large Contact CSV candidate attempts exceeded budget: ${JSON.stringify(largeContactPerformance.matchingStats)}`);
+    }
+    if (
+      lastNameChangeCandidateState.groupCount !== 1 ||
+      lastNameChangeCandidateState.firstGroupScore < 86 ||
+      !lastNameChangeCandidateState.matchingStats?.candidatePairs
+    ) {
+      throw new Error(`Expected last-name-change Contact pair to survive candidate pruning: ${JSON.stringify(lastNameChangeCandidateState)}`);
     }
     assertPerformanceBudget("large Contact CSV worker import", largeContactPerformance.elapsedMs, PERFORMANCE_BUDGETS.largeContactCsvWorkerMs);
     if (!lightTheme.colorScheme.includes("light") || !darkTheme.colorScheme.includes("dark") || lightTheme.bodyBg === darkTheme.bodyBg) {
@@ -372,8 +386,8 @@ async function run() {
       throw new Error(`Expected latest Contact and Account exports in Recent files: ${JSON.stringify(latestRecentFiles)}`);
     }
     if (!csvMenuClosed) throw new Error("Expected Import menu to close with Escape.");
-    if (!exportMenuClosed || exportMenuState.options.join("|") !== "Decisions|Labels") {
-      throw new Error(`Expected Export menu to show Decisions and Labels and close with Escape: ${JSON.stringify({ exportMenuClosed, exportMenuState })}`);
+    if (!exportMenuClosed || !exportMenuState.options.includes("Decisions") || !exportMenuState.options.includes("Labels")) {
+      throw new Error(`Expected Export menu to include Decisions and Labels and close with Escape: ${JSON.stringify({ exportMenuClosed, exportMenuState })}`);
     }
     if (!topbarImportState.fileChooserOpened || topbarImportState.rowCount !== contactSmokeRowCount || !topbarImportState.groupCount) {
       throw new Error(`Expected topbar Import > Contacts to open a file picker and load a dataset: ${JSON.stringify(topbarImportState)}`);
@@ -430,6 +444,14 @@ async function run() {
     }
     if (!separatedBadgeVisible) throw new Error("Expected Separate action to show a separated-record badge.");
     if (!fieldResolutionSelectable) throw new Error("Expected visible field-resolution selects to contain options.");
+    if (
+      !trainingLabelRerenderState.matchActiveAfterMatch ||
+      !trainingLabelRerenderState.notMatchActiveAfterRelabel ||
+      trainingLabelRerenderState.matchActiveAfterRelabel ||
+      trainingLabelRerenderState.notMatchPressedAfterRelabel !== "true"
+    ) {
+      throw new Error(`Expected training label buttons to rerender after relabeling the same pair: ${JSON.stringify(trainingLabelRerenderState)}`);
+    }
     if (!trainingExportEnabled) throw new Error("Expected training label action to enable label export.");
     if (!fullLabelIndicators) throw new Error("Expected fully labeled groups to show a green label indicator.");
     if (labelStatusFilterState.countBeforeApply !== labelStatusFilterState.startingCount || !labelStatusFilterState.applyEnabledAfterChange) {
@@ -453,7 +475,6 @@ async function run() {
       throw new Error(`Expected Lead Source hard-rule radios to be disabled and visually marked: ${JSON.stringify(leadSourceRule)}`);
     }
     if (!mergeFieldCanChange) throw new Error("Expected Contact merge field radio selection to change.");
-    if (mergeConfirmationValue !== "MERGE") throw new Error("Expected Contact merge confirmation input to accept text.");
     if (
       !staleRefreshState.preMergeCalled ||
       !staleRefreshState.refreshCalled ||
@@ -511,6 +532,35 @@ async function run() {
     ) {
       throw new Error(`Expected pre-merge check and merge payload to target the same records: ${JSON.stringify(mergePayload)}`);
     }
+    if (
+      !mergePayload.reviewVisible ||
+      !mergePayload.confirmVisible ||
+      !mergePayload.cancelVisible ||
+      mergePayload.mergeSentBeforeConfirm ||
+      !mergePayload.previewClearedAfterCancel ||
+      mergePayload.mergeSentAfterCancel ||
+      !mergePayload.nextAdvanced ||
+      !mergePayload.leftRailNavigationWorked ||
+      mergePayload.reviewOnlyRowCount < 1 ||
+      !mergePayload.payloadsAligned ||
+      mergePayload.dialogMessages.length
+    ) {
+      throw new Error(`Expected the queued merge review flow to render, navigate, cancel, and confirm correctly: ${JSON.stringify(mergePayload)}`);
+    }
+    if (
+      !mergeReportDownloadState.buttonVisible ||
+      !mergeReportDownloadState.downloaded ||
+      !mergeReportDownloadState.csv.includes("Salesforce ID") ||
+      !mergeReportDownloadState.csv.includes(mergePayload.masterId || "") ||
+      !mergeReportDownloadState.csv.includes((mergePayload.mergeIds || [])[0] || "") ||
+      !mergeReportDownloadState.csv.includes(mergePayload.records?.[0]?.name || "") ||
+      !mergeReportDownloadState.csv.includes(mergePayload.records?.[0]?.fields?.firstName || "") ||
+      !mergeReportDownloadState.csv.includes(mergePayload.records?.[0]?.fields?.lastName || "") ||
+      !mergeReportDownloadState.csv.includes("Retained as master") ||
+      !mergeReportDownloadState.csv.includes("Merged into master")
+    ) {
+      throw new Error(`Expected merge result to expose a downloadable CSV status report: ${JSON.stringify(mergeReportDownloadState)}`);
+    }
     if (!accountMergeDisabled) throw new Error("Expected Account merge mode to be disabled.");
     if (!shortcutsVisible) throw new Error("Expected shortcuts modal to be visible.");
     if (!rootScrollPolicy.ok) throw new Error(`Root scrolling is suppressed: ${JSON.stringify(rootScrollPolicy)}`);
@@ -562,6 +612,7 @@ async function run() {
       loadingStatusSamples,
       latestJsonLoad,
       latestJsonLoadElapsedMs,
+      lastNameChangeCandidateState,
       largeContactPerformance,
       performanceBudgets: PERFORMANCE_BUDGETS,
       leftPaneSmallListLayout,
@@ -642,6 +693,36 @@ async function assertEmptyImportButtonOpensFileChooser(browser, filePath) {
       fileChooserOpened: true,
       elapsedMs: Date.now() - startedAt,
       ...(await datasetLoadState(page))
+    };
+  } finally {
+    await page.close();
+  }
+}
+
+async function assertLastNameChangeCandidateMatch(browser, filePath) {
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const diagnostics = [];
+  page.on("console", (message) => {
+    if (["error", "warning"].includes(message.type())) {
+      diagnostics.push(`${message.type()}: ${message.text()}`);
+    }
+  });
+  page.on("pageerror", (error) => diagnostics.push(`pageerror: ${error.message}`));
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('[data-empty-action="choose-csv"]').waitFor({ state: "visible", timeout: 5000 });
+    const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
+    await page.locator('[data-empty-action="choose-csv"]').click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles(filePath);
+    await waitForLoadingModalHidden(page, "Last-name-change Contact candidate load", diagnostics);
+    await waitForFirstGroup(page, "Last-name-change Contact candidate load");
+    return {
+      ...(await datasetLoadState(page)),
+      ...(await page.evaluate(() => ({
+        firstGroupScore: state.groups[0]?.score || 0,
+        firstGroupReasons: state.groups[0]?.reasons || []
+      })))
     };
   } finally {
     await page.close();
@@ -740,8 +821,47 @@ async function datasetLoadState(page) {
     rowCount: state.rows.length,
     groupCount: state.groups.length,
     workerAvailable: typeof Worker !== "undefined",
-    processingMode: state.lastProcessingMode
+    processingMode: state.lastProcessingMode,
+    matchingStats: state.lastMatchingStats
   }));
+}
+
+async function exerciseTrainingLabelRerender(page) {
+  const matchButton = page.locator('[data-label-action="match"]').first();
+  const notMatchButton = page.locator('[data-label-action="not_match"]').first();
+  if (!(await matchButton.isVisible())) {
+    return {
+      available: false,
+      matchActiveAfterMatch: false,
+      matchActiveAfterRelabel: false,
+      notMatchActiveAfterRelabel: false,
+      notMatchPressedAfterRelabel: ""
+    };
+  }
+
+  await matchButton.click();
+  await page.waitForFunction(() => {
+    const button = document.querySelector('[data-label-action="match"]');
+    return button?.classList.contains("is-active") && button?.getAttribute("aria-pressed") === "true";
+  }, null, { timeout: 5000 });
+  const matchActiveAfterMatch = await matchButton.evaluate((button) => button.classList.contains("is-active"));
+
+  await notMatchButton.click();
+  await page.waitForFunction(() => {
+    const match = document.querySelector('[data-label-action="match"]');
+    const notMatch = document.querySelector('[data-label-action="not_match"]');
+    return !match?.classList.contains("is-active") &&
+      notMatch?.classList.contains("is-active") &&
+      notMatch?.getAttribute("aria-pressed") === "true";
+  }, null, { timeout: 5000 });
+
+  return {
+    available: true,
+    matchActiveAfterMatch,
+    matchActiveAfterRelabel: await matchButton.evaluate((button) => button.classList.contains("is-active")),
+    notMatchActiveAfterRelabel: await notMatchButton.evaluate((button) => button.classList.contains("is-active")),
+    notMatchPressedAfterRelabel: await notMatchButton.getAttribute("aria-pressed")
+  };
 }
 
 async function reportSummaryState(page) {
@@ -916,10 +1036,23 @@ async function mergeLeadSourceRuleState(page) {
 }
 
 async function captureMergePayload(page) {
-  let payload = null;
-  let preMergePayload = null;
+  const mergePayloads = [];
+  const firstReviewPreMergePayloads = [];
+  const secondReviewPreMergePayloads = [];
+  let reviewPhase = "first";
+  const dialogMessages = [];
+  const handleDialog = async (dialog) => {
+    dialogMessages.push(dialog.message());
+    await dialog.accept();
+  };
+  page.on("dialog", handleDialog);
   await page.route("**/api/salesforce/premerge-check", async (route) => {
-    preMergePayload = JSON.parse(route.request().postData() || "{}");
+    const preMergePayload = JSON.parse(route.request().postData() || "{}");
+    if (reviewPhase === "first") {
+      firstReviewPreMergePayloads.push(preMergePayload);
+    } else {
+      secondReviewPreMergePayloads.push(preMergePayload);
+    }
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -941,7 +1074,10 @@ async function captureMergePayload(page) {
     });
   });
   await page.route("**/api/salesforce/merge", async (route) => {
-    payload = JSON.parse(route.request().postData() || "{}");
+    const payload = JSON.parse(route.request().postData() || "{}");
+    mergePayloads.push(payload);
+    const masterRecord = findMergePayloadRecord(payload, payload.masterId);
+    const duplicateRecord = findMergePayloadRecord(payload, (payload.mergeIds || [])[0]);
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -953,20 +1089,195 @@ async function captureMergePayload(page) {
         masterId: payload.masterId,
         mergedRecordIds: payload.mergeIds || [],
         updatedRelatedIds: [],
-        mergedAt: new Date().toISOString()
+        mergedAt: new Date().toISOString(),
+        mergeReport: {
+          generatedAt: new Date().toISOString(),
+          fileName: "salesforce-merge-report-latest.csv",
+          latestFileName: "salesforce-merge-report-latest.csv",
+          csvPath: "/tmp/salesforce-merge-report-latest.csv",
+          latestCsvPath: "/tmp/salesforce-merge-report-latest.csv",
+          manifestPath: "/tmp/salesforce-merge-report-latest.json",
+          latestManifestPath: "/tmp/salesforce-merge-report-latest.json",
+          rowCount: 2,
+          rows: buildMergeReportRows(payload, masterRecord, duplicateRecord)
+        }
       })
     });
   });
 
-  page.once("dialog", (dialog) => dialog.accept());
   await page.locator(".merge-submit-button").click();
+  await page.locator(".merge-review-panel").waitFor({ state: "visible", timeout: 5000 });
+  await page.locator(".merge-confirmation-preview").waitFor({ state: "visible", timeout: 5000 });
+  const reviewVisible = await page.locator(".merge-review-panel").isVisible();
+  const confirmVisible = await page.locator(".merge-confirm-preview-button").isVisible();
+  const cancelVisible = await page.locator(".merge-cancel-preview-button").isVisible();
+  const previewState = await page.evaluate(() => {
+    const panel = document.querySelector(".merge-confirmation-preview");
+    const meta = [...document.querySelectorAll(".merge-confirmation-meta div")];
+    const reviewOnlyRows = [...document.querySelectorAll('[data-merge-preview-kind="review-only"]')].map((node) => node.textContent.trim());
+    return {
+      title: panel?.querySelector("strong")?.textContent?.trim() || "",
+      masterId: meta[0]?.querySelector("dd span")?.textContent?.trim() || "",
+      duplicateCount: document.querySelectorAll(".merge-confirmation-preview .merge-id-chip").length,
+      duplicateListCount: document.querySelectorAll(".merge-preview-list-item").length,
+      reviewOnlyRows,
+      reviewGroupCount: document.querySelectorAll(".group-item").length,
+      currentPreviewLabel: document.querySelector(".merge-review-nav-status strong")?.textContent?.trim() || "",
+      readOnly: !document.querySelector(".merge-master-radio") && !document.querySelector(".merge-field-radio")
+    };
+  });
+  const mergeSentBeforeConfirm = mergePayloads.length > 0;
+
+  let nextAdvanced = true;
+  let leftRailNavigationWorked = true;
+  if (!(await page.locator(".merge-review-next-button").isDisabled())) {
+    const firstPreviewLabel = previewState.currentPreviewLabel;
+    await page.locator(".merge-review-next-button").click();
+    await page.waitForTimeout(100);
+    const secondPreviewLabel = await page.locator(".merge-review-nav-status strong").textContent();
+    nextAdvanced = Boolean(secondPreviewLabel && secondPreviewLabel.trim() && secondPreviewLabel.trim() !== firstPreviewLabel);
+
+    await page.locator(".group-item-main").nth(2).click();
+    await page.waitForTimeout(100);
+    const leftRailPreviewLabel = await page.locator(".merge-review-nav-status strong").textContent();
+    leftRailNavigationWorked = Boolean(leftRailPreviewLabel && leftRailPreviewLabel.includes("Contact group"));
+  }
+
+  await page.locator(".merge-cancel-preview-button").click();
+  await page.locator(".merge-review-panel").waitFor({ state: "hidden", timeout: 5000 });
+  const previewClearedAfterCancel = await page.locator(".merge-review-panel").count() === 0;
+  const mergeSentAfterCancel = mergePayloads.length > 0;
+
+  reviewPhase = "second";
+  await page.locator(".merge-submit-button").click();
+  await page.locator(".merge-review-panel").waitFor({ state: "visible", timeout: 5000 });
+  await page.locator(".merge-confirm-preview-button").click();
   await page.locator(".merge-result.success").waitFor({ state: "visible", timeout: 5000 });
   await page.unroute("**/api/salesforce/premerge-check");
   await page.unroute("**/api/salesforce/merge");
+  page.off("dialog", handleDialog);
+  const payloadsAligned = secondReviewPreMergePayloads.length === mergePayloads.length
+    && secondReviewPreMergePayloads.every((preMergePayload, index) => {
+      const payload = mergePayloads[index];
+      return payload
+        && preMergePayload.groupKey === payload.groupKey
+        && preMergePayload.masterId === payload.masterId
+        && JSON.stringify(preMergePayload.mergeIds || []) === JSON.stringify(payload.mergeIds || []);
+    });
   return {
-    ...(payload || {}),
-    preMergePayload
+    ...(mergePayloads[0] || {}),
+    preMergePayload: secondReviewPreMergePayloads[0] || firstReviewPreMergePayloads[0] || null,
+    preMergePayloads: secondReviewPreMergePayloads,
+    mergePayloads,
+    reviewVisible,
+    confirmVisible,
+    cancelVisible,
+    mergeSentBeforeConfirm,
+    previewClearedAfterCancel,
+    mergeSentAfterCancel,
+    nextAdvanced,
+    leftRailNavigationWorked,
+    readOnly: previewState.readOnly,
+    reviewGroupCount: firstReviewPreMergePayloads.length,
+    previewTitle: previewState.title,
+    previewMasterId: previewState.masterId,
+    previewDuplicateCount: previewState.duplicateListCount || previewState.duplicateCount,
+    reviewOnlyRowCount: previewState.reviewOnlyRows.length,
+    payloadsAligned,
+    dialogMessages
   };
+}
+
+function buildMergeReportRows(payload, masterRecord, duplicateRecord) {
+  return [
+    ["ROLE", "Salesforce ID", "Name", "First Name", "Last Name", "Email", "Lead Source", "Phone", "Mobile Phone", "Account ID", "Account Name", "Created Date", "Last Modified Date", "System Modstamp", "Is Deleted", "STATUS", "DETAILS"],
+    mergeReportRowFromPayloadRecord({
+      role: "Master record",
+      record: masterRecord,
+      fallbackId: payload.masterId,
+      status: "Retained as master",
+      details: "Kept as the Salesforce merge master"
+    }),
+    mergeReportRowFromPayloadRecord({
+      role: "Duplicate record",
+      record: duplicateRecord,
+      fallbackId: (payload.mergeIds || [])[0],
+      status: "Merged into master",
+      details: "Deleted by Salesforce merge and retained related detail"
+    })
+  ];
+}
+
+function mergeReportRowFromPayloadRecord({ role, record, fallbackId, status, details }) {
+  const fields = record?.fields || {};
+  const firstName = String(fields.firstName || "");
+  const lastName = String(fields.lastName || "");
+  const fullName = String(record?.name || fields.fullName || [firstName, lastName].filter(Boolean).join(" ") || fallbackId || "");
+  return [
+    role,
+    String(record?.id || fallbackId || ""),
+    fullName,
+    firstName,
+    lastName,
+    String(fields.email || ""),
+    String(fields.leadSource || ""),
+    String(fields.phone || ""),
+    String(fields.mobile || ""),
+    String(fields.accountId || ""),
+    String(fields.company || ""),
+    String(fields.createdDate || ""),
+    String(fields.lastModifiedDate || ""),
+    String(fields.systemModstamp || ""),
+    String(fields.isDeleted ?? ""),
+    status,
+    details
+  ];
+}
+
+function findMergePayloadRecord(payload, id) {
+  const normalizedId = String(id || "");
+  return (payload.records || []).find((record) => String(record?.id || "") === normalizedId) || null;
+}
+
+function toSalesforceCurrentRecord(record) {
+  const fields = record?.fields || {};
+  return {
+    Id: String(record?.id || ""),
+    IsDeleted: false,
+    CreatedDate: String(fields.createdDate || ""),
+    LastModifiedDate: String(fields.lastModifiedDate || ""),
+    SystemModstamp: String(fields.systemModstamp || ""),
+    Name: String(record?.name || fields.fullName || ""),
+    FirstName: String(fields.firstName || ""),
+    LastName: String(fields.lastName || ""),
+    Email: String(fields.email || ""),
+    LeadSource: String(fields.leadSource || ""),
+    Phone: String(fields.phone || ""),
+    MobilePhone: String(fields.mobile || ""),
+    AccountId: String(fields.accountId || ""),
+    Account: { Name: String(fields.company || "") },
+    AccountName: String(fields.company || "")
+  };
+}
+
+async function captureMergeReportDownload(page) {
+  const button = page.locator(".merge-report-download-button");
+  const state = {
+    buttonVisible: await button.isVisible(),
+    downloaded: false,
+    csv: ""
+  };
+
+  if (!state.buttonVisible) return state;
+
+  const downloadPath = path.join(outDir, "merge-report-download.csv");
+  const downloadPromise = page.waitForEvent("download");
+  await button.click();
+  const download = await downloadPromise;
+  await download.saveAs(downloadPath);
+  state.downloaded = true;
+  state.csv = await fs.readFile(downloadPath, "utf8");
+  return state;
 }
 
 async function captureStaleRefreshFlow(page, refreshedCsv) {
@@ -1078,7 +1389,6 @@ async function captureStaleFailureCardRefreshFlow(page, refreshedCsv) {
   if (await page.locator(".merge-master-radio").count() > 1) {
     await page.locator(".merge-master-radio").nth(1).check();
   }
-  await page.locator(".merge-confirmation-input").fill("MERGE");
   await page.evaluate(() => {
     window.__smokeOriginalConfirm = window.__smokeOriginalConfirm || window.confirm;
     window.__smokeConfirmMessages = [];
