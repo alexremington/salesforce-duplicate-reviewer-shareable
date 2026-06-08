@@ -446,6 +446,7 @@ const TRAINING_PAIR_FIELDS = {
 const ACCOUNT_CONTRADICTION_THRESHOLD = 0.5;
 const ACCOUNT_EXACT_NAME_WEAK_WEBSITE_CAP = 85;
 const ACCOUNT_UNCORROBORATED_NEAR_EXACT_NAME_CAP = 85;
+const ACCOUNT_EXACT_DUPLICATE_FLOOR = 92;
 const ACCOUNT_WEAK_WEBSITE_CONFLICT_MAX = 0.55;
 const ACCOUNT_SCOPE_DIVERGENCE_CAP = 85;
 const ACCOUNT_SCOPE_DIVERGENCE_TOKENS = new Set([
@@ -3761,6 +3762,7 @@ function scoreAccountPair(left, right, fieldStats = null) {
   if (scoreResult.scopeDivergenceCapApplied) reasons.push("Different account scope");
   if (scoreResult.exactNameWeakWebsiteCapApplied) reasons.push("Exact name with conflicting website");
   if (scoreResult.uncorroboratedNearExactNameCapApplied) reasons.push("Near-exact name without corroboration");
+  if (scoreResult.exactDuplicateFloorApplied) reasons.push("Exact duplicate corroboration");
 
   return {
     left: left.row,
@@ -3848,7 +3850,8 @@ function scoreAccountFields(fieldScores, left, right, fieldStats) {
       parentBranchDivergenceCapApplied: false,
       scopeDivergenceCapApplied: false,
       exactNameWeakWebsiteCapApplied: false,
-      uncorroboratedNearExactNameCapApplied: false
+      uncorroboratedNearExactNameCapApplied: false,
+      exactDuplicateFloorApplied: false
     };
   }
 
@@ -3866,15 +3869,17 @@ function scoreAccountFields(fieldScores, left, right, fieldStats) {
   );
   const cappedScore = applyAccountNameDivergenceCap(penalizedScore, fieldScores, left, right);
   const corroborationCap = applyAccountNearExactNameCorroborationCap(cappedScore.value, fieldScores, left, right);
+  const exactDuplicateFloor = applyAccountExactDuplicateFloor(corroborationCap.value, fieldScores, left, right);
 
   return {
-    value: corroborationCap.value,
+    value: exactDuplicateFloor.value,
     commonEvidenceDiscounted,
     nameDivergenceCapApplied: cappedScore.nameDivergenceApplied,
     parentBranchDivergenceCapApplied: cappedScore.parentBranchApplied,
     scopeDivergenceCapApplied: cappedScore.scopeDivergenceApplied,
     exactNameWeakWebsiteCapApplied: cappedScore.exactNameWeakWebsiteApplied,
-    uncorroboratedNearExactNameCapApplied: corroborationCap.applied
+    uncorroboratedNearExactNameCapApplied: corroborationCap.applied,
+    exactDuplicateFloorApplied: exactDuplicateFloor.applied
   };
 }
 
@@ -4022,6 +4027,38 @@ function applyAccountNearExactNameCorroborationCap(value, fieldScores, left, rig
     value: Math.min(value, cap),
     applied: value > cap
   };
+}
+
+function applyAccountExactDuplicateFloor(value, fieldScores, left, right) {
+  if (!hasStrongExactAccountDuplicateCorroboration(fieldScores, left, right)) {
+    return {
+      value,
+      applied: false
+    };
+  }
+
+  return {
+    value: Math.max(value, ACCOUNT_EXACT_DUPLICATE_FLOOR),
+    applied: value < ACCOUNT_EXACT_DUPLICATE_FLOOR
+  };
+}
+
+function hasStrongExactAccountDuplicateCorroboration(fieldScores, left, right) {
+  if (fieldScores.name !== 1) return false;
+  if (!hasStrongExactBillingAddress(fieldScores)) return false;
+
+  return fieldScores.website === 1 || fieldScores.ultimateParentAccount === 1 || left.hasStatusMarker || right.hasStatusMarker;
+}
+
+function hasStrongExactBillingAddress(fieldScores) {
+  const exactStreet = fieldScores.billingStreet === 1;
+  const exactCity = fieldScores.billingCity === 1;
+  const exactPostal = fieldScores.billingPostalCode === 1;
+  const exactCountry = fieldScores.billingCountry === 1;
+
+  if (exactStreet && (exactCity || exactPostal || exactCountry)) return true;
+  if (exactPostal && exactCountry && exactCity) return true;
+  return false;
 }
 
 function accountNearExactNameUncorroboratedCap(nameScore) {
@@ -5046,6 +5083,8 @@ function renderMetrics() {
 
 function renderTrainingExportButton() {
   const labelCount = trainingLabelCount();
+  const separatedCount = separatedRecordTrainingCount();
+  const hasTrainingSignal = labelCount > 0 || separatedCount > 0;
   els.trainingExportButton.disabled = !labelCount;
   els.trainingExportButton.textContent = "Labels";
   els.trainingExportButton.setAttribute(
@@ -5053,13 +5092,21 @@ function renderTrainingExportButton() {
     labelCount ? `Export labels (${formatNumber(labelCount)})` : "Export labels"
   );
   els.trainingExportButton.classList.toggle("is-active", labelCount > 0);
-  els.codexTrainingButton.disabled = !labelCount;
+  els.codexTrainingButton.disabled = !hasTrainingSignal;
   els.codexTrainingButton.textContent = "Send to Codex";
+  const codexTrainingSummary = [
+    labelCount ? `${formatNumber(labelCount)} ${labelCount === 1 ? "label" : "labels"}` : "",
+    separatedCount
+      ? `${formatNumber(separatedCount)} separated ${separatedCount === 1 ? "record" : "records"}`
+      : ""
+  ]
+    .filter(Boolean)
+    .join(" and ");
   els.codexTrainingButton.setAttribute(
     "aria-label",
-    labelCount ? `Send ${formatNumber(labelCount)} labels to Codex` : "Send to Codex"
+    codexTrainingSummary ? `Send ${codexTrainingSummary} to Codex` : "Send to Codex"
   );
-  els.codexTrainingButton.classList.toggle("is-active", labelCount > 0);
+  els.codexTrainingButton.classList.toggle("is-active", hasTrainingSignal);
   els.trainingImportButton.disabled = !state.rows.length;
   updateExportMenuButtonState();
 }
@@ -7526,6 +7573,14 @@ function trainingLabelCount() {
   return state.trainingLabels.size;
 }
 
+function separatedRecordTrainingCount() {
+  let count = 0;
+  state.separatedRecords.forEach((recordKeys) => {
+    count += recordKeys?.size || 0;
+  });
+  return count;
+}
+
 function wrapIndex(index, length) {
   if (!length) return 0;
   return ((index % length) + length) % length;
@@ -8455,8 +8510,49 @@ function buildTrainingLabelRows() {
   return rows;
 }
 
+function buildSeparatedRecordTrainingRows() {
+  const groupsByKey = new Map(state.groups.map((group) => [group.key, group]));
+  const rows = [];
+
+  [...state.separatedRecords.entries()]
+    .sort(([leftGroupKey], [rightGroupKey]) => leftGroupKey.localeCompare(rightGroupKey))
+    .forEach(([groupKey, separatedKeys]) => {
+      const group = groupsByKey.get(groupKey);
+      if (!group || !separatedKeys?.size) return;
+
+      const separatedKeySet = new Set(separatedKeys);
+      const activeRecords = group.records.filter((record) => !separatedKeySet.has(recordKey(record)));
+      const activeGroupSalesforceIds = activeRecords.map((record) => salesforceId(record)).filter(Boolean);
+      const activeGroupRecordKeys = activeRecords.map(recordKey);
+      const activeGroupNames = activeRecords.map(displayName).filter(Boolean);
+
+      group.records
+        .filter((record) => separatedKeySet.has(recordKey(record)))
+        .sort((left, right) => displayName(left).localeCompare(displayName(right)))
+        .forEach((record) => {
+          rows.push({
+            objectType: state.objectType,
+            fileName: state.fileName || "",
+            groupKey,
+            groupScore: group.score ?? "",
+            minPairScore: group.minPairScore ?? "",
+            separatedSalesforceId: salesforceId(record),
+            separatedRecordKey: recordKey(record),
+            separatedName: displayName(record),
+            activeGroupSalesforceIds,
+            activeGroupRecordKeys,
+            activeGroupNames
+          });
+        });
+    });
+
+  return rows;
+}
+
 async function sendTrainingLabelsToCodex() {
-  if (!state.trainingLabels.size) return;
+  const labelCount = trainingLabelCount();
+  const separatedCount = separatedRecordTrainingCount();
+  if (!labelCount && !separatedCount) return;
 
   els.codexTrainingButton.disabled = true;
   els.codexTrainingButton.textContent = "Sending...";
@@ -8471,21 +8567,31 @@ async function sendTrainingLabelsToCodex() {
         datasetKey: state.datasetKey,
         rowCount: state.rows.length,
         groupCount: state.groups.length,
-        labelCount: state.trainingLabels.size,
+        labelCount,
+        separationCount: separatedCount,
         requestedAction:
-          "Read the latest training-label CSV, evaluate where the duplicate matching logic disagrees with the labels, and improve the matching/scoring logic safely.",
+          "Read the latest training-label CSV and separated-record JSON, evaluate where the duplicate matching logic disagrees with the user's labels and manual separations, and improve the matching/scoring logic safely.",
         openCodexSession: true,
-        rows: buildTrainingLabelRows()
+        rows: buildTrainingLabelRows(),
+        separatedRows: buildSeparatedRecordTrainingRows()
       })
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error?.message || "Labels could not be sent to Codex.");
 
+    const trainingSummary = [
+      result.labelCount ? `${formatNumber(result.labelCount)} ${result.labelCount === 1 ? "label" : "labels"}` : "",
+      result.separationCount
+        ? `${formatNumber(result.separationCount)} separated ${result.separationCount === 1 ? "record" : "records"}`
+        : ""
+    ]
+      .filter(Boolean)
+      .join(" and ");
     state.reviewStateStatus = result.codexSessionLaunched
-      ? `Opened Codex review session for ${formatNumber(result.labelCount)} labels`
+      ? `Opened Codex review session for ${trainingSummary}`
       : result.codexSessionError
         ? `Created Codex request, but Terminal could not open`
-        : `Created Codex review request for ${formatNumber(result.labelCount)} labels`;
+        : `Created Codex review request for ${trainingSummary}`;
     renderSource();
   } catch {
     state.reviewStateStatus = "Codex review request could not be created";

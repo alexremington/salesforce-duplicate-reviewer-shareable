@@ -6,6 +6,7 @@ const fs = require("node:fs/promises");
 const http = require("node:http");
 const path = require("node:path");
 const { URL } = require("node:url");
+const { buildCodexTrainingCommand } = require("./codex-training");
 const managedPlatform = require("../vendor/managed-app/scripts/platform");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
@@ -15,12 +16,8 @@ const HOST = process.env.HOST || "127.0.0.1";
 const PORT = Number(process.env.DUPLICATE_REVIEWER_PORT || process.env.PORT || 5180);
 const OUTPUT_DIR = path.join(ROOT_DIR, "Output");
 const CODEX_BIN = process.env.CODEX_BIN || "codex";
-const CODEX_MODEL = process.env.CODEX_MODEL || "gpt-5.5";
-const CODEX_REASONING_EFFORT = process.env.CODEX_REASONING_EFFORT || "xhigh";
-const CODEX_TARGET_SESSION_ID = process.env.CODEX_TARGET_SESSION_ID || "";
-const CODEX_TARGET_SESSION_ID_FILE =
-  process.env.CODEX_TARGET_SESSION_ID_FILE ||
-  path.join(OUTPUT_DIR, "codex-target-session-id.txt");
+const CODEX_MODEL = process.env.CODEX_MODEL || "";
+const CODEX_REASONING_EFFORT = process.env.CODEX_REASONING_EFFORT || "";
 const STAGING_CONTACTS_CSV =
   process.env.STAGING_CONTACTS_CSV ||
   path.join(OUTPUT_DIR, "staging-contacts", "salesforce-report-latest.csv");
@@ -268,19 +265,24 @@ async function handleRequest(request, response) {
   if (request.method === "POST" && url.pathname === "/api/codex/training-labels") {
     const body = await readJsonBody(request, 25 * 1024 * 1024);
     const rows = validateTrainingLabelRows(body.rows);
+    const separatedRows = validateSeparatedTrainingRows(body.separatedRows);
     const receivedAt = new Date();
     const timestamp = timestampForFileName(receivedAt);
     const csv = rowsToCsv(rows);
     const labelCount = Math.max(0, rows.length - 1);
+    const separationCount = separatedRows.length;
     const csvFileName = `codex-training-labels-${timestamp}.csv`;
     const csvPath = path.join(OUTPUT_DIR, csvFileName);
     const latestCsvPath = path.join(OUTPUT_DIR, "codex-training-labels-latest.csv");
+    const separatedFileName = `codex-training-separations-${timestamp}.json`;
+    const separatedPath = path.join(OUTPUT_DIR, separatedFileName);
+    const latestSeparatedPath = path.join(OUTPUT_DIR, "codex-training-separations-latest.json");
     const manifestPath = path.join(OUTPUT_DIR, "codex-training-labels-latest.json");
     const requestPath = path.join(OUTPUT_DIR, `codex-training-request-${timestamp}.md`);
     const latestRequestPath = path.join(OUTPUT_DIR, "codex-training-request-latest.md");
     const requestedAction = String(
       body.requestedAction ||
-        "Read the latest training-label CSV, evaluate where the duplicate matching logic disagrees with the labels, and improve the matching/scoring logic safely."
+        "Read the latest training-label CSV and separated-record JSON, evaluate where the duplicate matching logic disagrees with the user's labels and manual separations, and improve the matching/scoring logic safely."
     );
     const manifest = {
       receivedAt: receivedAt.toISOString(),
@@ -290,9 +292,12 @@ async function handleRequest(request, response) {
       rowCount: Number(body.rowCount || 0),
       groupCount: Number(body.groupCount || 0),
       labelCount,
+      separationCount,
       requestedAction,
       csvPath,
       latestCsvPath,
+      separatedPath,
+      latestSeparatedPath,
       requestPath,
       latestRequestPath
     };
@@ -301,6 +306,8 @@ async function handleRequest(request, response) {
     await fs.mkdir(OUTPUT_DIR, { recursive: true });
     await fs.writeFile(csvPath, csv);
     await fs.writeFile(latestCsvPath, csv);
+    await fs.writeFile(separatedPath, `${JSON.stringify(separatedRows, null, 2)}\n`);
+    await fs.writeFile(latestSeparatedPath, `${JSON.stringify(separatedRows, null, 2)}\n`);
     await fs.writeFile(requestPath, requestMarkdown);
     await fs.writeFile(latestRequestPath, requestMarkdown);
     await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -319,8 +326,11 @@ async function handleRequest(request, response) {
     sendJson(response, {
       ok: true,
       labelCount,
+      separationCount,
       csvPath,
       latestCsvPath,
+      separatedPath,
+      latestSeparatedPath,
       manifestPath,
       requestPath,
       latestRequestPath,
@@ -1648,13 +1658,44 @@ async function appendMergeAudit(record) {
 }
 
 function validateTrainingLabelRows(rows) {
-  if (!Array.isArray(rows) || rows.length < 2) {
+  if (!Array.isArray(rows) || rows.length < 1) {
     throw httpError(400, "Training label rows are required.");
   }
   if (!rows.every((row) => Array.isArray(row))) {
     throw httpError(400, "Training label rows must be arrays.");
   }
   return rows.map((row) => row.map((value) => String(value ?? "")));
+}
+
+function validateSeparatedTrainingRows(rows) {
+  if (rows == null) return [];
+  if (!Array.isArray(rows)) {
+    throw httpError(400, "Separated training rows must be an array.");
+  }
+  return rows.map((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      throw httpError(400, "Separated training rows must be objects.");
+    }
+    return {
+      objectType: String(row.objectType || ""),
+      fileName: String(row.fileName || ""),
+      groupKey: String(row.groupKey || ""),
+      groupScore: String(row.groupScore ?? ""),
+      minPairScore: String(row.minPairScore ?? ""),
+      separatedSalesforceId: String(row.separatedSalesforceId || ""),
+      separatedRecordKey: String(row.separatedRecordKey || ""),
+      separatedName: String(row.separatedName || ""),
+      activeGroupSalesforceIds: Array.isArray(row.activeGroupSalesforceIds)
+        ? row.activeGroupSalesforceIds.map((value) => String(value || ""))
+        : [],
+      activeGroupRecordKeys: Array.isArray(row.activeGroupRecordKeys)
+        ? row.activeGroupRecordKeys.map((value) => String(value || ""))
+        : [],
+      activeGroupNames: Array.isArray(row.activeGroupNames)
+        ? row.activeGroupNames.map((value) => String(value || ""))
+        : []
+    };
+  });
 }
 
 function rowsToCsv(rows) {
@@ -1691,6 +1732,7 @@ function buildCodexTrainingRequest(manifest) {
     `Loaded rows: ${manifest.rowCount}`,
     `Loaded groups: ${manifest.groupCount}`,
     `Training labels: ${manifest.labelCount}`,
+    `Separated records: ${manifest.separationCount || 0}`,
     "",
     "## Requested Action",
     "",
@@ -1700,28 +1742,30 @@ function buildCodexTrainingRequest(manifest) {
     "",
     `- Latest labels CSV: ${manifest.latestCsvPath}`,
     `- Timestamped labels CSV: ${manifest.csvPath}`,
+    `- Latest separated-record JSON: ${manifest.latestSeparatedPath}`,
+    `- Timestamped separated-record JSON: ${manifest.separatedPath}`,
     `- Latest manifest: ${path.join(OUTPUT_DIR, "codex-training-labels-latest.json")}`,
     "",
     "## Instructions For Codex",
     "",
-    "1. Read the latest labels CSV and compare the user's decisions against the app's current scoring output.",
-    "2. Identify systematic false positives, false negatives, and unsure cases that point to scoring or blocking issues.",
-    "3. Make conservative code changes to the duplicate matching logic so the labeled examples are handled better without overfitting.",
-    "4. Run the relevant syntax checks/tests and summarize what changed.",
+    "1. Read the latest labels CSV and separated-record JSON and compare the user's decisions against the app's current scoring output.",
+    "2. Treat separated records as strong negative evidence against the active records in their original groups unless the source data clearly contradicts that manual split.",
+    "3. Identify systematic false positives, false negatives, and unsure cases that point to scoring or blocking issues.",
+    "4. Make conservative code changes to the duplicate matching logic so the labeled examples are handled better without overfitting.",
+    "5. Run the relevant syntax checks/tests and summarize what changed.",
     ""
   ].join("\n");
 }
 
 async function openCodexTrainingSession(requestPath) {
   const prompt = `Read ${requestPath} and carry out the requested Duplicate Reviewer matching-logic evaluation and conservative improvements.`;
-  const modelArg = CODEX_MODEL ? ` --model ${shellQuote(CODEX_MODEL)}` : "";
-  const reasoningArg = CODEX_REASONING_EFFORT
-    ? ` -c ${shellQuote(`model_reasoning_effort="${CODEX_REASONING_EFFORT}"`)}`
-    : "";
-  const targetSessionId = await readCodexTargetSessionId();
-  const codexCommand = targetSessionId
-    ? `${shellQuote(CODEX_BIN)} resume --cd ${shellQuote(ROOT_DIR)}${modelArg}${reasoningArg} ${shellQuote(targetSessionId)} ${shellQuote(prompt)}`
-    : `${shellQuote(CODEX_BIN)} --cd ${shellQuote(ROOT_DIR)}${modelArg}${reasoningArg} ${shellQuote(prompt)}`;
+  const codexCommand = buildCodexTrainingCommand({
+    codexBin: CODEX_BIN,
+    rootDir: ROOT_DIR,
+    prompt,
+    model: CODEX_MODEL,
+    reasoningEffort: CODEX_REASONING_EFFORT
+  });
   const command = [
     `cd ${shellQuote(ROOT_DIR)}`,
     codexCommand
@@ -1734,26 +1778,6 @@ async function openCodexTrainingSession(requestPath) {
   ].join("\n");
 
   await runAppleScript(script);
-}
-
-async function readCodexTargetSessionId() {
-  const configuredSessionId = parseCodexSessionId(CODEX_TARGET_SESSION_ID);
-  if (configuredSessionId) return configuredSessionId;
-
-  try {
-    const text = await fs.readFile(CODEX_TARGET_SESSION_ID_FILE, "utf8");
-    return parseCodexSessionId(text);
-  } catch (error) {
-    if (error.code === "ENOENT") return "";
-    throw error;
-  }
-}
-
-function parseCodexSessionId(text) {
-  return String(text || "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) => line && !line.startsWith("#") && /^[0-9a-fA-F-]{20,}$/.test(line)) || "";
 }
 
 function shellQuote(value) {

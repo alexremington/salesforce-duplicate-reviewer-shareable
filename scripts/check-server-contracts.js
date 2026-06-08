@@ -6,6 +6,7 @@ const http = require("node:http");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
+const { buildCodexTrainingCommand } = require("../server/codex-training");
 
 const PROJECT_DIR = path.resolve(__dirname, "..");
 const SERVER_SCRIPT = path.join("server", "server.js");
@@ -95,6 +96,7 @@ async function main() {
     await assertRetiredMergeGateAbsent();
     await assertStaticApp(baseUrl);
     await assertLatestEndpointCaching(baseUrl);
+    await assertCodexTrainingLaunchCommand();
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/premerge-check");
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/merge");
     await assertSalesforcePreMergeWithWarningCli(baseUrl);
@@ -176,6 +178,33 @@ async function assertLatestEndpointCaching(baseUrl) {
   });
   if (second.statusCode !== 304) {
     throw new Error(`Latest JSON cache revalidation failed: HTTP ${second.statusCode}: ${second.body}`);
+  }
+}
+
+async function assertCodexTrainingLaunchCommand() {
+  const command = buildCodexTrainingCommand({
+    rootDir: "/tmp/duplicate-reviewer",
+    prompt: "Read /tmp/duplicate-reviewer/Output/codex-training-request-latest.md and start fresh.",
+    codexBin: "codex"
+  });
+
+  if (!command.includes("codex") || command.includes("resume") || command.includes("gpt-5.5")) {
+    throw new Error(`Codex launch command still reuses an existing session or hardcodes the expensive model: ${command}`);
+  }
+
+  const configuredCommand = buildCodexTrainingCommand({
+    rootDir: "/tmp/duplicate-reviewer",
+    prompt: "Read /tmp/duplicate-reviewer/Output/codex-training-request-latest.md and start fresh.",
+    codexBin: "codex",
+    model: "gpt-5.4-mini",
+    reasoningEffort: "medium"
+  });
+
+  if (
+    !configuredCommand.includes("--model 'gpt-5.4-mini'") ||
+    !configuredCommand.includes(`model_reasoning_effort="medium"`)
+  ) {
+    throw new Error(`Codex launch command did not preserve explicit model overrides: ${configuredCommand}`);
   }
 }
 
