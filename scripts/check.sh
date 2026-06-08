@@ -34,23 +34,23 @@ node scripts/check-server-contracts.js
 echo "Checking staging routing defaults..."
 contactsDryRun="$(scripts/run-staging-contacts-bulk-query.sh --dry-run)"
 case "${contactsDryRun}" in
-  *"/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts"*) ;;
+  *"/Output/staging-contacts"*) ;;
   *)
     echo "${contactsDryRun}"
-    echo "Staging Contacts did not resolve to the canonical Salesforce Pulls staging folder."
+    echo "Staging Contacts did not resolve to the public-safe staging output folder."
     exit 1
     ;;
 esac
-if ! grep -Fq "sf org auth show-access-token" scripts/run-salesforce-bulk-query.sh; then
-  echo "Bulk query wrapper did not use sf org auth show-access-token."
+if ! grep -Fq "sf org display" scripts/run-salesforce-bulk-query.sh; then
+  echo "Bulk query wrapper did not use sf org display."
   exit 1
 fi
 accountsDryRun="$(scripts/run-staging-accounts-bulk-query.sh --dry-run)"
 case "${accountsDryRun}" in
-  *"/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-accounts"*) ;;
+  *"/Output/staging-accounts"*) ;;
   *)
     echo "${accountsDryRun}"
-    echo "Staging Accounts did not resolve to the canonical Salesforce Pulls staging folder."
+    echo "Staging Accounts did not resolve to the public-safe staging output folder."
     exit 1
     ;;
 esac
