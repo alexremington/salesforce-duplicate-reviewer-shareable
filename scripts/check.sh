@@ -41,7 +41,7 @@ case "${contactsDryRun}" in
     exit 1
     ;;
 esac
-if ! rg -n "sf org auth show-access-token" scripts/run-salesforce-bulk-query.sh >/dev/null; then
+if ! grep -Fq "sf org auth show-access-token" scripts/run-salesforce-bulk-query.sh; then
   echo "Bulk query wrapper did not use sf org auth show-access-token."
   exit 1
 fi
