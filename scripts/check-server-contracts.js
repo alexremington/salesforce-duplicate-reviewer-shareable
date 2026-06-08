@@ -179,7 +179,11 @@ async function waitForHealth(baseUrl, logs) {
 
 async function assertStaticApp(baseUrl) {
   const response = await requestText(`${baseUrl}/`);
-  if (response.statusCode !== 200 || !response.body.includes("Salesforce Account and Contact Matching")) {
+  if (
+    response.statusCode !== 200 ||
+    !response.body.includes("Salesforce Account and Contact Matching") ||
+    !response.body.includes('app.js?v=duplicate-reviewer-cli-warning-safe-v1')
+  ) {
     throw new Error(`Static app contract failed: HTTP ${response.statusCode}`);
   }
 }
