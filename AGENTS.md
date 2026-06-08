@@ -32,3 +32,30 @@ These instructions apply to this repository and its subdirectories.
 - Launcher changes must reject or restart stale runtime processes when feature or API contract versions do not match the current source.
 - Use Playwright for smoke testing. Do not attempt to use the Codex in-app browser for smoke tests; the repo Playwright harness is the source of truth for rendered smoke validation.
 - Smoke coverage should exercise primary buttons and fail on scroll traps, hidden overflowing content, layout overlap, and nonfunctional controls.
+
+## Pre-Commit Preflight
+
+- Before committing any feature, workflow, sync, or cleanup change, verify the diff does not remove any protected user-facing flow by accident.
+- For merge-review work, explicitly confirm the queued review flow is still present in source, smoke coverage, and launcher output:
+  - `renderMergeReviewPanel`
+  - `renderMergeConfirmationPreview`
+  - `startMergeReviewSession`
+  - `handleConfirmedMerge`
+  - the matching smoke assertions for review, preview, cancel, and confirm
+- If a commit intentionally retires or renames a protected flow, update the guardrail and smoke assertions in the same change before pushing.
+- Do not commit a broad sync or cleanup that deletes protected workflow code unless you have manually reviewed the removed sections and confirmed the replacement behavior is intentional.
+- Treat `npm run check` as the minimum pre-commit gate, then run `npm run smoke:ui:local` before pushing any user-visible change.
+- If a change touches the launcher or cached runtime path, confirm the live served bundle still reflects the current source before committing.
+
+## Recommended Agent Workflow
+
+- Use `Hume` only when visible UI direction is still unresolved or the user explicitly wants design review.
+- Keep the main Codex thread as the orchestrator and primary implementation thread.
+- Use the repo-local `architect` agent for scoped planning, merge-safety review, interaction-risk review, and acceptance criteria.
+- Use the repo-local `reviewer` agent after implementation for correctness, portability, merge-safety, and validation-gap review.
+- Use the repo-local `qa-ux` agent to enforce `npm run check`, `npm run check:windows`, and `npm run smoke:ui:local` as the validation floor.
+- Prefer subagents for planning, review, and QA. Do not default to multiple parallel implementation agents editing the same change.
+
+The repo-local custom agents live under `.codex/agents/`, and the reusable workflow lives in `.agents/skills/agentic-delivery/`.
+
+New development-task prompts are hook-enforced through `.codex/config.toml`, so no special `agentic-delivery` prefix is required. For visible UI work, mention `Hume` only when design direction is still unresolved or you want design review.
