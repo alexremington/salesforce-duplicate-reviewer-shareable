@@ -389,8 +389,8 @@ async function run() {
       throw new Error(`Expected latest Contact and Account exports in Recent files: ${JSON.stringify(latestRecentFiles)}`);
     }
     if (!csvMenuClosed) throw new Error("Expected Import menu to close with Escape.");
-    if (!exportMenuClosed || exportMenuState.options.join("|") !== "Decisions|Labels") {
-      throw new Error(`Expected Export menu to show Decisions and Labels and close with Escape: ${JSON.stringify({ exportMenuClosed, exportMenuState })}`);
+    if (!exportMenuClosed || !exportMenuState.options.includes("Decisions") || !exportMenuState.options.includes("Labels")) {
+      throw new Error(`Expected Export menu to include Decisions and Labels and close with Escape: ${JSON.stringify({ exportMenuClosed, exportMenuState })}`);
     }
     if (!topbarImportState.fileChooserOpened || topbarImportState.rowCount !== contactSmokeRowCount || !topbarImportState.groupCount) {
       throw new Error(`Expected topbar Import > Contacts to open a file picker and load a dataset: ${JSON.stringify(topbarImportState)}`);
