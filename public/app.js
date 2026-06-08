@@ -445,6 +445,8 @@ const TRAINING_PAIR_FIELDS = {
 };
 const ACCOUNT_CONTRADICTION_THRESHOLD = 0.5;
 const ACCOUNT_EXACT_NAME_WEAK_WEBSITE_CAP = 85;
+const ACCOUNT_UNCORROBORATED_NEAR_EXACT_NAME_CAP = 85;
+const ACCOUNT_EXACT_DUPLICATE_FLOOR = 92;
 const ACCOUNT_WEAK_WEBSITE_CONFLICT_MAX = 0.55;
 const ACCOUNT_SCOPE_DIVERGENCE_CAP = 85;
 const ACCOUNT_SCOPE_DIVERGENCE_TOKENS = new Set([
@@ -761,6 +763,7 @@ const state = {
   filterLogic: "",
   labelStatusFilters: new Set(),
   pendingLabelStatusFilters: new Set(),
+  lastMatchingStats: null,
   recentFiles: []
 };
 
@@ -770,12 +773,19 @@ let reviewStateSaveTimer = 0;
 let pendingReviewStateRecord = null;
 let nextGroupFilterId = 1;
 const mergeMasterSelections = new Map();
-const mergeConfirmations = new Map();
+const mergePreviewStates = new Map();
 const mergeInFlightGroupKeys = new Set();
+const mergeReviewSession = {
+  active: false,
+  queueGroupKeys: [],
+  submitting: false
+};
 let shortcutsReturnFocus = null;
 // These caches are tied to immutable group arrays and are cleared on recompute.
 let visibleGroupsCache = null;
 let groupLookupCache = null;
+let groupListRenderCache = null;
+let detailRenderCache = "";
 let groupListRenderFrame = 0;
 let matchingWorkerRunner = null;
 
@@ -988,8 +998,6 @@ els.detailSurface.addEventListener("change", (event) => {
 });
 
 els.detailSurface.addEventListener("input", (event) => {
-  if (!event.target.classList?.contains("merge-confirmation-input")) return;
-  mergeConfirmations.set(event.target.dataset.groupKey, event.target.value);
 });
 
 els.detailSurface.addEventListener("click", (event) => {
@@ -1308,10 +1316,13 @@ function clearLoadedDatasetForPendingLoad() {
     format: ""
   };
   state.lastProcessingMode = "";
+  state.lastMatchingStats = null;
   state.headers = [];
   state.rows = [];
   state.mapping = {};
   state.groups = [];
+  groupListRenderCache = null;
+  detailRenderCache = "";
   state.selectedGroupKey = "";
   state.filters = [];
   state.filterLogic = "";
@@ -1325,8 +1336,9 @@ function clearLoadedDatasetForPendingLoad() {
   state.fieldResolutions.clear();
   state.separatedRecords.clear();
   mergeMasterSelections.clear();
-  mergeConfirmations.clear();
+  mergePreviewStates.clear();
   mergeInFlightGroupKeys.clear();
+  resetMergeReviewSession();
   scoringContextCache = null;
   groupLookupCache = null;
   visibleGroupsCache = null;
@@ -2004,6 +2016,7 @@ function sanitizeMergeResult(result) {
     status: result.status,
     message: String(result.message || ""),
     objectType: String(result.objectType || state.objectType),
+    groupKey: String(result.groupKey || ""),
     masterId: String(result.masterId || ""),
     mergedRecordIds: Array.isArray(result.mergedRecordIds) ? result.mergedRecordIds.map(String) : [],
     updatedRelatedIds: Array.isArray(result.updatedRelatedIds) ? result.updatedRelatedIds.map(String) : [],
@@ -2012,7 +2025,8 @@ function sanitizeMergeResult(result) {
     apiVersion: String(result.apiVersion || ""),
     mergedAt: String(result.mergedAt || result.at || ""),
     preMergeCheck: sanitizePreMergeCheck(result.preMergeCheck),
-    recoverySnapshot: result.recoverySnapshot && typeof result.recoverySnapshot === "object" ? result.recoverySnapshot : null
+    recoverySnapshot: result.recoverySnapshot && typeof result.recoverySnapshot === "object" ? result.recoverySnapshot : null,
+    mergeReport: sanitizeMergeReport(result.mergeReport)
   };
 }
 
@@ -2032,6 +2046,23 @@ function sanitizePreMergeCheck(check) {
           loadedValue: String(change.loadedValue ?? ""),
           currentValue: String(change.currentValue ?? "")
         }))
+      : []
+  };
+}
+
+function sanitizeMergeReport(report) {
+  if (!report || typeof report !== "object") return null;
+  return {
+    generatedAt: String(report.generatedAt || ""),
+    fileName: String(report.fileName || ""),
+    latestFileName: String(report.latestFileName || ""),
+    csvPath: String(report.csvPath || ""),
+    latestCsvPath: String(report.latestCsvPath || ""),
+    manifestPath: String(report.manifestPath || ""),
+    latestManifestPath: String(report.latestManifestPath || ""),
+    rowCount: Number(report.rowCount || 0),
+    rows: Array.isArray(report.rows)
+      ? report.rows.map((row) => (Array.isArray(row) ? row.map((value) => String(value ?? "")) : []))
       : []
   };
 }
@@ -2117,6 +2148,7 @@ async function ingestRows(rows, fileName, fromObjects, knownHeaders) {
 
 async function applyProcessedDataset(result, { fromObjects = false } = {}) {
   state.lastProcessingMode = result.processingMode || "";
+  state.lastMatchingStats = result.matchingStats || null;
   stageRowsForReview({
     rows: result.rows || [],
     fileName: result.fileName || datasetFileNameForFormat(result.format),
@@ -2126,7 +2158,7 @@ async function applyProcessedDataset(result, { fromObjects = false } = {}) {
     objectType: result.objectType
   });
   await updateLoadingProgress("Rendering duplicate groups.", 98);
-  applyComputedGroups(result.groups || []);
+  applyComputedGroups(result.groups || [], result.matchingStats || null);
   await updateLoadingProgress("Ready.", 100);
   return fromObjects ? Promise.resolve() : restoreReviewStateForCurrentDataset();
 }
@@ -2148,9 +2180,11 @@ function stageRowsForReview({ rows, fileName, fromObjects, headers, mapping, obj
   state.selectedGroupKey = "";
   state.trainingLabels.clear();
   state.trainingPairIndexes.clear();
+  state.lastMatchingStats = null;
   mergeMasterSelections.clear();
-  mergeConfirmations.clear();
+  mergePreviewStates.clear();
   mergeInFlightGroupKeys.clear();
+  resetMergeReviewSession();
   if (!fromObjects) {
     state.decisions.clear();
     state.mergeResults.clear();
@@ -2177,8 +2211,9 @@ async function recompute({ title = "Matching Records", message = "Preparing reco
       highRecallMode: state.highRecallMode
     }, updateLoadingProgress);
     state.lastProcessingMode = result.processingMode || "";
+    state.lastMatchingStats = result.matchingStats || null;
     await updateLoadingProgress("Rendering duplicate groups.", 98);
-    applyComputedGroups(result.groups || []);
+    applyComputedGroups(result.groups || [], result.matchingStats || null);
     await updateLoadingProgress("Ready.", 100);
   } catch (error) {
     if (!isAbortError(error)) throw error;
@@ -2187,9 +2222,12 @@ async function recompute({ title = "Matching Records", message = "Preparing reco
   }
 }
 
-function applyComputedGroups(groups) {
+function applyComputedGroups(groups, matchingStats = null) {
   state.groups = Array.isArray(groups) ? groups : [];
+  state.lastMatchingStats = matchingStats || state.lastMatchingStats;
   groupLookupCache = null;
+  groupListRenderCache = null;
+  detailRenderCache = "";
   if (!state.groups.some((group) => group.key === state.selectedGroupKey)) {
     state.selectedGroupKey = state.groups[0]?.key || "";
   }
@@ -2249,13 +2287,14 @@ async function processMatchingJobOnMain(payload, progress = async () => {}) {
     const mapping = dataset.mapping || autoMapHeaders(headers, OBJECT_CONFIG[dataset.objectType].fields);
     stageMatchingContext(rows, dataset.objectType, headers, mapping);
     await progress("Matching records.", 7);
-    const groups = await buildGroupsAsync(rows, dataset.objectType, mapping, payload.threshold, payload.highRecallMode, progress);
+    const { groups, matchingStats } = await buildGroupsAsync(rows, dataset.objectType, mapping, payload.threshold, payload.highRecallMode, progress);
     return {
       ...dataset,
       rows,
       headers,
       mapping,
       groups,
+      matchingStats,
       processingMode: "main"
     };
   }
@@ -2268,7 +2307,7 @@ async function processMatchingJobOnMain(payload, progress = async () => {}) {
     const objectType = normalizeObjectType(payload.objectType, state.objectType);
     const mapping = payload.mapping || {};
     stageMatchingContext(rows, objectType, payload.headers || inferHeaders(rows), mapping);
-    const groups = await buildGroupsAsync(
+    const { groups, matchingStats } = await buildGroupsAsync(
       rows,
       objectType,
       mapping,
@@ -2276,7 +2315,7 @@ async function processMatchingJobOnMain(payload, progress = async () => {}) {
       payload.highRecallMode,
       progress
     );
-    return { groups, processingMode: "main" };
+    return { groups, matchingStats, processingMode: "main" };
   }
 
   throw new Error(`Unsupported matching job: ${payload.mode || "unknown"}`);
@@ -2621,9 +2660,24 @@ function readMappingFromControls() {
  * away from all-pairs comparison in normal cases.
  */
 async function buildGroupsAsync(rows, objectType, mapping, threshold, highRecallMode = false, progress = async () => {}) {
+  const startedAt = performance.now();
   if (!rows.length) {
     await progress("No records to match.", 100);
-    return [];
+    return {
+      groups: [],
+      matchingStats: {
+        objectType,
+        rowCount: 0,
+        threshold,
+        highRecallMode,
+        elapsedMs: 0,
+        candidatePairs: 0,
+        candidateAttempts: 0,
+        scoredPairs: 0,
+        retainedPairs: 0,
+        resultGroups: 0
+      }
+    };
   }
 
   await progress("Preparing records.", 8);
@@ -2631,7 +2685,7 @@ async function buildGroupsAsync(rows, objectType, mapping, threshold, highRecall
 
   await progress("Finding candidate pairs.", 22);
   const pairKeys = objectType === "contact"
-    ? await getContactCandidatePairsAsync(preparedRows, highRecallMode, candidatePairLimit(highRecallMode), progress)
+    ? await getContactCandidatePairsAsync(preparedRows, highRecallMode, candidatePairLimit(highRecallMode), threshold, progress)
     : await getAccountCandidatePairsAsync(preparedRows, highRecallMode, candidatePairLimit(highRecallMode), threshold, progress);
 
   await progress(`Scoring ${formatNumber(pairKeys.size)} candidate pairs.`, 44);
@@ -2648,7 +2702,25 @@ async function buildGroupsAsync(rows, objectType, mapping, threshold, highRecall
     .map((group, index) => ({ ...group, id: index + 1 }));
 
   await progress("Rendering duplicate groups.", 96);
-  return groups;
+  return {
+    groups,
+    matchingStats: {
+      objectType,
+      rowCount: rows.length,
+      threshold,
+      highRecallMode,
+      elapsedMs: Math.round(performance.now() - startedAt),
+      candidatePairs: pairKeys.size,
+      candidateAttempts: pairKeys.searchStats?.attempts || 0,
+      candidateAttemptCapHit: Boolean(pairKeys.searchStats?.attemptCapHit),
+      bucketCount: pairKeys.bucketStats?.bucketCount || 0,
+      maxBucketSize: pairKeys.bucketStats?.maxBucketSize || 0,
+      oversizedBucketCount: pairKeys.bucketStats?.oversizedBucketCount || 0,
+      scoredPairs: pairs.scoreStats?.scoredPairs || pairKeys.size,
+      retainedPairs: pairs.scoreStats?.retainedPairs || pairs.length,
+      resultGroups: groups.length
+    }
+  };
 }
 
 function getScoringContext(rows, objectType, mapping) {
@@ -2737,6 +2809,10 @@ async function scoreCandidatePairsAsync(pairKeys, preparedRows, scorer, threshol
 
   await progress("Sorting scored pairs.", 78);
   pairs.sort((a, b) => b.value - a.value || b.fieldMatchRatio - a.fieldMatchRatio);
+  pairs.scoreStats = {
+    scoredPairs: keys.length,
+    retainedPairs: pairs.length
+  };
   return pairs;
 }
 
@@ -2999,6 +3075,7 @@ async function getContactCandidatePairsAsync(
   rows,
   highRecallMode = false,
   maxCandidatePairs = candidatePairLimit(highRecallMode),
+  threshold = state.threshold,
   progress = async () => {}
 ) {
   const buckets = new Map();
@@ -3030,7 +3107,7 @@ async function getContactCandidatePairsAsync(
     rows.length <= 300 ? rows.length : 0,
     highRecallMode ? contactHighRecallBucketKeys : null,
     maxCandidatePairs,
-    null,
+    contactCandidatePairFilter(threshold),
     progress
   );
 }
@@ -3096,6 +3173,38 @@ function accountCandidatePairFilter(threshold) {
   const minimumScore = Number(threshold);
   if (!Number.isFinite(minimumScore) || minimumScore <= 0) return null;
   return (left, right) => accountCandidateCanReachThreshold(left, right, minimumScore);
+}
+
+function contactCandidatePairFilter(threshold) {
+  const minimumScore = Number(threshold);
+  if (!Number.isFinite(minimumScore) || minimumScore <= 0) return null;
+  return (left, right) => contactCandidateCanReachThreshold(left, right, minimumScore);
+}
+
+function contactCandidateCanReachThreshold(left, right, minimumScore) {
+  if (hasSharedExactContactIdentifier(left, right)) return true;
+  if (
+    minimumScore <= CONTACT_FIRST_NAME_COMPANY_DOMAIN_FLOOR &&
+    hasContactFirstNameCompanyDomainCandidateCorroboration(left, right)
+  ) {
+    return true;
+  }
+  if (left.lastName && right.lastName && nameSimilarity(left.lastName, right.lastName) < 0.72) return false;
+  return true;
+}
+
+function hasContactFirstNameCompanyDomainCandidateCorroboration(left, right) {
+  const sameEmailDomain = Boolean(left.domain && left.domain === right.domain);
+  const companySimilarity = comparableScore(left.company, right.company, contactCompanySimilarity);
+  return hasContactFirstNameCompanyDomainCorroboration(left, right, companySimilarity, sameEmailDomain);
+}
+
+function hasSharedExactContactIdentifier(left, right) {
+  if (left.email && left.email === right.email) return true;
+  if (left.linkedIn && left.linkedIn === right.linkedIn) return true;
+  if (!left.phones?.length || !right.phones?.length) return false;
+  const rightPhones = new Set(right.phones);
+  return left.phones.some((phone) => rightPhones.has(phone));
 }
 
 function accountCandidateCanReachThreshold(left, right, threshold) {
@@ -3219,6 +3328,7 @@ async function pairsFromBucketsAsync(
 ) {
   const pairs = new Set();
   const searchState = createCandidateSearchState(maxCandidatePairs, candidateFilter);
+  const bucketStats = summarizeCandidateBuckets(buckets);
   const sortedBuckets = sortedCandidateBuckets(buckets);
   const totalBuckets = Math.max(sortedBuckets.length, 1);
   let lastYield = performance.now();
@@ -3243,7 +3353,7 @@ async function pairsFromBucketsAsync(
     );
     if (pairs.size >= maxCandidatePairs || searchState.stopped) {
       await progress(`Found ${formatNumber(pairs.size)} candidate pairs.`, 42);
-      return finishCandidatePairs(pairs, searchState);
+      return finishCandidatePairs(pairs, searchState, bucketStats);
     }
     await pulse(bucketIndex + 1);
   }
@@ -3257,7 +3367,7 @@ async function pairsFromBucketsAsync(
         addCandidatePair(left, right, pairs, rows, maxCandidatePairs, candidateFilter, searchState);
         if (pairs.size >= maxCandidatePairs || searchState.stopped) {
           await progress(`Found ${formatNumber(pairs.size)} candidate pairs.`, 42);
-          return finishCandidatePairs(pairs, searchState);
+          return finishCandidatePairs(pairs, searchState, bucketStats);
         }
         if (performance.now() - lastYield >= MATCHING_YIELD_INTERVAL_MS) {
           const percent = 40 + (attempts / exhaustiveTotal) * 3;
@@ -3269,7 +3379,7 @@ async function pairsFromBucketsAsync(
   }
 
   await progress(`Found ${formatNumber(pairs.size)} candidate pairs.`, 42);
-  return finishCandidatePairs(pairs, searchState);
+  return finishCandidatePairs(pairs, searchState, bucketStats);
 }
 
 function createCandidateSearchState(maxCandidatePairs, candidateFilter) {
@@ -3281,12 +3391,27 @@ function createCandidateSearchState(maxCandidatePairs, candidateFilter) {
   };
 }
 
-function finishCandidatePairs(pairs, searchState) {
+function finishCandidatePairs(pairs, searchState, bucketStats = null) {
   pairs.searchStats = {
     attempts: searchState.attempts,
     attemptCapHit: searchState.stopped
   };
+  pairs.bucketStats = bucketStats;
   return pairs;
+}
+
+function summarizeCandidateBuckets(buckets) {
+  let maxBucketSize = 0;
+  let oversizedBucketCount = 0;
+  for (const indexes of buckets.values()) {
+    maxBucketSize = Math.max(maxBucketSize, indexes.length);
+    if (indexes.length > MAX_DUPLICATE_BUCKET_SIZE) oversizedBucketCount += 1;
+  }
+  return {
+    bucketCount: buckets.size,
+    maxBucketSize,
+    oversizedBucketCount
+  };
 }
 
 function sortedCandidateBuckets(buckets) {
@@ -3636,6 +3761,8 @@ function scoreAccountPair(left, right, fieldStats = null) {
   if (scoreResult.parentBranchDivergenceCapApplied) reasons.push("Different branch or department under parent");
   if (scoreResult.scopeDivergenceCapApplied) reasons.push("Different account scope");
   if (scoreResult.exactNameWeakWebsiteCapApplied) reasons.push("Exact name with conflicting website");
+  if (scoreResult.uncorroboratedNearExactNameCapApplied) reasons.push("Near-exact name without corroboration");
+  if (scoreResult.exactDuplicateFloorApplied) reasons.push("Exact duplicate corroboration");
 
   return {
     left: left.row,
@@ -3722,7 +3849,9 @@ function scoreAccountFields(fieldScores, left, right, fieldStats) {
       nameDivergenceCapApplied: false,
       parentBranchDivergenceCapApplied: false,
       scopeDivergenceCapApplied: false,
-      exactNameWeakWebsiteCapApplied: false
+      exactNameWeakWebsiteCapApplied: false,
+      uncorroboratedNearExactNameCapApplied: false,
+      exactDuplicateFloorApplied: false
     };
   }
 
@@ -3739,14 +3868,18 @@ function scoreAccountFields(fieldScores, left, right, fieldStats) {
     ACCOUNT_CONTRADICTION_THRESHOLD
   );
   const cappedScore = applyAccountNameDivergenceCap(penalizedScore, fieldScores, left, right);
+  const corroborationCap = applyAccountNearExactNameCorroborationCap(cappedScore.value, fieldScores, left, right);
+  const exactDuplicateFloor = applyAccountExactDuplicateFloor(corroborationCap.value, fieldScores, left, right);
 
   return {
-    value: cappedScore.value,
+    value: exactDuplicateFloor.value,
     commonEvidenceDiscounted,
     nameDivergenceCapApplied: cappedScore.nameDivergenceApplied,
     parentBranchDivergenceCapApplied: cappedScore.parentBranchApplied,
     scopeDivergenceCapApplied: cappedScore.scopeDivergenceApplied,
-    exactNameWeakWebsiteCapApplied: cappedScore.exactNameWeakWebsiteApplied
+    exactNameWeakWebsiteCapApplied: cappedScore.exactNameWeakWebsiteApplied,
+    uncorroboratedNearExactNameCapApplied: corroborationCap.applied,
+    exactDuplicateFloorApplied: exactDuplicateFloor.applied
   };
 }
 
@@ -3851,6 +3984,10 @@ function hasAccountExactNameWeakWebsiteConflict(fieldScores, left, right) {
 }
 
 function hasStrongExactNameCorroboration(fieldScores, left, right) {
+  return hasStrongAccountCorroboration(fieldScores, left, right);
+}
+
+function hasStrongAccountCorroboration(fieldScores, left, right) {
   if (left.hasStatusMarker || right.hasStatusMarker) return true;
   if ((fieldScores.website || 0) >= MATCHED_FIELD_THRESHOLD) return true;
   if (fieldScores.billingPostalCode === 1 && fieldScores.billingCountry === 1) return true;
@@ -3860,6 +3997,74 @@ function hasStrongExactNameCorroboration(fieldScores, left, right) {
     return true;
   }
   return fieldScores.ultimateParentAccount === 1 && hasDifferentUltimateParent(left) && hasDifferentUltimateParent(right);
+}
+
+function applyAccountNearExactNameCorroborationCap(value, fieldScores, left, right) {
+  const nameScore = fieldScores.name;
+  if (nameScore == null || nameScore < 0.9 || nameScore >= 1) {
+    return {
+      value,
+      applied: false
+    };
+  }
+
+  if (hasStrongAccountCorroboration(fieldScores, left, right)) {
+    return {
+      value,
+      applied: false
+    };
+  }
+
+  if (hasSharedDistinctiveEntityAnchor(left.name, right.name)) {
+    return {
+      value,
+      applied: false
+    };
+  }
+
+  const cap = accountNearExactNameUncorroboratedCap(nameScore);
+  return {
+    value: Math.min(value, cap),
+    applied: value > cap
+  };
+}
+
+function applyAccountExactDuplicateFloor(value, fieldScores, left, right) {
+  if (!hasStrongExactAccountDuplicateCorroboration(fieldScores, left, right)) {
+    return {
+      value,
+      applied: false
+    };
+  }
+
+  return {
+    value: Math.max(value, ACCOUNT_EXACT_DUPLICATE_FLOOR),
+    applied: value < ACCOUNT_EXACT_DUPLICATE_FLOOR
+  };
+}
+
+function hasStrongExactAccountDuplicateCorroboration(fieldScores, left, right) {
+  if (fieldScores.name !== 1) return false;
+  if (!hasStrongExactBillingAddress(fieldScores)) return false;
+
+  return fieldScores.website === 1 || fieldScores.ultimateParentAccount === 1 || left.hasStatusMarker || right.hasStatusMarker;
+}
+
+function hasStrongExactBillingAddress(fieldScores) {
+  const exactStreet = fieldScores.billingStreet === 1;
+  const exactCity = fieldScores.billingCity === 1;
+  const exactPostal = fieldScores.billingPostalCode === 1;
+  const exactCountry = fieldScores.billingCountry === 1;
+
+  if (exactStreet && (exactCity || exactPostal || exactCountry)) return true;
+  if (exactPostal && exactCountry && exactCity) return true;
+  return false;
+}
+
+function accountNearExactNameUncorroboratedCap(nameScore) {
+  if (nameScore < 0.92) return 83;
+  if (nameScore < 0.97) return ACCOUNT_UNCORROBORATED_NEAR_EXACT_NAME_CAP;
+  return 86;
 }
 
 function accountNameTokenCount(left, right) {
@@ -4878,6 +5083,8 @@ function renderMetrics() {
 
 function renderTrainingExportButton() {
   const labelCount = trainingLabelCount();
+  const separatedCount = separatedRecordTrainingCount();
+  const hasTrainingSignal = labelCount > 0 || separatedCount > 0;
   els.trainingExportButton.disabled = !labelCount;
   els.trainingExportButton.textContent = "Labels";
   els.trainingExportButton.setAttribute(
@@ -4885,13 +5092,21 @@ function renderTrainingExportButton() {
     labelCount ? `Export labels (${formatNumber(labelCount)})` : "Export labels"
   );
   els.trainingExportButton.classList.toggle("is-active", labelCount > 0);
-  els.codexTrainingButton.disabled = !labelCount;
+  els.codexTrainingButton.disabled = !hasTrainingSignal;
   els.codexTrainingButton.textContent = "Send to Codex";
+  const codexTrainingSummary = [
+    labelCount ? `${formatNumber(labelCount)} ${labelCount === 1 ? "label" : "labels"}` : "",
+    separatedCount
+      ? `${formatNumber(separatedCount)} separated ${separatedCount === 1 ? "record" : "records"}`
+      : ""
+  ]
+    .filter(Boolean)
+    .join(" and ");
   els.codexTrainingButton.setAttribute(
     "aria-label",
-    labelCount ? `Send ${formatNumber(labelCount)} labels to Codex` : "Send to Codex"
+    codexTrainingSummary ? `Send ${codexTrainingSummary} to Codex` : "Send to Codex"
   );
-  els.codexTrainingButton.classList.toggle("is-active", labelCount > 0);
+  els.codexTrainingButton.classList.toggle("is-active", hasTrainingSignal);
   els.trainingImportButton.disabled = !state.rows.length;
   updateExportMenuButtonState();
 }
@@ -4908,12 +5123,14 @@ function renderGroups(options = {}) {
 
   if (!state.rows.length) {
     els.groupList.classList.remove("is-virtualized");
+    groupListRenderCache = null;
     els.groupList.innerHTML = `<div class="empty-row">No records loaded</div>`;
     return;
   }
 
   if (!filtered.length) {
     els.groupList.classList.remove("is-virtualized");
+    groupListRenderCache = null;
     els.groupList.innerHTML = `<div class="empty-row">No matching groups</div>`;
     return;
   }
@@ -4927,8 +5144,14 @@ function renderGroups(options = {}) {
 }
 
 function renderPlainGroupList(groups) {
+  const signature = `plain:${groupRenderStateSignature(groups)}`;
+  if (groupListRenderCache?.signature === signature) {
+    renderGroupSelection();
+    return;
+  }
   els.groupList.classList.remove("is-virtualized");
   els.groupList.innerHTML = groups.map(renderGroupItem).join("");
+  groupListRenderCache = { signature };
 }
 
 function renderVirtualGroupList(groups, { preserveScroll = false } = {}) {
@@ -4939,16 +5162,51 @@ function renderVirtualGroupList(groups, { preserveScroll = false } = {}) {
   const end = Math.min(groups.length, start + visibleCount);
   const offsetTop = start * GROUP_ITEM_ESTIMATED_HEIGHT;
   const totalHeight = groups.length * GROUP_ITEM_ESTIMATED_HEIGHT;
+  const visibleGroups = groups.slice(start, end);
+  const signature = [
+    "virtual",
+    start,
+    end,
+    groups.length,
+    totalHeight,
+    groupRenderStateSignature(visibleGroups)
+  ].join(":");
+
+  if (groupListRenderCache?.signature === signature) {
+    els.groupList.scrollTop = scrollTop;
+    renderGroupSelection();
+    return;
+  }
 
   els.groupList.classList.add("is-virtualized");
   els.groupList.innerHTML = `
     <div class="group-list-spacer" style="height: ${totalHeight}px;">
       <div class="group-list-window" style="transform: translateY(${offsetTop}px);">
-        ${groups.slice(start, end).map(renderGroupItem).join("")}
+        ${visibleGroups.map(renderGroupItem).join("")}
       </div>
     </div>
   `;
   els.groupList.scrollTop = scrollTop;
+  groupListRenderCache = { signature };
+}
+
+function groupRenderStateSignature(groups) {
+  return groups.map((group) => {
+    const labelStatus = groupTrainingLabelStatus(group);
+    const separatedCount = getSeparatedGroupRecords(group).length;
+    const decision = state.decisions.get(group.key) || "";
+    return [
+      group.key,
+      group.score,
+      group.minPairScore,
+      group.matchedFieldPercent,
+      group.records.length,
+      labelStatus.status,
+      labelStatus.labeledCount,
+      separatedCount,
+      decision
+    ].join(",");
+  }).join("|");
 }
 
 function selectedGroupScrollTop(groups, fallbackScrollTop) {
@@ -5061,8 +5319,13 @@ function renderGroupLabelIndicator(labelStatus) {
 
 function selectGroup(groupKey) {
   if (!groupKey || groupKey === state.selectedGroupKey) return;
+  if (mergeReviewSession.active && !mergeReviewSession.queueGroupKeys.includes(groupKey)) return;
   state.selectedGroupKey = groupKey;
-  renderGroups();
+  if (els.groupList.querySelector(`[data-group-key="${cssEscape(groupKey)}"]`)) {
+    renderGroupSelection();
+  } else {
+    renderGroups();
+  }
   renderDetail();
 }
 
@@ -6033,6 +6296,12 @@ function renderDetail() {
   const activeRecords = group ? getActiveGroupRecords(group) : [];
   const separatedRecords = group ? getSeparatedGroupRecords(group) : [];
   const currentDecision = group ? state.decisions.get(group.key) || "" : "";
+  const detailSignature = detailRenderSignature({
+    group,
+    activeRecords,
+    separatedRecords,
+    currentDecision
+  });
   updateNavigationControls();
   els.duplicateButton.disabled = !hasGroup || activeRecords.length < 2;
   els.notDuplicateButton.disabled = !hasGroup;
@@ -6055,6 +6324,9 @@ function renderDetail() {
       : "Duplicate decision not set"
     : "No judgment selected";
   els.decisionStatus.className = `decision-status ${currentDecision}`;
+
+  if (detailRenderCache === detailSignature) return;
+  detailRenderCache = detailSignature;
 
   if (state.isLoadingFile) {
     els.detailTitle.textContent = "Loading Dataset";
@@ -6100,6 +6372,59 @@ function renderDetail() {
         : renderEvaluateWorkspace(group, bestPair, activeRecords, separatedRecords)}
     </div>
   `;
+}
+
+function detailRenderSignature({ group, activeRecords, separatedRecords, currentDecision }) {
+  if (state.isLoadingFile) {
+    return [
+      "loading",
+      state.loadingFileName,
+      state.objectType,
+      state.reviewMode
+    ].join("|");
+  }
+  if (!group) {
+    return [
+      "empty",
+      state.loadError || "",
+      state.rows.length,
+      state.objectType,
+      state.reviewMode
+    ].join("|");
+  }
+
+  const groupKey = group.key;
+  const fieldResolutions = state.fieldResolutions.get(groupKey) || {};
+  const mergeResult = state.mergeResults.get(groupKey) || null;
+  const separatedKeys = [...(state.separatedRecords.get(groupKey) || [])].sort();
+  const trainingContext = state.reviewMode === "evaluate" ? getTrainingPairContext(group) : null;
+  const trainingLabel = trainingContext ? state.trainingLabels.get(trainingContext.pair.key) : null;
+  return JSON.stringify({
+    mode: state.reviewMode,
+    objectType: state.objectType,
+    groupKey,
+    decision: currentDecision,
+    activeRecordKeys: activeRecords.map(recordKey),
+    separatedRecordKeys: separatedRecords.map(recordKey),
+    separatedKeys,
+    fieldResolutions,
+    mergeMaster: mergeMasterSelections.get(groupKey) || "",
+    mergeReviewActive: mergeReviewSession.active,
+    mergeReviewSubmitting: mergeReviewSession.submitting,
+    mergeReviewQueueGroupKeys: mergeReviewSession.queueGroupKeys,
+    mergePreviewMasterId: mergePreviewStates.get(groupKey)?.masterId || "",
+    mergePreviewMergeIds: mergePreviewStates.get(groupKey)?.mergeIds || [],
+    mergePreviewWritebacks: mergePreviewStates.get(groupKey)?.salesforceWritebackCount || 0,
+    mergeInFlight: mergeInFlightGroupKeys.has(groupKey),
+    mergeResultStatus: mergeResult?.status || "",
+    mergeResultMessage: mergeResult?.message || "",
+    trainingPairIndex: state.trainingPairIndexes.get(groupKey) || 0,
+    trainingPairKey: trainingContext?.pair.key || "",
+    trainingPairLabel: trainingLabel?.label || "",
+    trainingPairConfidence: trainingLabel?.confidence || state.trainingConfidence,
+    trainingConfidence: state.trainingConfidence,
+    trainingLabelCount: state.trainingLabels.size
+  });
 }
 
 function setReviewMode(mode) {
@@ -6159,7 +6484,7 @@ function renderEvaluateWorkspace(group, bestPair, activeRecords, separatedRecord
 
 function renderMergeWorkspace(group, activeRecords, separatedRecords, currentDecision) {
   return `
-    ${renderSalesforceMergePanel(group, activeRecords, currentDecision)}
+    ${mergeReviewSession.active ? renderMergeReviewPanel(group) : renderSalesforceMergePanel(group, activeRecords, currentDecision)}
     ${separatedRecords.length ? renderSeparatedRecords(group, separatedRecords) : ""}
   `;
 }
@@ -6262,9 +6587,19 @@ function renderSalesforceMergePanel(group, activeRecords, currentDecision) {
 
   const mergeState = getMergeState(group, activeRecords, currentDecision);
   const result = state.mergeResults.get(group.key);
-  const confirmation = mergeConfirmations.get(group.key) || "";
   const resolutionContext = createFieldResolutionContext(group, activeRecords);
   const overrideCount = countMergeFieldOverrides(group, activeRecords, mergeState, resolutionContext);
+  const queueGroups = getMergeReviewQueueCandidates();
+  const queueReadyCount = queueGroups.length;
+  const queueCurrentIndex = queueGroups.findIndex((candidate) => candidate.key === group.key);
+  const queueSummary = queueReadyCount
+    ? queueReadyCount === 1
+      ? "1 merge group is ready for read-only review."
+      : `${formatNumber(queueReadyCount)} merge groups are ready for read-only review.`
+    : "Mark duplicate groups ready before starting the read-only review step.";
+  const reviewButtonLabel = queueReadyCount > 1
+    ? `Review ${formatNumber(queueReadyCount)} groups before confirming`
+    : "Review before confirming";
 
   return `
     <section class="salesforce-merge-panel ${escapeHtml(mergeState.statusClass)}" aria-label="Salesforce merge">
@@ -6302,25 +6637,22 @@ function renderSalesforceMergePanel(group, activeRecords, currentDecision) {
             : '<em class="merge-empty">No duplicate Contacts selected</em>'}
         </div>
       </div>
-      <div class="merge-control-grid">
-        <label class="merge-control">
-          <span>Confirm</span>
-          <input
-            class="merge-confirmation-input"
-            type="text"
-            autocomplete="off"
-            autocapitalize="characters"
-            spellcheck="false"
-            placeholder="Type MERGE"
-            value="${escapeHtml(confirmation)}"
-            data-group-key="${escapeHtml(group.key)}"
-            ${mergeState.locked ? "disabled" : ""}
-          />
-        </label>
+      <div class="merge-queue-summary">
+        <div class="merge-queue-summary-copy">
+          <strong>Next step: review before confirming</strong>
+          <span>${escapeHtml(queueSummary)}</span>
+          <em>${queueCurrentIndex >= 0
+            ? `Current group is ${formatNumber(queueCurrentIndex + 1)} of ${formatNumber(queueReadyCount)} in the queued merge set.`
+            : "Only groups marked Duplicate and ready for Salesforce merge enter the queued review set."
+          }</em>
+        </div>
+        <div class="merge-queue-summary-count">
+          <span>Queued groups</span>
+          <strong>${formatNumber(queueReadyCount)}</strong>
+        </div>
       </div>
       <p class="merge-warning">
-        Salesforce merge keeps the selected master Contact and reparents related records from duplicate Contacts.
-        Enforced merge rules are sent with the Salesforce merge request; other field choices document controlling values for review/export.
+        Salesforce merge keeps the selected master Contact and reparents related records from duplicate Contacts. Lead Source changes still apply as Salesforce write-backs; other field choices remain review-only and will be shown in the read-only confirmation preview.
       </p>
       ${mergeState.invalidRecords.length ? renderMissingContactIdNotice(group, mergeState) : ""}
       ${result ? renderMergeResult(result) : ""}
@@ -6330,10 +6662,181 @@ function renderSalesforceMergePanel(group, activeRecords, currentDecision) {
           type="button"
           data-merge-action="merge"
           data-group-key="${escapeHtml(group.key)}"
-          ${mergeState.canSubmit ? "" : "disabled"}
-        >${escapeHtml(mergeState.buttonLabel)}</button>
+          ${mergeState.canSubmit && queueReadyCount ? "" : "disabled"}
+        >${escapeHtml(reviewButtonLabel)}</button>
       </div>
     </section>
+  `;
+}
+
+function renderMergeReviewPanel(group) {
+  const previewState = mergePreviewStates.get(group.key) || null;
+  const queueGroups = getMergeReviewQueueGroups();
+  const currentIndex = queueGroups.findIndex((candidate) => candidate.key === group.key);
+  const currentNumber = currentIndex >= 0 ? currentIndex + 1 : 0;
+  const activePreviewState = previewState || mergePreviewStates.get(queueGroups[0]?.key) || null;
+  const currentGroupLabel = currentNumber
+    ? `Contact group ${group.id}`
+    : "Queued merge review";
+  const reviewCount = queueGroups.length;
+
+  if (!activePreviewState) {
+    return `
+      <section class="salesforce-merge-panel blocked" aria-label="Review before confirming">
+        <div class="salesforce-merge-header">
+          <div>
+            <span>Review before confirming</span>
+            <strong>No queued merge previews are available</strong>
+            <em>Return to Contact merge setup, then refresh the review queue.</em>
+          </div>
+          <span class="merge-status-pill blocked">Needs setup</span>
+        </div>
+        <div class="merge-actions">
+          <button class="button button-secondary" type="button" data-merge-action="cancel-batch-review">Cancel</button>
+        </div>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="salesforce-merge-panel ready merge-review-panel" aria-label="Review before confirming">
+      <div class="salesforce-merge-header">
+        <div>
+          <span>Review before confirming</span>
+          <strong>Read-only merged Contact previews for the queued merge set</strong>
+          <em>Use the left rail or the inline Previous and Next controls to inspect each resulting merged Contact before sending the queued Salesforce merges.</em>
+        </div>
+        <span class="merge-status-pill ready">${mergeReviewSession.submitting ? "Merging" : "Fresh"}</span>
+      </div>
+      <div class="merge-review-summary">
+        <div class="merge-readiness-card">
+          <span>Queued merge groups</span>
+          <strong>${formatNumber(reviewCount)}</strong>
+          <em>${reviewCount === 1 ? "group ready" : "groups ready"}</em>
+        </div>
+        <div class="merge-readiness-card">
+          <span>Current preview</span>
+          <strong>${formatNumber(currentNumber)} of ${formatNumber(reviewCount)}</strong>
+          <em>${escapeHtml(currentGroupLabel)}</em>
+        </div>
+        <div class="merge-readiness-card">
+          <span>Overall confirmation</span>
+          <strong>Affects ${formatNumber(reviewCount)}</strong>
+          <em>${reviewCount === 1 ? "Salesforce merge" : "Salesforce merges"}</em>
+        </div>
+      </div>
+      <div class="merge-review-nav">
+        <div class="merge-review-nav-buttons">
+          <button
+            class="button button-secondary merge-review-previous-button"
+            type="button"
+            data-merge-action="previous-review-group"
+            ${currentIndex <= 0 ? "disabled" : ""}
+          >Previous</button>
+          <button
+            class="button button-primary merge-review-next-button"
+            type="button"
+            data-merge-action="next-review-group"
+            ${currentIndex === -1 || currentIndex >= reviewCount - 1 ? "disabled" : ""}
+          >Next</button>
+        </div>
+        <div class="merge-review-nav-status">
+          <span>Currently reviewing</span>
+          <strong>${escapeHtml(currentGroupLabel)}</strong>
+        </div>
+      </div>
+      ${renderMergeConfirmationPreview(activePreviewState)}
+      <div class="merge-review-footer">
+        <p class="merge-warning">
+          These previews are read-only. To change a master choice or retained field value, cancel review and return to Contact merge setup. No Salesforce merge request is sent until you confirm the full queued set.
+        </p>
+        <div class="merge-actions">
+          <button
+            class="button button-secondary merge-cancel-preview-button"
+            type="button"
+            data-merge-action="cancel-batch-review"
+            ${mergeReviewSession.submitting ? "disabled" : ""}
+          >Cancel</button>
+          <button
+            class="button button-primary merge-confirm-preview-button"
+            type="button"
+            data-merge-action="confirm-merge"
+            ${mergeReviewSession.submitting ? "disabled" : ""}
+          >${mergeReviewSession.submitting ? "Confirming..." : `Confirm ${reviewCount === 1 ? "merge" : "all merges"}`}</button>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderMergeConfirmationPreview(previewState) {
+  return `
+    <section class="merge-confirmation-preview" aria-label="Merge confirmation preview">
+      <div class="merge-confirmation-header">
+        <div>
+          <span>Review before confirming</span>
+          <strong>Review the surviving Contact before sending the Salesforce merge</strong>
+        </div>
+      </div>
+      <dl class="merge-confirmation-meta">
+        <div>
+          <dt>Surviving master</dt>
+          <dd>${escapeHtml(previewState.masterName || "Unnamed Contact")} <span>${escapeHtml(previewState.masterId)}</span></dd>
+        </div>
+        <div>
+          <dt>Duplicate Contacts removed</dt>
+          <dd>${formatNumber(previewState.mergeIds.length)}</dd>
+        </div>
+        <div>
+          <dt>Salesforce field write-backs</dt>
+          <dd>${formatNumber(previewState.salesforceWritebackCount)}</dd>
+        </div>
+      </dl>
+      <div class="merge-preview merge-preview-list">
+        <span>Duplicate Contacts that will merge into the master</span>
+        <div class="merge-id-list merge-id-list-plain">
+          ${previewState.mergeRecordChips.length
+            ? previewState.mergeRecordChips.map((chip) => renderMergePreviewChip(chip)).join("")
+            : '<em class="merge-empty">No duplicate Contacts selected</em>'}
+        </div>
+      </div>
+      <div class="merge-confirmation-fields" aria-label="Resulting Contact fields">
+        <table class="merge-preview-table">
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Surviving value</th>
+              <th>Merge effect</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${previewState.previewFields.map((field) => renderMergePreviewFieldRow(field)).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function renderMergePreviewChip(chip) {
+  return `
+    <div class="merge-preview-list-item">
+      <strong>${escapeHtml(chip.name || "Unnamed record")}</strong>
+      <span>${escapeHtml(chip.id || "")}</span>
+    </div>
+  `;
+}
+
+function renderMergePreviewFieldRow(field) {
+  const effectText = field.kind === "review-only"
+    ? `Review only: ${field.reviewOnlyValue || "—"}`
+    : field.kindLabel;
+  return `
+    <tr class="merge-preview-row ${escapeHtml(field.kind)}" data-merge-preview-kind="${escapeHtml(field.kind)}">
+      <th scope="row">${escapeHtml(field.label)}</th>
+      <td>${escapeHtml(field.resultValue || "—")}</td>
+      <td>${escapeHtml(effectText)}</td>
+    </tr>
   `;
 }
 
@@ -6401,7 +6904,7 @@ function getMergeState(group, activeRecords, currentDecision) {
     title: alreadyMerged
       ? `Merged into ${result.masterId || selectedId}`
       : `${formatNumber(activeRecords.length)} ${activeRecords.length === 1 ? "Contact" : "Contacts"}: 1 master, ${formatNumber(mergeRecords.length)} ${mergeRecords.length === 1 ? "duplicate" : "duplicates"}`,
-    description: blockedReason || "Mark this group Duplicate, choose a master Contact, review field overrides, then type MERGE.",
+    description: blockedReason || "Mark this group Duplicate, choose a master Contact, review field overrides, then review before confirming.",
     statusClass: mergeStatusClass(result, blockedReason, inFlight),
     statusLabel: mergeStatusLabel(result, blockedReason, inFlight)
   };
@@ -6604,15 +7107,26 @@ function renderMergeResult(result) {
   const mergedIds = Array.isArray(result.mergedRecordIds) ? result.mergedRecordIds : [];
   const relatedCount = Array.isArray(result.updatedRelatedIds) ? result.updatedRelatedIds.length : 0;
   const when = result.mergedAt ? new Date(result.mergedAt).toLocaleString() : "";
+  const report = result.mergeReport;
   const message = result.status === "success"
     ? `Merged ${formatNumber(mergedIds.length)} ${mergedIds.length === 1 ? "record" : "records"}${relatedCount ? ` and updated ${formatNumber(relatedCount)} related ${relatedCount === 1 ? "record" : "records"}` : ""}.`
     : result.message || "Salesforce merge failed.";
   const canRefresh = canOfferPreMergeDatasetRefresh(result);
   return `
-    <div class="merge-result ${escapeHtml(result.status || "")}">
+    <div class="merge-result ${escapeHtml(result.status || "")}" data-group-key="${escapeHtml(result.groupKey || "")}">
       <strong>${escapeHtml(result.status === "success" ? "Last merge succeeded" : "Last merge failed")}</strong>
       <span>${escapeHtml(message)}</span>
       ${when ? `<em>${escapeHtml(when)}</em>` : ""}
+      ${report && Array.isArray(report.rows) && report.rows.length ? `
+        <div class="merge-result-actions">
+          <button
+            class="button button-secondary merge-report-download-button"
+            type="button"
+            data-merge-action="download-merge-report"
+            data-group-key="${escapeHtml(result.groupKey || "")}"
+          >Download CSV report</button>
+        </div>
+      ` : ""}
       ${canRefresh ? `
         <div class="merge-result-actions">
           <button
@@ -6632,8 +7146,249 @@ function canOfferPreMergeDatasetRefresh(result) {
   return isPreMergeFreshnessFailureMessage(result.message);
 }
 
+function downloadMergeReport(button) {
+  const groupKey = button.dataset.groupKey || "";
+  const result = state.mergeResults.get(groupKey);
+  const report = result?.mergeReport;
+  if (!report || !Array.isArray(report.rows) || !report.rows.length) {
+    window.alert("No CSV report is available for this merge yet.");
+    return;
+  }
+
+  downloadCsv(report.fileName || `${state.objectType}-merge-report.csv`, report.rows);
+}
+
 function hasStalePreMergeCheck(check) {
   return Boolean(check && check.status && check.status !== "fresh");
+}
+
+function getMergeReviewQueueCandidates() {
+  if (state.objectType !== "contact") return [];
+  return filteredGroups().filter((group) => {
+    const activeRecords = getActiveGroupRecords(group);
+    const currentDecision = state.decisions.get(group.key) || "";
+    const mergeState = getMergeState(group, activeRecords, currentDecision);
+    return mergeState.canSubmit;
+  });
+}
+
+function getMergeReviewQueueGroups() {
+  if (!mergeReviewSession.active) return [];
+  return mergeReviewSession.queueGroupKeys
+    .map((groupKey) => findGroupByKey(groupKey))
+    .filter(Boolean);
+}
+
+function resetMergeReviewSession() {
+  mergeReviewSession.active = false;
+  mergeReviewSession.queueGroupKeys = [];
+  mergeReviewSession.submitting = false;
+}
+
+function clearMergePreviewState(groupKey) {
+  const shouldResetReview = !groupKey
+    || !mergeReviewSession.active
+    || mergeReviewSession.queueGroupKeys.includes(groupKey);
+  if (shouldResetReview) {
+    resetMergeReviewSession();
+    mergePreviewStates.clear();
+    return;
+  }
+  mergePreviewStates.delete(groupKey);
+}
+
+function navigateMergeReview(direction) {
+  const queueGroupKeys = mergeReviewSession.queueGroupKeys;
+  if (!mergeReviewSession.active || !queueGroupKeys.length) return;
+  const currentIndex = queueGroupKeys.indexOf(state.selectedGroupKey);
+  const fallbackIndex = direction > 0 ? -1 : queueGroupKeys.length;
+  const nextIndex = Math.max(
+    0,
+    Math.min(queueGroupKeys.length - 1, (currentIndex === -1 ? fallbackIndex : currentIndex) + direction)
+  );
+  selectGroup(queueGroupKeys[nextIndex]);
+}
+
+async function startMergeReviewSession(preferredGroupKey = "") {
+  const queueGroups = getMergeReviewQueueCandidates();
+  if (!queueGroups.length) {
+    window.alert("No duplicate Contact groups are ready for merge review.");
+    return;
+  }
+
+  let refreshAfterStaleCheck = false;
+  let reviewAborted = false;
+  let currentGroup = null;
+  mergePreviewStates.clear();
+  queueGroups.forEach((group) => mergeInFlightGroupKeys.add(group.key));
+  renderGroups({ preserveScroll: true });
+  renderDetail();
+
+  try {
+    for (const group of queueGroups) {
+      currentGroup = group;
+      const activeRecords = getActiveGroupRecords(group);
+      const mergeState = getMergeState(group, activeRecords, state.decisions.get(group.key) || "");
+      const mergeIds = mergeState.mergeRecords.map(({ id }) => id);
+      const masterFieldPayload = buildSalesforceMergeMasterFieldPayload(group, mergeState);
+      const preMergeRecords = buildSalesforcePreMergeRecords(activeRecords);
+      const preMergeCheck = await checkSalesforcePreMergeFreshness({
+        groupKey: group.key,
+        mergeState,
+        mergeIds,
+        records: preMergeRecords
+      });
+
+      if (preMergeCheck.status !== "fresh") {
+        const message = preMergeFreshnessSummary(preMergeCheck);
+        state.mergeResults.set(
+          group.key,
+          sanitizeMergeResult({
+            status: "failed",
+            objectType: state.objectType,
+            masterId: mergeState.selectedId,
+            mergedRecordIds: mergeIds,
+            message,
+            preMergeCheck,
+            mergedAt: new Date().toISOString()
+          })
+        );
+        state.selectedGroupKey = group.key;
+        refreshAfterStaleCheck = confirmPreMergeDatasetRefresh(preMergeCheck);
+        resetMergeReviewSession();
+        mergePreviewStates.clear();
+        reviewAborted = true;
+        break;
+      }
+
+      mergePreviewStates.set(group.key, buildMergePreviewState({
+        group,
+        activeRecords,
+        mergeState,
+        mergeIds,
+        preMergeRecords,
+        masterFieldPayload,
+        preMergeCheck
+      }));
+    }
+
+    if (!reviewAborted) {
+      mergeReviewSession.active = true;
+      mergeReviewSession.queueGroupKeys = queueGroups.map((group) => group.key);
+      mergeReviewSession.submitting = false;
+      const preferredGroup = mergeReviewSession.queueGroupKeys.includes(preferredGroupKey)
+        ? preferredGroupKey
+        : mergeReviewSession.queueGroupKeys[0];
+      if (preferredGroup) state.selectedGroupKey = preferredGroup;
+    }
+  } catch (error) {
+    const preMergeCheck = sanitizePreMergeCheck(error.preMergeCheck);
+    const message = hasStalePreMergeCheck(preMergeCheck)
+      ? preMergeFreshnessSummary(preMergeCheck)
+      : error.message || "Salesforce merge failed.";
+    const activeGroupKey = currentGroup?.key || preferredGroupKey || queueGroups[0]?.key || "";
+    if (activeGroupKey) {
+      state.mergeResults.set(
+        activeGroupKey,
+        sanitizeMergeResult({
+          status: "failed",
+          objectType: state.objectType,
+          masterId: mergePreviewStates.get(activeGroupKey)?.masterId || "",
+          mergedRecordIds: mergePreviewStates.get(activeGroupKey)?.mergeIds || [],
+          message,
+          preMergeCheck,
+          mergedAt: new Date().toISOString()
+        })
+      );
+      state.selectedGroupKey = activeGroupKey;
+    }
+    resetMergeReviewSession();
+    mergePreviewStates.clear();
+    if (canOfferPreMergeDatasetRefresh({ status: "failed", message, preMergeCheck })) {
+      refreshAfterStaleCheck = confirmPreMergeDatasetRefreshFromMessage(message);
+    }
+  } finally {
+    queueGroups.forEach((group) => mergeInFlightGroupKeys.delete(group.key));
+    scheduleReviewStateSave();
+    renderGroups();
+    renderDetail();
+  }
+
+  if (refreshAfterStaleCheck) {
+    await refreshLoadedDatasetFromSource();
+  }
+}
+
+async function handleConfirmedMerge(button) {
+  const queueGroupKeys = [...mergeReviewSession.queueGroupKeys];
+  if (!queueGroupKeys.length || mergeReviewSession.submitting) return;
+  let refreshAfterStaleCheck = false;
+  mergeReviewSession.submitting = true;
+  queueGroupKeys.forEach((groupKey) => mergeInFlightGroupKeys.add(groupKey));
+  renderDetail();
+
+  try {
+    for (const groupKey of queueGroupKeys) {
+      const previewState = mergePreviewStates.get(groupKey);
+      if (!previewState) continue;
+
+      state.selectedGroupKey = groupKey;
+      renderGroups({ preserveScroll: true });
+      renderDetail();
+
+      const response = await fetch("/api/salesforce/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          objectType: state.objectType,
+          groupKey,
+          masterId: previewState.masterId,
+          mergeIds: previewState.mergeIds,
+          records: previewState.records,
+          ...previewState.masterFieldPayload
+        })
+      });
+      const payload = await readApiJson(response);
+      if (!response.ok) throw createApiError(payload, "Salesforce merge failed.");
+
+      state.mergeResults.set(groupKey, sanitizeMergeResult({ ...payload, status: "success" }));
+      state.decisions.set(groupKey, "duplicate");
+    }
+    clearMergePreviewState();
+  } catch (error) {
+    const preMergeCheck = sanitizePreMergeCheck(error.preMergeCheck);
+    const message = hasStalePreMergeCheck(preMergeCheck)
+      ? preMergeFreshnessSummary(preMergeCheck)
+      : error.message || "Salesforce merge failed.";
+    const activeGroupKey = state.selectedGroupKey;
+    const previewState = mergePreviewStates.get(activeGroupKey);
+    state.mergeResults.set(
+      activeGroupKey,
+      sanitizeMergeResult({
+        status: "failed",
+        objectType: state.objectType,
+        masterId: previewState?.masterId || "",
+        mergedRecordIds: previewState?.mergeIds || [],
+        message,
+        preMergeCheck,
+        mergedAt: new Date().toISOString()
+      })
+    );
+    clearMergePreviewState(activeGroupKey);
+    if (canOfferPreMergeDatasetRefresh({ status: "failed", message, preMergeCheck })) {
+      refreshAfterStaleCheck = confirmPreMergeDatasetRefreshFromMessage(message);
+    }
+  } finally {
+    mergeReviewSession.submitting = false;
+    queueGroupKeys.forEach((groupKey) => mergeInFlightGroupKeys.delete(groupKey));
+    scheduleReviewStateSave();
+    renderGroups();
+    renderDetail();
+  }
+
+  if (refreshAfterStaleCheck) {
+    await refreshLoadedDatasetFromSource();
+  }
 }
 
 function isPreMergeFreshnessFailureMessage(message) {
@@ -6818,6 +7573,14 @@ function trainingLabelCount() {
   return state.trainingLabels.size;
 }
 
+function separatedRecordTrainingCount() {
+  let count = 0;
+  state.separatedRecords.forEach((recordKeys) => {
+    count += recordKeys?.size || 0;
+  });
+  return count;
+}
+
 function wrapIndex(index, length) {
   if (!length) return 0;
   return ((index % length) + length) % length;
@@ -6985,6 +7748,7 @@ function setRecordSeparated(groupKey, key, separated) {
     state.separatedRecords.delete(groupKey);
   }
 
+  clearMergePreviewState(groupKey);
   visibleGroupsCache = null;
   ensureSelectedGroupVisible();
   renderGroups();
@@ -7000,6 +7764,7 @@ function setMergeMasterSelection(groupKey, value) {
   } else {
     mergeMasterSelections.delete(groupKey);
   }
+  clearMergePreviewState(groupKey);
   renderDetail();
   scheduleReviewStateSave();
 }
@@ -7013,19 +7778,31 @@ async function handleMergeAction(button) {
     await handleStalePreMergeRefresh(button);
     return;
   }
+  if (button.dataset.mergeAction === "cancel-batch-review") {
+    clearMergePreviewState(button.dataset.groupKey || state.selectedGroupKey);
+    renderDetail();
+    return;
+  }
+  if (button.dataset.mergeAction === "previous-review-group") {
+    navigateMergeReview(-1);
+    return;
+  }
+  if (button.dataset.mergeAction === "next-review-group") {
+    navigateMergeReview(1);
+    return;
+  }
+  if (button.dataset.mergeAction === "confirm-merge") {
+    await handleConfirmedMerge(button);
+    return;
+  }
+  if (button.dataset.mergeAction === "download-merge-report") {
+    downloadMergeReport(button);
+    return;
+  }
   if (button.dataset.mergeAction !== "merge") return;
   const groupKey = button.dataset.groupKey;
   const group = findGroupByKey(groupKey);
-  if (!group || mergeInFlightGroupKeys.has(groupKey)) return;
-
-  const panel = button.closest(".salesforce-merge-panel");
-  const confirmation = panel?.querySelector(".merge-confirmation-input")?.value.trim().toUpperCase() || "";
-  mergeConfirmations.set(groupKey, confirmation);
-  if (confirmation !== "MERGE") {
-    window.alert("Type MERGE before sending this merge to Salesforce.");
-    panel?.querySelector(".merge-confirmation-input")?.focus();
-    return;
-  }
+  if (!group || mergeInFlightGroupKeys.has(groupKey) || mergeReviewSession.submitting) return;
 
   const activeRecords = getActiveGroupRecords(group);
   const mergeState = getMergeState(group, activeRecords, state.decisions.get(group.key) || "");
@@ -7033,93 +7810,7 @@ async function handleMergeAction(button) {
     window.alert(mergeState.description || "This group is not ready to merge.");
     return;
   }
-
-  const mergeIds = mergeState.mergeRecords.map(({ id }) => id);
-  const masterFieldPayload = buildSalesforceMergeMasterFieldPayload(group, mergeState);
-  const preMergeRecords = buildSalesforcePreMergeRecords(activeRecords);
-  let refreshAfterStaleCheck = false;
-
-  mergeInFlightGroupKeys.add(groupKey);
-  renderDetail();
-
-  try {
-    const preMergeCheck = await checkSalesforcePreMergeFreshness({
-      groupKey,
-      mergeState,
-      mergeIds,
-      records: preMergeRecords
-    });
-
-    if (preMergeCheck.status !== "fresh") {
-      const message = preMergeFreshnessSummary(preMergeCheck);
-      state.mergeResults.set(
-        groupKey,
-        sanitizeMergeResult({
-          status: "failed",
-          objectType: state.objectType,
-          masterId: mergeState.selectedId,
-          mergedRecordIds: mergeIds,
-          message,
-          preMergeCheck,
-          mergedAt: new Date().toISOString()
-        })
-      );
-      refreshAfterStaleCheck = confirmPreMergeDatasetRefresh(preMergeCheck);
-    } else {
-      const confirmed = window.confirm(
-        `Merge ${mergeIds.length} ${mergeIds.length === 1 ? "record" : "records"} into ${mergeState.selectedId} in Salesforce?\n\nThis deletes the duplicate records and reparents related records to the master.`
-      );
-      if (!confirmed) return;
-
-      const response = await fetch("/api/salesforce/merge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          objectType: state.objectType,
-          groupKey,
-          masterId: mergeState.selectedId,
-          mergeIds,
-          records: preMergeRecords,
-          ...masterFieldPayload,
-          confirmation: "MERGE"
-        })
-      });
-      const payload = await readApiJson(response);
-      if (!response.ok) throw createApiError(payload, "Salesforce merge failed.");
-
-      state.mergeResults.set(groupKey, sanitizeMergeResult({ ...payload, status: "success" }));
-      state.decisions.set(groupKey, "duplicate");
-    }
-  } catch (error) {
-    const preMergeCheck = sanitizePreMergeCheck(error.preMergeCheck);
-    const message = hasStalePreMergeCheck(preMergeCheck)
-      ? preMergeFreshnessSummary(preMergeCheck)
-      : error.message || "Salesforce merge failed.";
-    state.mergeResults.set(
-      groupKey,
-      sanitizeMergeResult({
-        status: "failed",
-        objectType: state.objectType,
-        masterId: mergeState.selectedId,
-        mergedRecordIds: mergeIds,
-        message,
-        preMergeCheck,
-        mergedAt: new Date().toISOString()
-      })
-    );
-    if (canOfferPreMergeDatasetRefresh({ status: "failed", message, preMergeCheck })) {
-      refreshAfterStaleCheck = confirmPreMergeDatasetRefreshFromMessage(message);
-    }
-  } finally {
-    mergeInFlightGroupKeys.delete(groupKey);
-    scheduleReviewStateSave();
-    renderGroups();
-    renderDetail();
-  }
-
-  if (refreshAfterStaleCheck) {
-    await refreshLoadedDatasetFromSource();
-  }
+  await startMergeReviewSession(groupKey);
 }
 
 async function handleMissingContactIdRefresh(button) {
@@ -7187,10 +7878,55 @@ function buildSalesforcePreMergeRecords(records) {
         id,
         name: displayName(record),
         rowIndex: Number.isFinite(record.__rowIndex) ? record.__rowIndex : null,
-        fields
+        fields,
+        sourceRow: buildSalesforcePreMergeSourceRow(record)
       };
     })
     .filter(Boolean);
+}
+
+function buildMergePreviewState({ group, activeRecords, mergeState, mergeIds, preMergeRecords, masterFieldPayload, preMergeCheck }) {
+  const resolutionContext = createFieldResolutionContext(group, activeRecords);
+  const previewFields = OBJECT_CONFIG[state.objectType].displayFields.map((field) => {
+    const resolution = getFieldResolution(group, field, resolutionContext);
+    const masterValue = String(getDisplayFieldValue(mergeState.selectedRecord, field) || "");
+    const reviewOnlyValue = resolution.acceptedValue != null && normalizeResolutionValue(resolution.acceptedValue) !== normalizeResolutionValue(masterValue)
+      ? resolution.acceptedValue
+      : "";
+    return {
+      field,
+      label: FIELD_LABELS[field] || field,
+      kind: reviewOnlyValue ? "review-only" : "master-kept",
+      kindLabel: reviewOnlyValue ? "Review only" : "Master kept",
+      resultValue: masterValue,
+      reviewOnlyValue
+    };
+  });
+
+  return {
+    groupKey: group.key,
+    masterId: mergeState.selectedId,
+    masterName: displayName(mergeState.selectedRecord),
+    mergeIds: [...mergeIds],
+    mergeRecordChips: mergeState.mergeRecords.map(({ record, id }) => ({
+      name: displayName(record),
+      id
+    })),
+    records: preMergeRecords,
+    masterFieldPayload,
+    preMergeCheck: sanitizePreMergeCheck(preMergeCheck),
+    previewFields,
+    salesforceWritebackCount: previewFields.filter((field) => field.kind === "salesforce-writeback").length
+  };
+}
+
+function buildSalesforcePreMergeSourceRow(record) {
+  const source = record?.row && typeof record.row === "object" ? record.row : record;
+  return Object.fromEntries(
+    Object.entries(source || {})
+      .filter(([key]) => !String(key || "").startsWith("__"))
+      .map(([key, value]) => [key, value == null ? "" : String(value)])
+  );
 }
 
 function shouldIncludeSalesforcePreMergeField(field) {
@@ -7774,8 +8510,49 @@ function buildTrainingLabelRows() {
   return rows;
 }
 
+function buildSeparatedRecordTrainingRows() {
+  const groupsByKey = new Map(state.groups.map((group) => [group.key, group]));
+  const rows = [];
+
+  [...state.separatedRecords.entries()]
+    .sort(([leftGroupKey], [rightGroupKey]) => leftGroupKey.localeCompare(rightGroupKey))
+    .forEach(([groupKey, separatedKeys]) => {
+      const group = groupsByKey.get(groupKey);
+      if (!group || !separatedKeys?.size) return;
+
+      const separatedKeySet = new Set(separatedKeys);
+      const activeRecords = group.records.filter((record) => !separatedKeySet.has(recordKey(record)));
+      const activeGroupSalesforceIds = activeRecords.map((record) => salesforceId(record)).filter(Boolean);
+      const activeGroupRecordKeys = activeRecords.map(recordKey);
+      const activeGroupNames = activeRecords.map(displayName).filter(Boolean);
+
+      group.records
+        .filter((record) => separatedKeySet.has(recordKey(record)))
+        .sort((left, right) => displayName(left).localeCompare(displayName(right)))
+        .forEach((record) => {
+          rows.push({
+            objectType: state.objectType,
+            fileName: state.fileName || "",
+            groupKey,
+            groupScore: group.score ?? "",
+            minPairScore: group.minPairScore ?? "",
+            separatedSalesforceId: salesforceId(record),
+            separatedRecordKey: recordKey(record),
+            separatedName: displayName(record),
+            activeGroupSalesforceIds,
+            activeGroupRecordKeys,
+            activeGroupNames
+          });
+        });
+    });
+
+  return rows;
+}
+
 async function sendTrainingLabelsToCodex() {
-  if (!state.trainingLabels.size) return;
+  const labelCount = trainingLabelCount();
+  const separatedCount = separatedRecordTrainingCount();
+  if (!labelCount && !separatedCount) return;
 
   els.codexTrainingButton.disabled = true;
   els.codexTrainingButton.textContent = "Sending...";
@@ -7790,21 +8567,31 @@ async function sendTrainingLabelsToCodex() {
         datasetKey: state.datasetKey,
         rowCount: state.rows.length,
         groupCount: state.groups.length,
-        labelCount: state.trainingLabels.size,
+        labelCount,
+        separationCount: separatedCount,
         requestedAction:
-          "Read the latest training-label CSV, evaluate where the duplicate matching logic disagrees with the labels, and improve the matching/scoring logic safely.",
+          "Read the latest training-label CSV and separated-record JSON, evaluate where the duplicate matching logic disagrees with the user's labels and manual separations, and improve the matching/scoring logic safely.",
         openCodexSession: true,
-        rows: buildTrainingLabelRows()
+        rows: buildTrainingLabelRows(),
+        separatedRows: buildSeparatedRecordTrainingRows()
       })
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error?.message || "Labels could not be sent to Codex.");
 
+    const trainingSummary = [
+      result.labelCount ? `${formatNumber(result.labelCount)} ${result.labelCount === 1 ? "label" : "labels"}` : "",
+      result.separationCount
+        ? `${formatNumber(result.separationCount)} separated ${result.separationCount === 1 ? "record" : "records"}`
+        : ""
+    ]
+      .filter(Boolean)
+      .join(" and ");
     state.reviewStateStatus = result.codexSessionLaunched
-      ? `Opened Codex review session for ${formatNumber(result.labelCount)} labels`
+      ? `Opened Codex review session for ${trainingSummary}`
       : result.codexSessionError
         ? `Created Codex request, but Terminal could not open`
-        : `Created Codex review request for ${formatNumber(result.labelCount)} labels`;
+        : `Created Codex review request for ${trainingSummary}`;
     renderSource();
   } catch {
     state.reviewStateStatus = "Codex review request could not be created";
@@ -8036,6 +8823,11 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function cssEscape(value) {
+  if (globalThis.CSS?.escape) return globalThis.CSS.escape(String(value ?? ""));
+  return String(value ?? "").replace(/["\\\]\[]/g, "\\$&");
 }
 
 class UnionFind {

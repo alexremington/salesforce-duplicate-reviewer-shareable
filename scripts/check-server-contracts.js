@@ -6,12 +6,42 @@ const http = require("node:http");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
+const { buildCodexTrainingCommand } = require("../server/codex-training");
 
 const PROJECT_DIR = path.resolve(__dirname, "..");
 const SERVER_SCRIPT = path.join("server", "server.js");
 const PUBLIC_DIR = path.join(PROJECT_DIR, "public");
+const RETIRED_MERGE_GATE_PATTERNS = [
+  "merge-confirmation-input",
+  "Type MERGE",
+  'confirmation: "MERGE"',
+  "mergeConfirmationValue"
+];
+const REQUIRED_MERGE_REVIEW_PATTERNS = [
+  "mergeReviewSession",
+  "renderMergeReviewPanel",
+  "renderMergeConfirmationPreview",
+  "startMergeReviewSession",
+  "handleConfirmedMerge"
+];
+const REQUIRED_MERGE_REVIEW_FILE_PATTERNS = new Map([
+  [path.join(PROJECT_DIR, "public", "app.js"), REQUIRED_MERGE_REVIEW_PATTERNS],
+  [path.join(PROJECT_DIR, "tests", "playwright-smoke.js"), [
+    "reviewVisible",
+    "confirmVisible",
+    "cancelVisible",
+    "mergeSentBeforeConfirm",
+    "previewClearedAfterCancel",
+    "mergeSentAfterCancel",
+    "payloadsAligned"
+  ]]
+]);
+const CACHED_STATIC_APP_PATH = process.platform === "darwin"
+  ? path.join(os.homedir(), "Library", "Application Support", "salesforce-duplicate-reviewer", "static", "app.js")
+  : "";
 const APP_ID = "salesforce-duplicate-reviewer";
 const API_CONTRACT_VERSION = "duplicate-reviewer-api-contract-v2";
+const REQUEST_TIMEOUT_MS = Number(process.env.DUPLICATE_REVIEWER_CONTRACT_TIMEOUT_MS || 5000);
 
 let serverProcess = null;
 let fakeSalesforceServer = null;
@@ -63,7 +93,10 @@ async function main() {
     assertEqual(health.latestStagingFiles, true, "health latestStagingFiles");
     assertEqual(health.jsonDatasets, true, "health jsonDatasets");
 
+    await assertRetiredMergeGateAbsent();
     await assertStaticApp(baseUrl);
+    await assertLatestEndpointCaching(baseUrl);
+    await assertCodexTrainingLaunchCommand();
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/premerge-check");
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/merge");
     await assertSalesforcePreMergeWithWarningCli(baseUrl);
@@ -75,6 +108,104 @@ async function main() {
   }
 
   console.log("Server contract checks passed.");
+}
+
+async function assertRetiredMergeGateAbsent() {
+  const sourceFiles = [
+    path.join(PROJECT_DIR, "public", "app.js"),
+    path.join(PROJECT_DIR, "server", "server.js"),
+    path.join(PROJECT_DIR, "tests", "playwright-smoke.js"),
+    path.join(PROJECT_DIR, "README.md")
+  ];
+  const checkedLocations = [];
+
+  for (const filePath of sourceFiles) {
+    const contents = await fs.readFile(filePath, "utf8");
+    checkedLocations.push(filePath);
+    assertNoRetiredMergeGate(contents, filePath);
+    assertRequiredMergeReviewFlow(contents, filePath);
+  }
+
+  if (CACHED_STATIC_APP_PATH) {
+    try {
+      const cachedContents = await fs.readFile(CACHED_STATIC_APP_PATH, "utf8");
+      checkedLocations.push(CACHED_STATIC_APP_PATH);
+      assertNoRetiredMergeGate(cachedContents, CACHED_STATIC_APP_PATH);
+      assertRequiredMergeReviewFlow(cachedContents, CACHED_STATIC_APP_PATH);
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
+  return checkedLocations;
+}
+
+function assertNoRetiredMergeGate(contents, filePath) {
+  for (const retiredPattern of RETIRED_MERGE_GATE_PATTERNS) {
+    if (contents.includes(retiredPattern)) {
+      throw new Error(
+        `Retired merge-gate string ${JSON.stringify(retiredPattern)} found in ${filePath}. ` +
+        "The merge report should not require the old typed MERGE confirmation or related UI state."
+      );
+    }
+  }
+}
+
+function assertRequiredMergeReviewFlow(contents, filePath) {
+  const requiredPatterns = REQUIRED_MERGE_REVIEW_FILE_PATTERNS.get(filePath)
+    || (filePath === CACHED_STATIC_APP_PATH ? REQUIRED_MERGE_REVIEW_FILE_PATTERNS.get(path.join(PROJECT_DIR, "public", "app.js")) : null);
+  if (!requiredPatterns) return;
+  const missingPatterns = requiredPatterns.filter((pattern) => !contents.includes(pattern));
+  if (missingPatterns.length) {
+    throw new Error(
+      `Merge review flow markers missing from ${filePath}: ${missingPatterns.map((pattern) => JSON.stringify(pattern)).join(", ")}. ` +
+      "This usually means the queued review workflow was rolled back or renamed without updating the guardrail and smoke coverage."
+    );
+  }
+}
+
+async function assertLatestEndpointCaching(baseUrl) {
+  const first = await requestText(`${baseUrl}/api/staging-contacts/latest.json`);
+  const etag = first.headers.etag;
+  if (first.statusCode !== 200 || !etag || !first.body.includes("salesforce-duplicate-reviewer.dataset")) {
+    throw new Error(`Latest JSON cache contract failed: HTTP ${first.statusCode}: ${first.body}`);
+  }
+
+  const second = await requestText(`${baseUrl}/api/staging-contacts/latest.json`, {
+    headers: { "If-None-Match": etag }
+  });
+  if (second.statusCode !== 304) {
+    throw new Error(`Latest JSON cache revalidation failed: HTTP ${second.statusCode}: ${second.body}`);
+  }
+}
+
+async function assertCodexTrainingLaunchCommand() {
+  const command = buildCodexTrainingCommand({
+    rootDir: "/tmp/duplicate-reviewer",
+    prompt: "Read /tmp/duplicate-reviewer/Output/codex-training-request-latest.md and start fresh.",
+    codexBin: "codex"
+  });
+
+  if (!command.includes("codex") || command.includes("resume") || command.includes("gpt-5.5")) {
+    throw new Error(`Codex launch command still reuses an existing session or hardcodes the expensive model: ${command}`);
+  }
+
+  const configuredCommand = buildCodexTrainingCommand({
+    rootDir: "/tmp/duplicate-reviewer",
+    prompt: "Read /tmp/duplicate-reviewer/Output/codex-training-request-latest.md and start fresh.",
+    codexBin: "codex",
+    model: "gpt-5.4-mini",
+    reasoningEffort: "medium"
+  });
+
+  if (
+    !configuredCommand.includes("--model 'gpt-5.4-mini'") ||
+    !configuredCommand.includes(`model_reasoning_effort="medium"`)
+  ) {
+    throw new Error(`Codex launch command did not preserve explicit model overrides: ${configuredCommand}`);
+  }
 }
 
 async function writeSmokeDataset(csvPath, firstId, secondId) {
@@ -111,7 +242,11 @@ async function waitForHealth(baseUrl, logs) {
 
 async function assertStaticApp(baseUrl) {
   const response = await requestText(`${baseUrl}/`);
-  if (response.statusCode !== 200 || !response.body.includes("Salesforce Account and Contact Matching")) {
+  if (
+    response.statusCode !== 200 ||
+    !response.body.includes("Salesforce Account and Contact Matching") ||
+    !response.body.includes('app.js?v=duplicate-reviewer-cli-warning-safe-v1')
+  ) {
     throw new Error(`Static app contract failed: HTTP ${response.statusCode}`);
   }
 }
@@ -146,9 +281,13 @@ async function assertSalesforcePreMergeWithWarningCli(baseUrl) {
 async function assertSalesforceMergeWithWarningCli(baseUrl) {
   const payload = {
     ...smokeMergePayload(),
-    masterFields: { LeadSource: "Web" },
-    confirmation: "MERGE"
+    masterFields: { LeadSource: "Web" }
   };
+  const expectedMasterRecord = payload.records[0];
+  const expectedDuplicateRecord = payload.records[1];
+  const expectedRelatedId = "00TT00000090001CCC";
+  const expectedMasterSourceRow = expectedMasterRecord.sourceRow;
+  const expectedDuplicateSourceRow = expectedDuplicateRecord.sourceRow;
   const response = await requestText(`${baseUrl}/api/salesforce/merge`, {
     method: "POST",
     body: payload
@@ -166,43 +305,122 @@ async function assertSalesforceMergeWithWarningCli(baseUrl) {
   ) {
     throw new Error(`Warning CLI merge contract returned unexpected body: ${response.body}`);
   }
+  if (
+    !body.mergeReport ||
+    !Array.isArray(body.mergeReport.rows) ||
+    body.mergeReport.rows.length < 2 ||
+    !body.mergeReport.csvPath ||
+    !body.mergeReport.latestCsvPath
+  ) {
+    throw new Error(`Warning CLI merge contract did not return a merge report: ${response.body}`);
+  }
+
+  const reportCsv = await fs.readFile(body.mergeReport.csvPath, "utf8");
+  const relatedRow = body.mergeReport.rows.find((row) => Array.isArray(row) && row[0] === "Related record");
+  if (
+    !reportCsv.includes("ROLE,Salesforce ID,Name,First Name,Last Name,Email,Lead Source,Phone,Mobile Phone,Account ID,Account Name,Created Date,Last Modified Date,System Modstamp,Is Deleted,STATUS,DETAILS") ||
+    !reportCsv.includes(expectedMasterSourceRow["Contact ID 18"]) ||
+    !reportCsv.includes("Alex") ||
+    !reportCsv.includes("Alexander") ||
+    !reportCsv.includes(expectedMasterSourceRow["First Name"]) ||
+    !reportCsv.includes(expectedMasterSourceRow["Last Name"]) ||
+    !reportCsv.includes(expectedMasterSourceRow["Email"]) ||
+    !reportCsv.includes(expectedMasterSourceRow["Phone"]) ||
+    !reportCsv.includes(expectedMasterSourceRow["Mobile"]) ||
+    !reportCsv.includes(expectedMasterSourceRow["Account Name"]) ||
+    !reportCsv.includes(expectedDuplicateSourceRow["Contact ID 18"]) ||
+    !reportCsv.includes(expectedDuplicateSourceRow["First Name"]) ||
+    !reportCsv.includes(expectedDuplicateSourceRow["Last Name"]) ||
+    !reportCsv.includes(expectedDuplicateSourceRow["Email"]) ||
+    !reportCsv.includes(expectedDuplicateSourceRow["Phone"]) ||
+    !reportCsv.includes(expectedDuplicateSourceRow["Mobile"]) ||
+    !reportCsv.includes(expectedDuplicateSourceRow["Account Name"]) ||
+    !reportCsv.includes(expectedRelatedId) ||
+    !reportCsv.includes("Retained as master") ||
+    !reportCsv.includes("Merged into master")
+  ) {
+    throw new Error(`Warning CLI merge report file did not contain the expected statuses: ${reportCsv}`);
+  }
+  const masterRow = body.mergeReport.rows.find((row) => Array.isArray(row) && row[0] === "Master record");
+  const duplicateRow = body.mergeReport.rows.find((row) => Array.isArray(row) && row[0] === "Duplicate record");
+  if (!masterRow || masterRow[1] !== expectedMasterSourceRow["Contact ID 18"] || masterRow[3] !== "Alex" || masterRow[4] !== "Test" || masterRow[5] !== "afremington+test1@gmail.com" || masterRow[7] !== "6786655734" || masterRow[10] !== "[DO NOT USE] Peanut Butter & Co." || masterRow[6] !== "" || masterRow[8] !== "") {
+    throw new Error(`Warning CLI merge report master row did not match the uploaded file values: ${JSON.stringify(masterRow)}`);
+  }
+  if (!duplicateRow || duplicateRow[1] !== expectedDuplicateSourceRow["Contact ID 18"] || duplicateRow[3] !== "Alexander" || duplicateRow[4] !== "Test" || duplicateRow[5] !== "afremington+test2@gmail.com" || duplicateRow[7] !== "6786655734" || duplicateRow[10] !== "[DO NOT USE] Peanut Butter & Co." || duplicateRow[6] !== "" || duplicateRow[8] !== "") {
+    throw new Error(`Warning CLI merge report duplicate row did not match the uploaded file values: ${JSON.stringify(duplicateRow)}`);
+  }
+  if (!relatedRow || relatedRow[1] !== expectedRelatedId) {
+    throw new Error(`Warning CLI merge report did not preserve the related Salesforce ID: ${JSON.stringify(relatedRow)}`);
+  }
 }
 
 function smokeMergePayload() {
   return {
     objectType: "contact",
     groupKey: "smoke-merge-group",
-    masterId: "003T00000090001",
-    mergeIds: ["003T00000090002"],
+    masterId: "003VZ0000132RgDYAU",
+    mergeIds: ["003VZ0000132Rl3YAE"],
     records: [
       {
-        id: "003T00000090001",
-        name: "Smoke Record",
+        id: "003VZ0000132RgDYAU",
+        name: "Alex Test",
         rowIndex: 0,
+        sourceRow: {
+          "Contact ID 18": "003VZ0000132RgDYAU",
+          "First Name": "Alex",
+          "Last Name": "Test",
+          "Account Name": "[DO NOT USE] Peanut Butter & Co.",
+          "Mailing Street": "1000 Wilson Blvd",
+          "Mailing City": "Arlington",
+          "Mailing State/Province (text only)": "Virginia",
+          "Mailing Zip/Postal Code": "",
+          "Mailing Country (text only)": "United States",
+          "Phone": "6786655734",
+          "Fax": "",
+          "Mobile": "",
+          "Email": "afremington+test1@gmail.com",
+          "Account Owner": "Kumuda Rajashekara",
+          "Salutation": ""
+        },
         fields: {
-          fullName: "Smoke Record",
-          firstName: "Smoke",
-          lastName: "Record",
-          company: "Smoke Account",
-          email: "smoke@example.com",
-          leadSource: "Web",
-          phone: "(555) 010-0001",
+          fullName: "Alex Test",
+          firstName: "Alex",
+          lastName: "Test",
+          company: "[DO NOT USE] Peanut Butter & Co.",
+          email: "afremington+test1@gmail.com",
+          phone: "6786655734",
           mobile: ""
         }
       },
       {
-        id: "003T00000090002",
-        name: "Smoke Record Copy",
+        id: "003VZ0000132Rl3YAE",
+        name: "Alexander Test",
         rowIndex: 1,
+        sourceRow: {
+          "Contact ID 18": "003VZ0000132Rl3YAE",
+          "First Name": "Alexander",
+          "Last Name": "Test",
+          "Account Name": "[DO NOT USE] Peanut Butter & Co.",
+          "Mailing Street": "1000 Wilson Blvd",
+          "Mailing City": "Arlington",
+          "Mailing State/Province (text only)": "Virginia",
+          "Mailing Zip/Postal Code": "",
+          "Mailing Country (text only)": "United States",
+          "Phone": "6786655734",
+          "Fax": "",
+          "Mobile": "",
+          "Email": "afremington+test2@gmail.com",
+          "Account Owner": "Kumuda Rajashekara",
+          "Salutation": ""
+        },
         fields: {
-          fullName: "Smoke Record Copy",
-          firstName: "Smoke",
-          lastName: "Record Copy",
-          company: "Smoke Account",
-          email: "smoke-copy@example.com",
-          leadSource: "Referral",
-          phone: "",
-          mobile: "(555) 010-0002"
+          fullName: "Alexander Test",
+          firstName: "Alexander",
+          lastName: "Test",
+          company: "[DO NOT USE] Peanut Butter & Co.",
+          email: "afremington+test2@gmail.com",
+          phone: "6786655734",
+          mobile: ""
         }
       }
     ]
@@ -302,36 +520,36 @@ async function writeFakeSalesforceCli(directory, instanceUrl) {
 function fakeSalesforceContactRecords() {
   return [
     {
-      Id: "003T00000090001",
+      Id: "003VZ0000132RgDYAU",
       IsDeleted: false,
-      CreatedDate: "2026-01-01T00:00:00.000+0000",
-      LastModifiedDate: "2026-01-01T00:00:00.000+0000",
-      SystemModstamp: "2026-01-01T00:00:00.000+0000",
-      Name: "Smoke Record",
-      FirstName: "Smoke",
-      LastName: "Record",
-      Email: "smoke@example.com",
-      LeadSource: "Web",
-      Phone: "(555) 010-0001",
+      CreatedDate: "2026-04-01T00:00:00.000+0000",
+      LastModifiedDate: "2026-04-01T00:00:00.000+0000",
+      SystemModstamp: "2026-04-01T00:00:00.000+0000",
+      Name: "Alex Test",
+      FirstName: "Alex",
+      LastName: "Test",
+      Email: "afremington+test1@gmail.com",
+      LeadSource: "",
+      Phone: "6786655734",
       MobilePhone: "",
-      AccountId: "001T00000090001",
-      Account: { Name: "Smoke Account" }
+      AccountId: "001T00000090011AAA",
+      Account: { Name: "[DO NOT USE] Peanut Butter & Co." }
     },
     {
-      Id: "003T00000090002",
+      Id: "003VZ0000132Rl3YAE",
       IsDeleted: false,
-      CreatedDate: "2026-01-01T00:00:00.000+0000",
-      LastModifiedDate: "2026-01-01T00:00:00.000+0000",
-      SystemModstamp: "2026-01-01T00:00:00.000+0000",
-      Name: "Smoke Record Copy",
-      FirstName: "Smoke",
-      LastName: "Record Copy",
-      Email: "smoke-copy@example.com",
-      LeadSource: "Referral",
-      Phone: "",
-      MobilePhone: "(555) 010-0002",
-      AccountId: "001T00000090001",
-      Account: { Name: "Smoke Account" }
+      CreatedDate: "2026-04-02T00:00:00.000+0000",
+      LastModifiedDate: "2026-04-02T00:00:00.000+0000",
+      SystemModstamp: "2026-04-02T00:00:00.000+0000",
+      Name: "Alexander Test",
+      FirstName: "Alexander",
+      LastName: "Test",
+      Email: "afremington+test2@gmail.com",
+      LeadSource: "",
+      Phone: "6786655734",
+      MobilePhone: "",
+      AccountId: "001T00000090022BBB",
+      Account: { Name: "[DO NOT USE] Peanut Butter & Co." }
     }
   ];
 }
@@ -343,10 +561,10 @@ function fakeSalesforceMergeSoapResponse() {
     "  <soapenv:Body>",
     '    <mergeResponse xmlns="urn:partner.soap.sforce.com">',
     "      <result>",
-    "        <id>003T00000090001</id>",
+    "        <id>003VZ0000132RgDYAU</id>",
     "        <success>true</success>",
-    "        <mergedRecordIds>003T00000090002</mergedRecordIds>",
-    "        <updatedRelatedIds>00TT00000090001</updatedRelatedIds>",
+    "        <mergedRecordIds>003VZ0000132Rl3YAE</mergedRecordIds>",
+    "        <updatedRelatedIds>00TT00000090001CCC</updatedRelatedIds>",
     "      </result>",
     "    </mergeResponse>",
     "  </soapenv:Body>",
@@ -393,11 +611,14 @@ function requestText(url, options = {}) {
     const body = options.body == null ? "" : JSON.stringify(options.body);
     const request = http.request(url, {
       method: options.method || "GET",
-      timeout: 1500,
-      headers: body ? {
+      timeout: REQUEST_TIMEOUT_MS,
+      headers: {
+        ...(options.headers || {}),
+        ...(body ? {
         "Content-Type": "application/json",
         "Content-Length": Buffer.byteLength(body)
-      } : undefined
+        } : {})
+      }
     }, (response) => {
       let responseBody = "";
       response.setEncoding("utf8");
@@ -405,7 +626,7 @@ function requestText(url, options = {}) {
         responseBody += chunk;
       });
       response.on("end", () => {
-        resolve({ statusCode: response.statusCode || 0, body: responseBody });
+        resolve({ statusCode: response.statusCode || 0, headers: response.headers, body: responseBody });
       });
     });
     request.on("timeout", () => request.destroy(new Error("request timed out")));
