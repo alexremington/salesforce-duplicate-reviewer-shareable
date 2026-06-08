@@ -84,6 +84,9 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host 'Checking staging routing defaults...'
+$contactsOutDir = 'C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts'
+$accountsOutDir = 'C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-accounts'
+$env:OUT_DIR = $contactsOutDir
 $contactsDryRun = (& scripts/run-staging-contacts-bulk-query.sh --dry-run) -join "`n"
 if ($contactsDryRun -notmatch '/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts') {
   Write-Host $contactsDryRun
@@ -93,6 +96,7 @@ $bulkQueryWrapper = Get-Content scripts/run-salesforce-bulk-query.sh -Raw
 if ($bulkQueryWrapper -notmatch 'sf org auth show-access-token') {
   throw 'Bulk query wrapper did not use sf org auth show-access-token.'
 }
+$env:OUT_DIR = $accountsOutDir
 $accountsDryRun = (& scripts/run-staging-accounts-bulk-query.sh --dry-run) -join "`n"
 if ($accountsDryRun -notmatch '/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-accounts') {
   Write-Host $accountsDryRun
