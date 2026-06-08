@@ -822,7 +822,6 @@ async function mergeSalesforceRecords(body) {
 }
 
 function validateMergeRequest(body, options = {}) {
-  const requireConfirmation = options.requireConfirmation !== false;
   const objectType = normalizeMergeObjectType(body.objectType);
   const masterId = normalizeSalesforceId(body.masterId);
   const mergeIds = uniqueIds(Array.isArray(body.mergeIds) ? body.mergeIds : []).filter((id) => id !== masterId);
@@ -831,7 +830,6 @@ function validateMergeRequest(body, options = {}) {
   const loadedRecords = validatePreMergeLoadedRecords(body.records);
   const expectedPrefix = "003";
 
-  if (requireConfirmation && body.confirmation !== "MERGE") throw httpError(400, "Type MERGE to confirm this Salesforce merge.");
   if (!masterId) throw httpError(400, "A master Salesforce ID is required.");
   if (!masterId.startsWith(expectedPrefix)) throw httpError(400, `${objectType} merges require ${expectedPrefix} Salesforce IDs.`);
   if (!mergeIds.length) throw httpError(400, "At least one duplicate Salesforce ID is required.");
@@ -865,10 +863,14 @@ function validatePreMergeLoadedRecords(value) {
     const fields = record.fields && typeof record.fields === "object" && !Array.isArray(record.fields)
       ? record.fields
       : {};
+    const sourceRow = record.sourceRow && typeof record.sourceRow === "object" && !Array.isArray(record.sourceRow)
+      ? Object.fromEntries(Object.entries(record.sourceRow).map(([key, value]) => [String(key || ""), String(value ?? "")]))
+      : {};
     return {
       id,
       name: String(record.name || ""),
       rowIndex: Number.isFinite(Number(record.rowIndex)) ? Number(record.rowIndex) : null,
+      sourceRow,
       fields: Object.fromEntries(
         CONTACT_PREMERGE_COMPARISON_FIELDS
           .filter(([field]) => Object.prototype.hasOwnProperty.call(fields, field))
@@ -1019,6 +1021,11 @@ function buildMergeReport({ mergeRequest, response, preMergeCheck }) {
   const latestFileName = "salesforce-merge-report-latest.csv";
   const manifestFileName = `salesforce-merge-report-${timestamp}.json`;
   const latestManifestFileName = "salesforce-merge-report-latest.json";
+  const loadedRecordsById = new Map(
+    (mergeRequest?.loadedRecords || [])
+      .filter((record) => record && record.id)
+      .map((record) => [salesforceIdKey(record.id), record])
+  );
   const currentRecordsById = new Map(
     (preMergeCheck?.currentRecords || [])
       .filter((record) => record && record.Id)
@@ -1026,12 +1033,14 @@ function buildMergeReport({ mergeRequest, response, preMergeCheck }) {
   );
   const recordsById = new Map();
   const getRecordSnapshot = (id) => {
-    const normalizedId = salesforceIdKey(id);
+    const displayId = String(id || "").trim();
+    const normalizedId = salesforceIdKey(displayId);
     if (!normalizedId) return null;
     if (!recordsById.has(normalizedId)) {
       recordsById.set(normalizedId, buildMergeReportRecordSnapshot({
+        loadedRecord: loadedRecordsById.get(normalizedId) || null,
         currentRecord: currentRecordsById.get(normalizedId) || null,
-        id: normalizedId
+        id: displayId
       }));
     }
     return recordsById.get(normalizedId);
@@ -1081,9 +1090,45 @@ function buildMergeReport({ mergeRequest, response, preMergeCheck }) {
   };
 }
 
-function buildMergeReportRecordSnapshot({ currentRecord = null, id = "" } = {}) {
+function buildMergeReportRecordSnapshot({ loadedRecord = null, currentRecord = null, id = "" } = {}) {
+  const loadedSnapshot = loadedRecord || {};
   const snapshot = currentRecord || {};
-  const salesforceId = String(snapshot.Id || id || "");
+  const loadedFields = loadedSnapshot.fields || {};
+  const sourceRow = loadedSnapshot.sourceRow || {};
+  const sourceRowLookup = createSourceRowLookup(sourceRow);
+  const sourceValue = (...candidates) => getSourceRowValue(sourceRowLookup, ...candidates);
+  const salesforceId = String(
+    sourceValue("Id", "Contact ID 18", "Contact Id 18", "Salesforce ID", "SF ID", "Record ID") ||
+      loadedSnapshot.id ||
+      loadedSnapshot.Id ||
+      snapshot.Id ||
+      id ||
+      ""
+  );
+  if (loadedRecord) {
+    const sourceFirstName = sourceValue("First Name", "FirstName", "Given Name") || loadedFields.firstName || "";
+    const sourceLastName = sourceValue("Last Name", "LastName", "Surname", "Family Name") || loadedFields.lastName || "";
+    const sourceFullName =
+      sourceValue("Name", "Full Name", "Contact Name") ||
+      [sourceFirstName, sourceLastName].filter(Boolean).join(" ");
+    return {
+      "Salesforce ID": salesforceId,
+      Name: String(sourceFullName || loadedSnapshot.name || loadedFields.fullName || ""),
+      "First Name": String(sourceFirstName),
+      "Last Name": String(sourceLastName),
+      Email: String(sourceValue("Email", "Email Address") || loadedFields.email || ""),
+      "Lead Source": String(sourceValue("Lead Source", "LeadSource", "Source") || loadedFields.leadSource || ""),
+      Phone: String(sourceValue("Phone", "Business Phone", "Work Phone") || loadedFields.phone || ""),
+      "Mobile Phone": String(sourceValue("Mobile", "Mobile Phone", "Cell", "Cell Phone") || loadedFields.mobile || ""),
+      "Account ID": String(sourceValue("Account ID", "AccountId") || ""),
+      "Account Name": String(sourceValue("Account Name", "Account", "Company") || loadedFields.company || ""),
+      "Created Date": String(sourceValue("Created Date", "CreatedDate", "Created") || ""),
+      "Last Modified Date": String(sourceValue("Last Modified Date", "LastModifiedDate") || ""),
+      "System Modstamp": String(sourceValue("System Modstamp", "SystemModstamp") || ""),
+      "Is Deleted": String(sourceValue("Is Deleted", "IsDeleted") || "")
+    };
+  }
+
   return {
     "Salesforce ID": salesforceId,
     Name: String(snapshot.Name || ""),
@@ -1100,6 +1145,26 @@ function buildMergeReportRecordSnapshot({ currentRecord = null, id = "" } = {}) 
     "System Modstamp": String(snapshot.SystemModstamp || ""),
     "Is Deleted": String(snapshot.IsDeleted ?? "")
   };
+}
+
+function createSourceRowLookup(sourceRow) {
+  return new Map(
+    Object.entries(sourceRow || {}).map(([key, value]) => [normalizeSourceHeaderKey(key), String(value ?? "")])
+  );
+}
+
+function getSourceRowValue(sourceRowLookup, ...candidates) {
+  for (const candidate of candidates) {
+    const value = sourceRowLookup.get(normalizeSourceHeaderKey(candidate));
+    if (value) return value;
+  }
+  return "";
+}
+
+function normalizeSourceHeaderKey(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
 }
 
 function mergeReportRow({ role, id, record, status, details }) {
