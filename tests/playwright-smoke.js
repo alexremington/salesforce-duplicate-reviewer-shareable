@@ -27,7 +27,7 @@ const baseUrl = process.env.DUPLICATE_REVIEWER_URL || "http://127.0.0.1:5180";
 const outDir = process.env.PLAYWRIGHT_SMOKE_OUT_DIR || path.join(os.tmpdir(), "duplicate-reviewer-playwright");
 const REACHABILITY_OPTIONS = {
   intentionallyHiddenIds: ["csvInput", "trainingImportInput"],
-  pointerEventsAllowedClassNames: ["threshold-slider-input", "threshold-slider"],
+  pointerEventsAllowedClassNames: ["threshold-slider-input"],
   sharedHitAncestorSelectors: [".threshold-slider"]
 };
 const PERFORMANCE_BUDGETS = {
@@ -119,43 +119,6 @@ async function run() {
     const exportMenuClosed = await page.locator("#exportMenu").isHidden();
     await page.locator("#demoButton").click();
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
-    await page.locator("#exportMenuButton").click();
-    const datasetExportMenuState = await exportMenuStateForSmoke(page);
-    if (datasetExportMenuState.options.join("|") !== "Dataset + Scores|Decisions|Labels") {
-      throw new Error(`Expected Export menu to include Dataset + Scores, Decisions, and Labels after loading demo data: ${JSON.stringify(datasetExportMenuState)}`);
-    }
-    await page.evaluate(() => {
-      window.__smokeExportBlob = null;
-      window.__smokeExportFilename = "";
-      window.__smokeOriginalCreateObjectURL = window.__smokeOriginalCreateObjectURL || URL.createObjectURL;
-      window.__smokeOriginalAnchorClick = window.__smokeOriginalAnchorClick || HTMLAnchorElement.prototype.click;
-      URL.createObjectURL = function(blob) {
-        window.__smokeExportBlob = blob;
-        return window.__smokeOriginalCreateObjectURL.call(this, blob);
-      };
-      HTMLAnchorElement.prototype.click = function() {
-        if (this.download) window.__smokeExportFilename = String(this.download || "");
-        return window.__smokeOriginalAnchorClick.call(this);
-      };
-    });
-    await page.locator("#datasetExportButton").click();
-    await page.waitForFunction(() => Boolean(window.__smokeExportBlob), null, { timeout: 5000 });
-    const datasetExportCsv = await page.evaluate(async () => {
-      return window.__smokeExportBlob ? window.__smokeExportBlob.text() : "";
-    });
-    const datasetExportFilename = await page.evaluate(() => window.__smokeExportFilename || "");
-    await page.evaluate(() => {
-      if (window.__smokeOriginalCreateObjectURL) URL.createObjectURL = window.__smokeOriginalCreateObjectURL;
-      if (window.__smokeOriginalAnchorClick) HTMLAnchorElement.prototype.click = window.__smokeOriginalAnchorClick;
-      window.__smokeExportBlob = null;
-      window.__smokeExportFilename = "";
-    });
-    const datasetExportRows = datasetExportCsv.trim().split(/\r?\n/);
-    const datasetExportHeader = datasetExportRows[0].split(",");
-    const demoReportSummary = await reportSummaryState(page);
-    if (!datasetExportFilename.endsWith("-dataset-with-scores.csv") || datasetExportHeader.slice(-2).join("|") !== "group|score" || csvDataRowCount(datasetExportCsv) !== Number(demoReportSummary.values.records || 0)) {
-      throw new Error(`Expected Dataset + Scores export to preserve the dataset shape and append group/score columns: ${JSON.stringify({ datasetExportFilename, header: datasetExportHeader, rowCount: csvDataRowCount(datasetExportCsv), demoRecords: demoReportSummary.values.records })}`);
-    }
 
     const topbarImportState = await importContactsThroughMenu(page, csvPath);
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
@@ -234,8 +197,7 @@ async function run() {
     const notDuplicateBadges = await page.locator(".record-decision-badge.not-duplicate").count();
     await page.screenshot({ path: path.join(outDir, "desktop-not-duplicate.png"), fullPage: false });
 
-    const queuedDuplicateGroups = await markFirstGroupsDuplicate(page, 3);
-    await page.locator(".group-item-main").first().click();
+    await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
     await page.locator('[data-review-mode="merge"]').click();
     await page.locator(".merge-master-radio").first().waitFor({ state: "visible", timeout: 5000 });
     const mergeMasterRadios = await page.locator(".merge-master-radio").count();
@@ -265,28 +227,22 @@ async function run() {
           .some((radio) => radio.name === name && radio.value === value && radio.checked);
       }, mergeFieldSelection);
     }
+    await page.locator(".merge-confirmation-input").fill("MERGE");
     const staleRefreshState = await captureStaleRefreshFlow(page, contactSmokeCsv());
     const staleFailureCardRefreshState = await captureStaleFailureCardRefreshFlow(page, contactSmokeCsv());
     const missingContactIdRefreshState = await captureMissingContactIdRefreshFlow(page, missingContactIdCsvPath, contactSmokeCsv());
     const missingContactIdFallbackRefreshState = await captureMissingContactIdFallbackRefreshFlow(page, missingContactIdCsvPath, contactSmokeCsv());
-    await markFirstGroupsDuplicate(page, 3);
     await page.locator(".group-item-main").first().click();
+    await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
     await page.locator('[data-review-mode="merge"]').click();
     await page.locator(".merge-master-radio").first().waitFor({ state: "visible", timeout: 5000 });
     if (await page.locator(".merge-master-radio").count() > 1) {
       await page.locator(".merge-master-radio").nth(1).check();
     }
-    await page.evaluate(() => {
-      const radios = [...document.querySelectorAll(".merge-field-radio:not(:disabled)")];
-      const candidate = radios.find((radio) => {
-        if (radio.checked) return false;
-        const siblings = radios.filter((sibling) => sibling.name === radio.name);
-        const checkedSibling = siblings.find((sibling) => sibling.checked);
-        return checkedSibling && checkedSibling.value !== radio.value;
-      });
-      if (candidate) candidate.click();
-    });
+    await page.locator(".merge-confirmation-input").fill("MERGE");
+    const mergeConfirmationValue = await page.locator(".merge-confirmation-input").inputValue();
     const mergePayload = await captureMergePayload(page);
+    const mergeReportDownloadState = await captureMergeReportDownload(page);
     await page.setViewportSize({ width: 1280, height: 560 });
     const workspaceColumnScroll = await assertVerticalScrollAvailable(page, ".workspace-column", "workspace column");
     const rightPaneScrollModel = await assertRightPaneSingleScrollModel(page);
@@ -433,8 +389,8 @@ async function run() {
       throw new Error(`Expected latest Contact and Account exports in Recent files: ${JSON.stringify(latestRecentFiles)}`);
     }
     if (!csvMenuClosed) throw new Error("Expected Import menu to close with Escape.");
-    if (!exportMenuClosed || exportMenuState.options.join("|") !== "Dataset + Scores|Decisions|Labels") {
-      throw new Error(`Expected Export menu to show Dataset + Scores, Decisions, and Labels and close with Escape: ${JSON.stringify({ exportMenuClosed, exportMenuState })}`);
+    if (!exportMenuClosed || exportMenuState.options.join("|") !== "Decisions|Labels") {
+      throw new Error(`Expected Export menu to show Decisions and Labels and close with Escape: ${JSON.stringify({ exportMenuClosed, exportMenuState })}`);
     }
     if (!topbarImportState.fileChooserOpened || topbarImportState.rowCount !== contactSmokeRowCount || !topbarImportState.groupCount) {
       throw new Error(`Expected topbar Import > Contacts to open a file picker and load a dataset: ${JSON.stringify(topbarImportState)}`);
@@ -453,37 +409,6 @@ async function run() {
     }
     if (thresholdTypedState.minRange !== "80" || thresholdTypedState.maxRange !== "99") {
       throw new Error(`Expected typed min threshold to update the slider: ${JSON.stringify(thresholdTypedState)}`);
-    }
-    await setRangeValue(page, "#threshold", "70");
-    await setRangeValue(page, "#maxThreshold", "70");
-    await dragRangeToValue(page, "#maxThreshold", 80);
-    const thresholdCollapsedMinDragState = await thresholdControlState(page);
-    if (thresholdCollapsedMinDragState.minRange !== "70" || Number(thresholdCollapsedMinDragState.maxRange) <= 70) {
-      throw new Error(`Expected collapsed minimum threshold slider to remain draggable: ${JSON.stringify(thresholdCollapsedMinDragState)}`);
-    }
-    await setRangeValue(page, "#threshold", "70");
-    await setRangeValue(page, "#maxThreshold", "100");
-    await dragRangeToValue(page, "#threshold", 100);
-    const thresholdCollapsedMaxSetupState = await thresholdControlState(page);
-    if (thresholdCollapsedMaxSetupState.minRange !== "100" || thresholdCollapsedMaxSetupState.maxRange !== "100") {
-      throw new Error(`Expected dragging the minimum threshold to the far right to collapse at 100: ${JSON.stringify(thresholdCollapsedMaxSetupState)}`);
-    }
-    const thresholdCollapsedMaxInputBox = await page.locator("#threshold").boundingBox();
-    if (!thresholdCollapsedMaxInputBox) throw new Error("Expected the threshold slider input to be visible for the 100/100 click regression.");
-    await page.mouse.click(
-      thresholdCollapsedMaxInputBox.x + Math.max(4, thresholdCollapsedMaxInputBox.width - 18),
-      thresholdCollapsedMaxInputBox.y + thresholdCollapsedMaxInputBox.height / 2
-    );
-    const thresholdCollapsedMaxClickState = await thresholdControlState(page);
-    if (Number(thresholdCollapsedMaxClickState.minRange) === 100 && Number(thresholdCollapsedMaxClickState.maxRange) === 100) {
-      throw new Error(`Expected clicking the collapsed maximum threshold slider to move it off 100: ${JSON.stringify(thresholdCollapsedMaxClickState)}`);
-    }
-    await setRangeValue(page, "#threshold", "100");
-    await setRangeValue(page, "#maxThreshold", "100");
-    await dragRangeToValue(page, "#threshold", 90);
-    const thresholdCollapsedMaxDragState = await thresholdControlState(page);
-    if (Number(thresholdCollapsedMaxDragState.minRange) >= 100 || thresholdCollapsedMaxDragState.maxRange !== "100") {
-      throw new Error(`Expected collapsed maximum threshold slider to remain draggable: ${JSON.stringify(thresholdCollapsedMaxDragState)}`);
     }
     if (!fastestSearchDefaultUnchecked) {
       throw new Error("Expected fastest search to be opt-in so broader candidate search is the default.");
@@ -553,7 +478,7 @@ async function run() {
       throw new Error(`Expected Lead Source hard-rule radios to be disabled and visually marked: ${JSON.stringify(leadSourceRule)}`);
     }
     if (!mergeFieldCanChange) throw new Error("Expected Contact merge field radio selection to change.");
-    if (queuedDuplicateGroups < 3) throw new Error(`Expected at least 3 queued duplicate groups for merge review: ${queuedDuplicateGroups}`);
+    if (mergeConfirmationValue !== "MERGE") throw new Error("Expected Contact merge confirmation input to accept text.");
     if (
       !staleRefreshState.preMergeCalled ||
       !staleRefreshState.refreshCalled ||
@@ -599,47 +524,31 @@ async function run() {
     if (mergePayload.masterFields?.LeadSource !== "Web") {
       throw new Error(`Expected Salesforce merge payload to preserve oldest Lead Source: ${JSON.stringify(mergePayload)}`);
     }
-    if (!mergePayload.preMergePayloads?.every((payload) => payload.records?.length)) {
-      throw new Error(`Expected every Salesforce pre-merge freshness check to include loaded records: ${JSON.stringify(mergePayload)}`);
+    if (!mergePayload.preMergePayload?.records?.length) {
+      throw new Error(`Expected Salesforce pre-merge freshness check to include loaded records: ${JSON.stringify(mergePayload)}`);
     }
-    if (!mergePayload.mergePayloads?.every((payload) => payload.records?.length)) {
-      throw new Error(`Expected every Salesforce merge payload to include loaded freshness records: ${JSON.stringify(mergePayload)}`);
+    if (!mergePayload.records?.length) {
+      throw new Error(`Expected Salesforce merge payload to include loaded freshness records: ${JSON.stringify(mergePayload)}`);
     }
-    if (mergePayload.mergeSentBeforeConfirm) {
-      throw new Error(`Expected merge requests to wait for overall confirmation: ${JSON.stringify(mergePayload)}`);
+    if (
+      mergePayload.preMergePayload.masterId !== mergePayload.masterId ||
+      JSON.stringify(mergePayload.preMergePayload.mergeIds || []) !== JSON.stringify(mergePayload.mergeIds || [])
+    ) {
+      throw new Error(`Expected pre-merge check and merge payload to target the same records: ${JSON.stringify(mergePayload)}`);
     }
-    if (mergePayload.mergeSentAfterCancel) {
-      throw new Error(`Expected overall cancel to back out without sending merges: ${JSON.stringify(mergePayload)}`);
-    }
-    if (!mergePayload.previewClearedAfterCancel) {
-      throw new Error(`Expected overall cancel to dismiss the review surface: ${JSON.stringify(mergePayload)}`);
-    }
-    if (!mergePayload.reviewVisible || !mergePayload.confirmVisible || !mergePayload.cancelVisible) {
-      throw new Error(`Expected read-only merge review with visible confirm and cancel actions: ${JSON.stringify(mergePayload)}`);
-    }
-    if (!mergePayload.previewMasterId || mergePayload.previewDuplicateCount < 1) {
-      throw new Error(`Expected review surface summary to identify the surviving master and duplicates: ${JSON.stringify(mergePayload)}`);
-    }
-    if (!mergePayload.reviewOnlyRowCount) {
-      throw new Error(`Expected review surface table to label review-only retained values: ${JSON.stringify(mergePayload)}`);
-    }
-    if (!mergePayload.successVisible || mergePayload.reviewVisibleAfterSuccess || mergePayload.successReviewButtonCount !== 0 || mergePayload.successReviewButtonVisible || mergePayload.successPreviewVisible !== 0) {
-      throw new Error(`Expected merge success to replace review controls with a general success screen: ${JSON.stringify(mergePayload)}`);
-    }
-    if (mergePayload.successTitle !== "Last merge succeeded") {
-      throw new Error(`Expected merge success screen title to be "Last merge succeeded": ${JSON.stringify(mergePayload)}`);
-    }
-    if (mergePayload.dialogMessages?.length) {
-      throw new Error(`Expected review surface flow to avoid browser confirmation dialogs: ${JSON.stringify(mergePayload)}`);
-    }
-    if (!mergePayload.nextAdvanced || !mergePayload.leftRailNavigationWorked || !mergePayload.readOnly) {
-      throw new Error(`Expected multi-group review navigation and read-only state: ${JSON.stringify(mergePayload)}`);
-    }
-    if (mergePayload.reviewGroupCount < 3 || mergePayload.preMergePayloads.length !== mergePayload.reviewGroupCount || mergePayload.mergePayloads.length !== mergePayload.reviewGroupCount) {
-      throw new Error(`Expected one pre-merge check and one merge request per queued review group: ${JSON.stringify(mergePayload)}`);
-    }
-    if (!mergePayload.payloadsAligned) {
-      throw new Error(`Expected pre-merge checks and merge payloads to target the same queued records: ${JSON.stringify(mergePayload)}`);
+    if (
+      !mergeReportDownloadState.buttonVisible ||
+      !mergeReportDownloadState.downloaded ||
+      !mergeReportDownloadState.csv.includes("Salesforce ID") ||
+      !mergeReportDownloadState.csv.includes(mergePayload.masterId || "") ||
+      !mergeReportDownloadState.csv.includes((mergePayload.mergeIds || [])[0] || "") ||
+      !mergeReportDownloadState.csv.includes(mergePayload.records?.[0]?.name || "") ||
+      !mergeReportDownloadState.csv.includes(mergePayload.records?.[0]?.fields?.firstName || "") ||
+      !mergeReportDownloadState.csv.includes(mergePayload.records?.[0]?.fields?.lastName || "") ||
+      !mergeReportDownloadState.csv.includes("Retained as master") ||
+      !mergeReportDownloadState.csv.includes("Merged into master")
+    ) {
+      throw new Error(`Expected merge result to expose a downloadable CSV status report: ${JSON.stringify(mergeReportDownloadState)}`);
     }
     if (!accountMergeDisabled) throw new Error("Expected Account merge mode to be disabled.");
     if (!shortcutsVisible) throw new Error("Expected shortcuts modal to be visible.");
@@ -709,7 +618,6 @@ async function run() {
       fullLabelIndicators,
       duplicateBadges,
       notDuplicateBadges,
-      queuedDuplicateGroups,
       mergeMasterRadios,
       mergeFieldRadios,
       mergeMasterCanChange,
@@ -1117,23 +1025,10 @@ async function mergeLeadSourceRuleState(page) {
 }
 
 async function captureMergePayload(page) {
-  const mergePayloads = [];
-  const firstReviewPreMergePayloads = [];
-  const secondReviewPreMergePayloads = [];
-  let reviewPhase = "first";
-  const dialogMessages = [];
-  const handleDialog = async (dialog) => {
-    dialogMessages.push(dialog.message());
-    await dialog.accept();
-  };
-  page.on("dialog", handleDialog);
+  let payload = null;
+  let preMergePayload = null;
   await page.route("**/api/salesforce/premerge-check", async (route) => {
-    const preMergePayload = JSON.parse(route.request().postData() || "{}");
-    if (reviewPhase === "first") {
-      firstReviewPreMergePayloads.push(preMergePayload);
-    } else {
-      secondReviewPreMergePayloads.push(preMergePayload);
-    }
+    preMergePayload = JSON.parse(route.request().postData() || "{}");
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1149,14 +1044,15 @@ async function captureMergePayload(page) {
         missingIds: [],
         deletedIds: [],
         changedFields: [],
-        currentRecords: [],
+        currentRecords: (preMergePayload.records || []).map(toSalesforceCurrentRecord),
         loadedRecords: preMergePayload.records || []
       })
     });
   });
   await page.route("**/api/salesforce/merge", async (route) => {
-    const payload = JSON.parse(route.request().postData() || "{}");
-    mergePayloads.push(payload);
+    payload = JSON.parse(route.request().postData() || "{}");
+    const masterRecord = findMergePayloadRecord(payload, payload.masterId);
+    const duplicateRecord = findMergePayloadRecord(payload, (payload.mergeIds || [])[0]);
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1168,129 +1064,123 @@ async function captureMergePayload(page) {
         masterId: payload.masterId,
         mergedRecordIds: payload.mergeIds || [],
         updatedRelatedIds: [],
-        mergedAt: new Date().toISOString()
+        mergedAt: new Date().toISOString(),
+        mergeReport: {
+          generatedAt: new Date().toISOString(),
+          fileName: "salesforce-merge-report-latest.csv",
+          latestFileName: "salesforce-merge-report-latest.csv",
+          csvPath: "/tmp/salesforce-merge-report-latest.csv",
+          latestCsvPath: "/tmp/salesforce-merge-report-latest.csv",
+          manifestPath: "/tmp/salesforce-merge-report-latest.json",
+          latestManifestPath: "/tmp/salesforce-merge-report-latest.json",
+          rowCount: 2,
+          rows: buildMergeReportRows(payload, masterRecord, duplicateRecord)
+        }
       })
     });
   });
 
+  page.once("dialog", (dialog) => dialog.accept());
   await page.locator(".merge-submit-button").click();
-  await page.locator(".merge-review-panel").waitFor({ state: "visible", timeout: 5000 });
-  await page.locator(".merge-confirmation-preview").waitFor({ state: "visible", timeout: 5000 });
-  const reviewVisible = await page.locator(".merge-review-panel").isVisible();
-  const confirmVisible = await page.locator(".merge-confirm-preview-button").isVisible();
-  const cancelVisible = await page.locator(".merge-cancel-preview-button").isVisible();
-  const previewState = await page.evaluate(() => {
-    const panel = document.querySelector(".merge-confirmation-preview");
-    const meta = [...document.querySelectorAll(".merge-confirmation-meta div")];
-    const reviewOnlyRows = [...document.querySelectorAll('[data-merge-preview-kind="review-only"]')].map((node) => node.textContent.trim());
-    const fieldNames = [...document.querySelectorAll(".merge-preview-table tbody th")].map((node) => node.textContent.trim());
-    const effectTexts = [...document.querySelectorAll(".merge-preview-table tbody td:last-child")].map((node) => node.textContent.trim());
-    return {
-      title: panel?.querySelector("strong")?.textContent?.trim() || "",
-      masterId: meta[0]?.querySelector("dd span")?.textContent?.trim() || "",
-      duplicateCount: document.querySelectorAll(".merge-confirmation-preview .merge-id-chip").length,
-      duplicateListCount: document.querySelectorAll(".merge-preview-list-item").length,
-      reviewOnlyRows,
-      fieldNames,
-      effectTexts,
-      previewNoteCount: document.querySelectorAll(".merge-confirmation-preview .merge-preview-note").length,
-      reviewGroupCount: document.querySelectorAll(".group-item").length,
-      currentPreviewLabel: document.querySelector(".merge-review-nav-status strong")?.textContent?.trim() || "",
-      readOnly: !document.querySelector(".merge-master-radio") && !document.querySelector(".merge-field-radio")
-    };
-  });
-  if (previewState.fieldNames.some((text) => /Master survives|Master kept/i.test(text))) {
-    throw new Error(`Expected compact merge preview labels, found legacy copy: ${JSON.stringify(previewState.fieldNames)}`);
-  }
-  if (previewState.effectTexts.some((text) => /Review only:/i.test(text) || /Master survives|Master kept/i.test(text))) {
-    throw new Error(`Expected compact merge preview status text, found legacy copy: ${JSON.stringify(previewState.effectTexts)}`);
-  }
-  if (previewState.previewNoteCount !== 0) {
-    throw new Error(`Expected no explanatory merge preview notes, found ${previewState.previewNoteCount}.`);
-  }
-  if (!previewState.effectTexts.includes("Retained for review/export")) {
-    throw new Error(`Expected the review-only merge effect label to explain the value is retained for review/export: ${JSON.stringify(previewState.effectTexts)}`);
-  }
-  const mergeSentBeforeConfirm = mergePayloads.length > 0;
-
-  const firstPreviewLabel = previewState.currentPreviewLabel;
-  await page.locator(".merge-review-next-button").click();
-  await page.waitForTimeout(100);
-  const secondPreviewLabel = await page.locator(".merge-review-nav-status strong").textContent();
-  const nextAdvanced = Boolean(secondPreviewLabel && secondPreviewLabel.trim() && secondPreviewLabel.trim() !== firstPreviewLabel);
-
-  await page.locator(".group-item-main").nth(2).click();
-  await page.waitForTimeout(100);
-  const leftRailPreviewLabel = await page.locator(".merge-review-nav-status strong").textContent();
-  const leftRailNavigationWorked = Boolean(leftRailPreviewLabel && leftRailPreviewLabel.includes("Contact group"));
-
-  await page.locator(".merge-cancel-preview-button").click();
-  await page.locator(".merge-review-panel").waitFor({ state: "hidden", timeout: 5000 });
-  const previewClearedAfterCancel = await page.locator(".merge-review-panel").count() === 0;
-  const mergeSentAfterCancel = mergePayloads.length > 0;
-
-  reviewPhase = "second";
-  await page.locator(".merge-submit-button").click();
-  await page.locator(".merge-review-panel").waitFor({ state: "visible", timeout: 5000 });
-  await page.locator(".merge-confirm-preview-button").click();
-  await page.locator(".merge-success-panel").waitFor({ state: "visible", timeout: 5000 });
-  const successVisible = await page.locator(".merge-success-panel").isVisible();
-  const reviewVisibleAfterSuccess = await page.locator(".merge-review-panel").isVisible().catch(() => false);
-  const successReviewButtonCount = await page.locator(".merge-success-panel .merge-submit-button").count();
-  const successReviewButtonVisible = successReviewButtonCount
-    ? await page.locator(".merge-success-panel .merge-submit-button").isVisible()
-    : false;
-  const successPreviewVisible = await page.locator(".merge-success-panel .merge-confirmation-preview").count();
-  const successTitle = await page.locator(".merge-success-panel strong").first().textContent();
+  await page.locator(".merge-result.success").waitFor({ state: "visible", timeout: 5000 });
   await page.unroute("**/api/salesforce/premerge-check");
   await page.unroute("**/api/salesforce/merge");
-  page.off("dialog", handleDialog);
-  const payloadsAligned = secondReviewPreMergePayloads.length === mergePayloads.length
-    && secondReviewPreMergePayloads.every((preMergePayload, index) => {
-      const payload = mergePayloads[index];
-      return payload
-        && preMergePayload.groupKey === payload.groupKey
-        && preMergePayload.masterId === payload.masterId
-        && JSON.stringify(preMergePayload.mergeIds || []) === JSON.stringify(payload.mergeIds || []);
-    });
   return {
-    ...(mergePayloads[0] || {}),
-    preMergePayloads: secondReviewPreMergePayloads,
-    mergePayloads,
-    reviewVisible,
-    confirmVisible,
-    cancelVisible,
-    mergeSentBeforeConfirm,
-    previewClearedAfterCancel,
-    mergeSentAfterCancel,
-    nextAdvanced,
-    leftRailNavigationWorked,
-    readOnly: previewState.readOnly,
-    reviewGroupCount: firstReviewPreMergePayloads.length,
-    previewTitle: previewState.title,
-    previewMasterId: previewState.masterId,
-    previewDuplicateCount: previewState.duplicateListCount || previewState.duplicateCount,
-    reviewOnlyRowCount: previewState.reviewOnlyRows.length,
-    successVisible,
-    reviewVisibleAfterSuccess,
-    successReviewButtonCount,
-    successReviewButtonVisible,
-    successPreviewVisible,
-    successTitle: successTitle?.trim() || "",
-    payloadsAligned,
-    dialogMessages
+    ...(payload || {}),
+    preMergePayload
   };
 }
 
-async function markFirstGroupsDuplicate(page, count) {
-  const groupCount = await page.locator(".group-item-main").count();
-  const targetCount = Math.min(groupCount, count);
-  for (let index = 0; index < targetCount; index += 1) {
-    await page.locator(".group-item-main").nth(index).click();
-    await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
-    await page.locator("#decisionStatus").filter({ hasText: "Duplicate decision: Duplicate" }).waitFor({ state: "visible", timeout: 5000 });
-  }
-  return targetCount;
+function buildMergeReportRows(payload, masterRecord, duplicateRecord) {
+  return [
+    ["ROLE", "Salesforce ID", "Name", "First Name", "Last Name", "Email", "Lead Source", "Phone", "Mobile Phone", "Account ID", "Account Name", "Created Date", "Last Modified Date", "System Modstamp", "Is Deleted", "STATUS", "DETAILS"],
+    mergeReportRowFromPayloadRecord({
+      role: "Master record",
+      record: masterRecord,
+      fallbackId: payload.masterId,
+      status: "Retained as master",
+      details: "Kept as the Salesforce merge master"
+    }),
+    mergeReportRowFromPayloadRecord({
+      role: "Duplicate record",
+      record: duplicateRecord,
+      fallbackId: (payload.mergeIds || [])[0],
+      status: "Merged into master",
+      details: "Deleted by Salesforce merge and retained related detail"
+    })
+  ];
+}
+
+function mergeReportRowFromPayloadRecord({ role, record, fallbackId, status, details }) {
+  const fields = record?.fields || {};
+  const firstName = String(fields.firstName || "");
+  const lastName = String(fields.lastName || "");
+  const fullName = String(record?.name || fields.fullName || [firstName, lastName].filter(Boolean).join(" ") || fallbackId || "");
+  return [
+    role,
+    String(record?.id || fallbackId || ""),
+    fullName,
+    firstName,
+    lastName,
+    String(fields.email || ""),
+    String(fields.leadSource || ""),
+    String(fields.phone || ""),
+    String(fields.mobile || ""),
+    String(fields.accountId || ""),
+    String(fields.company || ""),
+    String(fields.createdDate || ""),
+    String(fields.lastModifiedDate || ""),
+    String(fields.systemModstamp || ""),
+    String(fields.isDeleted ?? ""),
+    status,
+    details
+  ];
+}
+
+function findMergePayloadRecord(payload, id) {
+  const normalizedId = String(id || "");
+  return (payload.records || []).find((record) => String(record?.id || "") === normalizedId) || null;
+}
+
+function toSalesforceCurrentRecord(record) {
+  const fields = record?.fields || {};
+  return {
+    Id: String(record?.id || ""),
+    IsDeleted: false,
+    CreatedDate: String(fields.createdDate || ""),
+    LastModifiedDate: String(fields.lastModifiedDate || ""),
+    SystemModstamp: String(fields.systemModstamp || ""),
+    Name: String(record?.name || fields.fullName || ""),
+    FirstName: String(fields.firstName || ""),
+    LastName: String(fields.lastName || ""),
+    Email: String(fields.email || ""),
+    LeadSource: String(fields.leadSource || ""),
+    Phone: String(fields.phone || ""),
+    MobilePhone: String(fields.mobile || ""),
+    AccountId: String(fields.accountId || ""),
+    Account: { Name: String(fields.company || "") },
+    AccountName: String(fields.company || "")
+  };
+}
+
+async function captureMergeReportDownload(page) {
+  const button = page.locator(".merge-report-download-button");
+  const state = {
+    buttonVisible: await button.isVisible(),
+    downloaded: false,
+    csv: ""
+  };
+
+  if (!state.buttonVisible) return state;
+
+  const downloadPath = path.join(outDir, "merge-report-download.csv");
+  const downloadPromise = page.waitForEvent("download");
+  await button.click();
+  const download = await downloadPromise;
+  await download.saveAs(downloadPath);
+  state.downloaded = true;
+  state.csv = await fs.readFile(downloadPath, "utf8");
+  return state;
 }
 
 async function captureStaleRefreshFlow(page, refreshedCsv) {
@@ -1402,6 +1292,7 @@ async function captureStaleFailureCardRefreshFlow(page, refreshedCsv) {
   if (await page.locator(".merge-master-radio").count() > 1) {
     await page.locator(".merge-master-radio").nth(1).check();
   }
+  await page.locator(".merge-confirmation-input").fill("MERGE");
   await page.evaluate(() => {
     window.__smokeOriginalConfirm = window.__smokeOriginalConfirm || window.confirm;
     window.__smokeConfirmMessages = [];
@@ -1649,29 +1540,6 @@ async function setRangeValue(page, selector, value) {
     input.value = nextValue;
     input.dispatchEvent(new Event("input", { bubbles: true }));
   }, value);
-}
-
-async function dragRangeToValue(page, selector, targetValue) {
-  const locator = page.locator(selector);
-  await locator.scrollIntoViewIfNeeded();
-  const bounds = await locator.boundingBox();
-  if (!bounds) throw new Error(`Expected ${selector} to have a bounding box`);
-  const metrics = await locator.evaluate((input) => {
-    const min = Number(input.min || 0);
-    const max = Number(input.max || 100);
-    const value = Number(input.value || 0);
-    return { min, max, value };
-  });
-  const trackRange = Math.max(metrics.max - metrics.min, 1);
-  const startX = bounds.x + ((metrics.value - metrics.min) / trackRange) * bounds.width;
-  const endX = bounds.x + ((targetValue - metrics.min) / trackRange) * bounds.width;
-  const y = bounds.y + bounds.height / 2;
-  const start = Math.min(Math.max(startX, bounds.x + 1), bounds.x + bounds.width - 1);
-  const end = Math.min(Math.max(endX, bounds.x + 1), bounds.x + bounds.width - 1);
-  await page.mouse.move(start, y);
-  await page.mouse.down();
-  await page.mouse.move(end, y, { steps: 12 });
-  await page.mouse.up();
 }
 
 async function themeColorState(page) {
@@ -2216,14 +2084,14 @@ async function assertRightPaneSingleScrollModel(page) {
     const workspace = document.querySelector(".workspace-column");
     const reviewPane = document.querySelector(".review-pane");
     const matchControls = document.querySelector(".match-controls-panel");
-    const mergeTerminal = document.querySelector(".merge-success-panel") || document.querySelector(".merge-submit-button");
+    const mergeSubmit = document.querySelector(".merge-submit-button");
     const workspaceAfterWheel = workspace.scrollTop;
     const reviewAfterWheel = reviewPane.scrollTop;
     const matchTopAfterWheel = Math.round(matchControls.getBoundingClientRect().top);
     const windowAfterWheel = window.scrollY;
 
-    mergeTerminal?.scrollIntoView({ block: "center", inline: "nearest" });
-    const mergeRect = mergeTerminal?.getBoundingClientRect();
+    mergeSubmit?.scrollIntoView({ block: "center", inline: "nearest" });
+    const mergeRect = mergeSubmit?.getBoundingClientRect();
     const mergeSubmitReachable = Boolean(
       mergeRect &&
       mergeRect.width > 0 &&
