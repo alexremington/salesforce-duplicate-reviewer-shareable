@@ -49,7 +49,7 @@ These instructions apply to this repository and its subdirectories.
 
 ## Recommended Agent Workflow
 
-- Use `Hume` first for visible UI direction unless the user explicitly waives that step.
+- Use `Hume` only when visible UI direction is still unresolved or the user explicitly wants design review.
 - Keep the main Codex thread as the orchestrator and primary implementation thread.
 - Use the repo-local `architect` agent for scoped planning, merge-safety review, interaction-risk review, and acceptance criteria.
 - Use the repo-local `reviewer` agent after implementation for correctness, portability, merge-safety, and validation-gap review.
@@ -58,4 +58,4 @@ These instructions apply to this repository and its subdirectories.
 
 The repo-local custom agents live under `.codex/agents/`, and the reusable workflow lives in `.agents/skills/agentic-delivery/`.
 
-New development-task prompts are hook-enforced through `.codex/config.toml`. Start them with `Use $agentic-delivery:`. For visible UI work, mention `Hume` or explicitly waive Hume in the request.
+New development-task prompts are hook-enforced through `.codex/config.toml`, so no special `agentic-delivery` prefix is required. For visible UI work, mention `Hume` only when design direction is still unresolved or you want design review.
