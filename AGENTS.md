@@ -33,6 +33,20 @@ These instructions apply to this repository and its subdirectories.
 - Use Playwright for smoke testing. Do not attempt to use the Codex in-app browser for smoke tests; the repo Playwright harness is the source of truth for rendered smoke validation.
 - Smoke coverage should exercise primary buttons and fail on scroll traps, hidden overflowing content, layout overlap, and nonfunctional controls.
 
+## Pre-Commit Preflight
+
+- Before committing any feature, workflow, sync, or cleanup change, verify the diff does not remove any protected user-facing flow by accident.
+- For merge-review work, explicitly confirm the queued review flow is still present in source, smoke coverage, and launcher output:
+  - `renderMergeReviewPanel`
+  - `renderMergeConfirmationPreview`
+  - `startMergeReviewSession`
+  - `handleConfirmedMerge`
+  - the matching smoke assertions for review, preview, cancel, and confirm
+- If a commit intentionally retires or renames a protected flow, update the guardrail and smoke assertions in the same change before pushing.
+- Do not commit a broad sync or cleanup that deletes protected workflow code unless you have manually reviewed the removed sections and confirmed the replacement behavior is intentional.
+- Treat `npm run check` as the minimum pre-commit gate, then run `npm run smoke:ui:local` before pushing any user-visible change.
+- If a change touches the launcher or cached runtime path, confirm the live served bundle still reflects the current source before committing.
+
 ## Recommended Agent Workflow
 
 - Use `Hume` first for visible UI direction unless the user explicitly waives that step.
