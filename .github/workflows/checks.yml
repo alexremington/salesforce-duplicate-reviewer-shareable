@@ -32,6 +32,9 @@ jobs:
         if: github.ref_name == 'main' && github.event.repository.private
         run: git fetch origin shareable:refs/heads/shareable
 
+      - name: Fetch shared automation resources
+        run: git clone --depth 1 https://github.com/alexremington/automation-shared-resources-shareable.git ../automation-shared-resources
+
       - name: Run checks
         run: npm run check
 
@@ -78,6 +81,10 @@ jobs:
         with:
           node-version: "22"
           package-manager-cache: false
+
+      - name: Fetch shared automation resources
+        shell: pwsh
+        run: git clone --depth 1 https://github.com/alexremington/automation-shared-resources-shareable.git ../automation-shared-resources
 
       - name: Run Windows portability checks
         shell: pwsh
