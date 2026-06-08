@@ -533,6 +533,21 @@ async function run() {
       throw new Error(`Expected pre-merge check and merge payload to target the same records: ${JSON.stringify(mergePayload)}`);
     }
     if (
+      !mergePayload.reviewVisible ||
+      !mergePayload.confirmVisible ||
+      !mergePayload.cancelVisible ||
+      mergePayload.mergeSentBeforeConfirm ||
+      !mergePayload.previewClearedAfterCancel ||
+      mergePayload.mergeSentAfterCancel ||
+      !mergePayload.nextAdvanced ||
+      !mergePayload.leftRailNavigationWorked ||
+      mergePayload.reviewOnlyRowCount < 1 ||
+      !mergePayload.payloadsAligned ||
+      mergePayload.dialogMessages.length
+    ) {
+      throw new Error(`Expected the queued merge review flow to render, navigate, cancel, and confirm correctly: ${JSON.stringify(mergePayload)}`);
+    }
+    if (
       !mergeReportDownloadState.buttonVisible ||
       !mergeReportDownloadState.downloaded ||
       !mergeReportDownloadState.csv.includes("Salesforce ID") ||
@@ -1021,10 +1036,23 @@ async function mergeLeadSourceRuleState(page) {
 }
 
 async function captureMergePayload(page) {
-  let payload = null;
-  let preMergePayload = null;
+  const mergePayloads = [];
+  const firstReviewPreMergePayloads = [];
+  const secondReviewPreMergePayloads = [];
+  let reviewPhase = "first";
+  const dialogMessages = [];
+  const handleDialog = async (dialog) => {
+    dialogMessages.push(dialog.message());
+    await dialog.accept();
+  };
+  page.on("dialog", handleDialog);
   await page.route("**/api/salesforce/premerge-check", async (route) => {
-    preMergePayload = JSON.parse(route.request().postData() || "{}");
+    const preMergePayload = JSON.parse(route.request().postData() || "{}");
+    if (reviewPhase === "first") {
+      firstReviewPreMergePayloads.push(preMergePayload);
+    } else {
+      secondReviewPreMergePayloads.push(preMergePayload);
+    }
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1040,13 +1068,14 @@ async function captureMergePayload(page) {
         missingIds: [],
         deletedIds: [],
         changedFields: [],
-        currentRecords: (preMergePayload.records || []).map(toSalesforceCurrentRecord),
+        currentRecords: [],
         loadedRecords: preMergePayload.records || []
       })
     });
   });
   await page.route("**/api/salesforce/merge", async (route) => {
-    payload = JSON.parse(route.request().postData() || "{}");
+    const payload = JSON.parse(route.request().postData() || "{}");
+    mergePayloads.push(payload);
     const masterRecord = findMergePayloadRecord(payload, payload.masterId);
     const duplicateRecord = findMergePayloadRecord(payload, (payload.mergeIds || [])[0]);
     await route.fulfill({
@@ -1076,14 +1105,86 @@ async function captureMergePayload(page) {
     });
   });
 
-  page.once("dialog", (dialog) => dialog.accept());
   await page.locator(".merge-submit-button").click();
+  await page.locator(".merge-review-panel").waitFor({ state: "visible", timeout: 5000 });
+  await page.locator(".merge-confirmation-preview").waitFor({ state: "visible", timeout: 5000 });
+  const reviewVisible = await page.locator(".merge-review-panel").isVisible();
+  const confirmVisible = await page.locator(".merge-confirm-preview-button").isVisible();
+  const cancelVisible = await page.locator(".merge-cancel-preview-button").isVisible();
+  const previewState = await page.evaluate(() => {
+    const panel = document.querySelector(".merge-confirmation-preview");
+    const meta = [...document.querySelectorAll(".merge-confirmation-meta div")];
+    const reviewOnlyRows = [...document.querySelectorAll('[data-merge-preview-kind="review-only"]')].map((node) => node.textContent.trim());
+    return {
+      title: panel?.querySelector("strong")?.textContent?.trim() || "",
+      masterId: meta[0]?.querySelector("dd span")?.textContent?.trim() || "",
+      duplicateCount: document.querySelectorAll(".merge-confirmation-preview .merge-id-chip").length,
+      duplicateListCount: document.querySelectorAll(".merge-preview-list-item").length,
+      reviewOnlyRows,
+      reviewGroupCount: document.querySelectorAll(".group-item").length,
+      currentPreviewLabel: document.querySelector(".merge-review-nav-status strong")?.textContent?.trim() || "",
+      readOnly: !document.querySelector(".merge-master-radio") && !document.querySelector(".merge-field-radio")
+    };
+  });
+  const mergeSentBeforeConfirm = mergePayloads.length > 0;
+
+  let nextAdvanced = true;
+  let leftRailNavigationWorked = true;
+  if (!(await page.locator(".merge-review-next-button").isDisabled())) {
+    const firstPreviewLabel = previewState.currentPreviewLabel;
+    await page.locator(".merge-review-next-button").click();
+    await page.waitForTimeout(100);
+    const secondPreviewLabel = await page.locator(".merge-review-nav-status strong").textContent();
+    nextAdvanced = Boolean(secondPreviewLabel && secondPreviewLabel.trim() && secondPreviewLabel.trim() !== firstPreviewLabel);
+
+    await page.locator(".group-item-main").nth(2).click();
+    await page.waitForTimeout(100);
+    const leftRailPreviewLabel = await page.locator(".merge-review-nav-status strong").textContent();
+    leftRailNavigationWorked = Boolean(leftRailPreviewLabel && leftRailPreviewLabel.includes("Contact group"));
+  }
+
+  await page.locator(".merge-cancel-preview-button").click();
+  await page.locator(".merge-review-panel").waitFor({ state: "hidden", timeout: 5000 });
+  const previewClearedAfterCancel = await page.locator(".merge-review-panel").count() === 0;
+  const mergeSentAfterCancel = mergePayloads.length > 0;
+
+  reviewPhase = "second";
+  await page.locator(".merge-submit-button").click();
+  await page.locator(".merge-review-panel").waitFor({ state: "visible", timeout: 5000 });
+  await page.locator(".merge-confirm-preview-button").click();
   await page.locator(".merge-result.success").waitFor({ state: "visible", timeout: 5000 });
   await page.unroute("**/api/salesforce/premerge-check");
   await page.unroute("**/api/salesforce/merge");
+  page.off("dialog", handleDialog);
+  const payloadsAligned = secondReviewPreMergePayloads.length === mergePayloads.length
+    && secondReviewPreMergePayloads.every((preMergePayload, index) => {
+      const payload = mergePayloads[index];
+      return payload
+        && preMergePayload.groupKey === payload.groupKey
+        && preMergePayload.masterId === payload.masterId
+        && JSON.stringify(preMergePayload.mergeIds || []) === JSON.stringify(payload.mergeIds || []);
+    });
   return {
-    ...(payload || {}),
-    preMergePayload
+    ...(mergePayloads[0] || {}),
+    preMergePayload: secondReviewPreMergePayloads[0] || firstReviewPreMergePayloads[0] || null,
+    preMergePayloads: secondReviewPreMergePayloads,
+    mergePayloads,
+    reviewVisible,
+    confirmVisible,
+    cancelVisible,
+    mergeSentBeforeConfirm,
+    previewClearedAfterCancel,
+    mergeSentAfterCancel,
+    nextAdvanced,
+    leftRailNavigationWorked,
+    readOnly: previewState.readOnly,
+    reviewGroupCount: firstReviewPreMergePayloads.length,
+    previewTitle: previewState.title,
+    previewMasterId: previewState.masterId,
+    previewDuplicateCount: previewState.duplicateListCount || previewState.duplicateCount,
+    reviewOnlyRowCount: previewState.reviewOnlyRows.length,
+    payloadsAligned,
+    dialogMessages
   };
 }
 
