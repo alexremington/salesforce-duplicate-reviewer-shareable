@@ -772,7 +772,6 @@ let reviewStateSaveTimer = 0;
 let pendingReviewStateRecord = null;
 let nextGroupFilterId = 1;
 const mergeMasterSelections = new Map();
-const mergeConfirmations = new Map();
 const mergeInFlightGroupKeys = new Set();
 let shortcutsReturnFocus = null;
 // These caches are tied to immutable group arrays and are cleared on recompute.
@@ -992,8 +991,6 @@ els.detailSurface.addEventListener("change", (event) => {
 });
 
 els.detailSurface.addEventListener("input", (event) => {
-  if (!event.target.classList?.contains("merge-confirmation-input")) return;
-  mergeConfirmations.set(event.target.dataset.groupKey, event.target.value);
 });
 
 els.detailSurface.addEventListener("click", (event) => {
@@ -1332,7 +1329,6 @@ function clearLoadedDatasetForPendingLoad() {
   state.fieldResolutions.clear();
   state.separatedRecords.clear();
   mergeMasterSelections.clear();
-  mergeConfirmations.clear();
   mergeInFlightGroupKeys.clear();
   scoringContextCache = null;
   groupLookupCache = null;
@@ -2177,7 +2173,6 @@ function stageRowsForReview({ rows, fileName, fromObjects, headers, mapping, obj
   state.trainingPairIndexes.clear();
   state.lastMatchingStats = null;
   mergeMasterSelections.clear();
-  mergeConfirmations.clear();
   mergeInFlightGroupKeys.clear();
   if (!fromObjects) {
     state.decisions.clear();
@@ -6356,7 +6351,6 @@ function detailRenderSignature({ group, activeRecords, separatedRecords, current
     separatedKeys,
     fieldResolutions,
     mergeMaster: mergeMasterSelections.get(groupKey) || "",
-    mergeConfirmation: mergeConfirmations.get(groupKey) || "",
     mergeInFlight: mergeInFlightGroupKeys.has(groupKey),
     mergeResultStatus: mergeResult?.status || "",
     mergeResultMessage: mergeResult?.message || "",
@@ -6529,7 +6523,6 @@ function renderSalesforceMergePanel(group, activeRecords, currentDecision) {
 
   const mergeState = getMergeState(group, activeRecords, currentDecision);
   const result = state.mergeResults.get(group.key);
-  const confirmation = mergeConfirmations.get(group.key) || "";
   const resolutionContext = createFieldResolutionContext(group, activeRecords);
   const overrideCount = countMergeFieldOverrides(group, activeRecords, mergeState, resolutionContext);
 
@@ -6568,22 +6561,6 @@ function renderSalesforceMergePanel(group, activeRecords, currentDecision) {
             ? mergeState.mergeRecords.map(renderMergeRecordChip).join("")
             : '<em class="merge-empty">No duplicate Contacts selected</em>'}
         </div>
-      </div>
-      <div class="merge-control-grid">
-        <label class="merge-control">
-          <span>Confirm</span>
-          <input
-            class="merge-confirmation-input"
-            type="text"
-            autocomplete="off"
-            autocapitalize="characters"
-            spellcheck="false"
-            placeholder="Type MERGE"
-            value="${escapeHtml(confirmation)}"
-            data-group-key="${escapeHtml(group.key)}"
-            ${mergeState.locked ? "disabled" : ""}
-          />
-        </label>
       </div>
       <p class="merge-warning">
         Salesforce merge keeps the selected master Contact and reparents related records from duplicate Contacts.
@@ -6668,7 +6645,7 @@ function getMergeState(group, activeRecords, currentDecision) {
     title: alreadyMerged
       ? `Merged into ${result.masterId || selectedId}`
       : `${formatNumber(activeRecords.length)} ${activeRecords.length === 1 ? "Contact" : "Contacts"}: 1 master, ${formatNumber(mergeRecords.length)} ${mergeRecords.length === 1 ? "duplicate" : "duplicates"}`,
-    description: blockedReason || "Mark this group Duplicate, choose a master Contact, review field overrides, then type MERGE.",
+    description: blockedReason || "Mark this group Duplicate, choose a master Contact, review field overrides, then confirm the browser prompt.",
     statusClass: mergeStatusClass(result, blockedReason, inFlight),
     statusLabel: mergeStatusLabel(result, blockedReason, inFlight)
   };
@@ -7312,15 +7289,6 @@ async function handleMergeAction(button) {
   const group = findGroupByKey(groupKey);
   if (!group || mergeInFlightGroupKeys.has(groupKey)) return;
 
-  const panel = button.closest(".salesforce-merge-panel");
-  const confirmation = panel?.querySelector(".merge-confirmation-input")?.value.trim().toUpperCase() || "";
-  mergeConfirmations.set(groupKey, confirmation);
-  if (confirmation !== "MERGE") {
-    window.alert("Type MERGE before sending this merge to Salesforce.");
-    panel?.querySelector(".merge-confirmation-input")?.focus();
-    return;
-  }
-
   const activeRecords = getActiveGroupRecords(group);
   const mergeState = getMergeState(group, activeRecords, state.decisions.get(group.key) || "");
   if (!mergeState.canSubmit) {
@@ -7374,8 +7342,7 @@ async function handleMergeAction(button) {
           masterId: mergeState.selectedId,
           mergeIds,
           records: preMergeRecords,
-          ...masterFieldPayload,
-          confirmation: "MERGE"
+          ...masterFieldPayload
         })
       });
       const payload = await readApiJson(response);
@@ -7481,10 +7448,20 @@ function buildSalesforcePreMergeRecords(records) {
         id,
         name: displayName(record),
         rowIndex: Number.isFinite(record.__rowIndex) ? record.__rowIndex : null,
-        fields
+        fields,
+        sourceRow: buildSalesforcePreMergeSourceRow(record)
       };
     })
     .filter(Boolean);
+}
+
+function buildSalesforcePreMergeSourceRow(record) {
+  const source = record?.row && typeof record.row === "object" ? record.row : record;
+  return Object.fromEntries(
+    Object.entries(source || {})
+      .filter(([key]) => !String(key || "").startsWith("__"))
+      .map(([key, value]) => [key, value == null ? "" : String(value)])
+  );
 }
 
 function shouldIncludeSalesforcePreMergeField(field) {

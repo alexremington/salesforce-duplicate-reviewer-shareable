@@ -227,7 +227,6 @@ async function run() {
           .some((radio) => radio.name === name && radio.value === value && radio.checked);
       }, mergeFieldSelection);
     }
-    await page.locator(".merge-confirmation-input").fill("MERGE");
     const staleRefreshState = await captureStaleRefreshFlow(page, contactSmokeCsv());
     const staleFailureCardRefreshState = await captureStaleFailureCardRefreshFlow(page, contactSmokeCsv());
     const missingContactIdRefreshState = await captureMissingContactIdRefreshFlow(page, missingContactIdCsvPath, contactSmokeCsv());
@@ -239,8 +238,6 @@ async function run() {
     if (await page.locator(".merge-master-radio").count() > 1) {
       await page.locator(".merge-master-radio").nth(1).check();
     }
-    await page.locator(".merge-confirmation-input").fill("MERGE");
-    const mergeConfirmationValue = await page.locator(".merge-confirmation-input").inputValue();
     const mergePayload = await captureMergePayload(page);
     const mergeReportDownloadState = await captureMergeReportDownload(page);
     await page.setViewportSize({ width: 1280, height: 560 });
@@ -478,7 +475,6 @@ async function run() {
       throw new Error(`Expected Lead Source hard-rule radios to be disabled and visually marked: ${JSON.stringify(leadSourceRule)}`);
     }
     if (!mergeFieldCanChange) throw new Error("Expected Contact merge field radio selection to change.");
-    if (mergeConfirmationValue !== "MERGE") throw new Error("Expected Contact merge confirmation input to accept text.");
     if (
       !staleRefreshState.preMergeCalled ||
       !staleRefreshState.refreshCalled ||
@@ -1292,7 +1288,6 @@ async function captureStaleFailureCardRefreshFlow(page, refreshedCsv) {
   if (await page.locator(".merge-master-radio").count() > 1) {
     await page.locator(".merge-master-radio").nth(1).check();
   }
-  await page.locator(".merge-confirmation-input").fill("MERGE");
   await page.evaluate(() => {
     window.__smokeOriginalConfirm = window.__smokeOriginalConfirm || window.confirm;
     window.__smokeConfirmMessages = [];
