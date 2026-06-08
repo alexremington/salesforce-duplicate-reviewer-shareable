@@ -1,6 +1,10 @@
 {
   "scope_label": "salesforce-duplicate-reviewer",
-  "workflow_hint": "Use $agentic-delivery:",
+  "policy_name": "lean-agentic-delivery",
+  "low_risk_context": "Lean workflow: keep the main thread as the orchestrator, stay narrow, and implement directly unless the scope expands.",
+  "medium_risk_context": "Lean workflow: use architect only if you need sequencing or acceptance criteria, keep implementation single-writer, and use reviewer or qa-ux only when the risk surface justifies it.",
+  "visible_ui_context": "Visible UI work: use Hume only if design direction is still unresolved or the user explicitly wants design review; for interaction bugs, verify the real user path in the launched app before claiming success.",
+  "high_risk_context": "Higher-risk work: confirm runtime and source alignment first, keep implementation single-writer, and use reviewer or qa-ux before closeout when the risk surface justifies it.",
   "high_risk_patterns": [
     "\\bui\\b",
     "\\bux\\b",
@@ -36,7 +40,24 @@
     "\\bmerge\\b",
     "\\bsalesforce\\b"
   ],
-  "low_risk_context": "This looks like low-risk development work in salesforce-duplicate-reviewer. A lightweight path is allowed: keep the change narrow, skip architect unless the scope expands, and only pull in reviewer or qa-ux if risk increases.",
-  "workflow_context": "This is development work in an enforced agent workflow for salesforce-duplicate-reviewer. Use architect before non-trivial edits, keep implementation single-writer by default, then run reviewer and qa-ux before closeout. Use Hume first for visible UI unless the user explicitly waived it.",
-  "missing_hume_reason": "Visible UI development in salesforce-duplicate-reviewer must mention Hume or explicitly waive Hume. Re-submit with Hume included in the request."
+  "low_risk_markers": [
+    "small",
+    "minor",
+    "tiny",
+    "single-file",
+    "single file",
+    "one file",
+    "typo",
+    "copy edit",
+    "wording",
+    "comment",
+    "rename",
+    "readme",
+    "docs",
+    "documentation",
+    "config-only",
+    "config only",
+    "test-only",
+    "test only"
+  ]
 }
