@@ -13,14 +13,15 @@ if ! git rev-parse --verify "${BRANCH}" >/dev/null 2>&1; then
 fi
 
 PRIVATE_PATTERN='00OV|00OS|OneDrive-POLITICO|/Users|politico--staging|politico-staging|politico\.my\.salesforce|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
-GENERATED_PATTERN='(^|/)(Output|logs|incoming|backups|data|dist|node_modules)(/|$)|(^|/)\.DS_Store$'
+GENERATED_PATTERN='(^|/)(Output|logs|incoming|backups|data|dist|node_modules|\.beads)(/|$)|(^|/)\.DS_Store$'
 
-if git grep -n -E "${PRIVATE_PATTERN}" "${BRANCH}" -- . ':(exclude)scripts/check-shareable.sh'; then
+# Beads stores local workspace metadata and backup state, not shareable app code.
+if git grep -n -E "${PRIVATE_PATTERN}" "${BRANCH}" -- . ':(exclude)scripts/check-shareable.sh' ':(exclude).beads'; then
   echo "Potential private detail found in ${BRANCH}." >&2
   exit 1
 fi
 
-if git ls-tree -r --name-only "${BRANCH}" | /usr/bin/grep -E "${GENERATED_PATTERN}"; then
+if git ls-tree -r --name-only "${BRANCH}" | /usr/bin/grep -vE '^\.beads(/|$)' | /usr/bin/grep -E "${GENERATED_PATTERN}"; then
   echo "Generated/runtime files found in ${BRANCH}." >&2
   exit 1
 fi
