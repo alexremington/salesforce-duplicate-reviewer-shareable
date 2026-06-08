@@ -70,6 +70,8 @@ Account matching remains available in `Evaluate`. Account merge is intentionally
 When the local reviewer server is running, Contact duplicate groups can be handled in the `Merge` workflow. Mark the group as `Duplicate`, choose the master Contact, review field-level retained-value overrides, type `MERGE`, and confirm the browser prompt to send the merge to Salesforce.
 
 Merges run server-side through the Salesforce SOAP API so access tokens are not exposed in the browser. The server uses `SF_ACCESS_TOKEN` when present; otherwise it gets a token from Salesforce CLI with `sf org display --target-org "$SF_ORG_ALIAS" --json`.
+After a successful merge, the merge result card exposes a CSV status report and the server writes the same report to `Output/salesforce-merge-report-latest.csv` for later review.
+The CSV now keeps the Salesforce ID and the record snapshot fields for the master and duplicate Contacts so the report can serve as a usable merge log.
 
 Current app-enforced rules:
 

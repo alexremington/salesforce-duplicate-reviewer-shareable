@@ -2011,6 +2011,7 @@ function sanitizeMergeResult(result) {
     status: result.status,
     message: String(result.message || ""),
     objectType: String(result.objectType || state.objectType),
+    groupKey: String(result.groupKey || ""),
     masterId: String(result.masterId || ""),
     mergedRecordIds: Array.isArray(result.mergedRecordIds) ? result.mergedRecordIds.map(String) : [],
     updatedRelatedIds: Array.isArray(result.updatedRelatedIds) ? result.updatedRelatedIds.map(String) : [],
@@ -2019,7 +2020,8 @@ function sanitizeMergeResult(result) {
     apiVersion: String(result.apiVersion || ""),
     mergedAt: String(result.mergedAt || result.at || ""),
     preMergeCheck: sanitizePreMergeCheck(result.preMergeCheck),
-    recoverySnapshot: result.recoverySnapshot && typeof result.recoverySnapshot === "object" ? result.recoverySnapshot : null
+    recoverySnapshot: result.recoverySnapshot && typeof result.recoverySnapshot === "object" ? result.recoverySnapshot : null,
+    mergeReport: sanitizeMergeReport(result.mergeReport)
   };
 }
 
@@ -2039,6 +2041,23 @@ function sanitizePreMergeCheck(check) {
           loadedValue: String(change.loadedValue ?? ""),
           currentValue: String(change.currentValue ?? "")
         }))
+      : []
+  };
+}
+
+function sanitizeMergeReport(report) {
+  if (!report || typeof report !== "object") return null;
+  return {
+    generatedAt: String(report.generatedAt || ""),
+    fileName: String(report.fileName || ""),
+    latestFileName: String(report.latestFileName || ""),
+    csvPath: String(report.csvPath || ""),
+    latestCsvPath: String(report.latestCsvPath || ""),
+    manifestPath: String(report.manifestPath || ""),
+    latestManifestPath: String(report.latestManifestPath || ""),
+    rowCount: Number(report.rowCount || 0),
+    rows: Array.isArray(report.rows)
+      ? report.rows.map((row) => (Array.isArray(row) ? row.map((value) => String(value ?? "")) : []))
       : []
   };
 }
@@ -6852,15 +6871,26 @@ function renderMergeResult(result) {
   const mergedIds = Array.isArray(result.mergedRecordIds) ? result.mergedRecordIds : [];
   const relatedCount = Array.isArray(result.updatedRelatedIds) ? result.updatedRelatedIds.length : 0;
   const when = result.mergedAt ? new Date(result.mergedAt).toLocaleString() : "";
+  const report = result.mergeReport;
   const message = result.status === "success"
     ? `Merged ${formatNumber(mergedIds.length)} ${mergedIds.length === 1 ? "record" : "records"}${relatedCount ? ` and updated ${formatNumber(relatedCount)} related ${relatedCount === 1 ? "record" : "records"}` : ""}.`
     : result.message || "Salesforce merge failed.";
   const canRefresh = canOfferPreMergeDatasetRefresh(result);
   return `
-    <div class="merge-result ${escapeHtml(result.status || "")}">
+    <div class="merge-result ${escapeHtml(result.status || "")}" data-group-key="${escapeHtml(result.groupKey || "")}">
       <strong>${escapeHtml(result.status === "success" ? "Last merge succeeded" : "Last merge failed")}</strong>
       <span>${escapeHtml(message)}</span>
       ${when ? `<em>${escapeHtml(when)}</em>` : ""}
+      ${report && Array.isArray(report.rows) && report.rows.length ? `
+        <div class="merge-result-actions">
+          <button
+            class="button button-secondary merge-report-download-button"
+            type="button"
+            data-merge-action="download-merge-report"
+            data-group-key="${escapeHtml(result.groupKey || "")}"
+          >Download CSV report</button>
+        </div>
+      ` : ""}
       ${canRefresh ? `
         <div class="merge-result-actions">
           <button
@@ -6878,6 +6908,18 @@ function canOfferPreMergeDatasetRefresh(result) {
   if (!result || result.status !== "failed" || !canRefreshLoadedDatasetFromSource()) return false;
   if (hasStalePreMergeCheck(result.preMergeCheck)) return true;
   return isPreMergeFreshnessFailureMessage(result.message);
+}
+
+function downloadMergeReport(button) {
+  const groupKey = button.dataset.groupKey || "";
+  const result = state.mergeResults.get(groupKey);
+  const report = result?.mergeReport;
+  if (!report || !Array.isArray(report.rows) || !report.rows.length) {
+    window.alert("No CSV report is available for this merge yet.");
+    return;
+  }
+
+  downloadCsv(report.fileName || `${state.objectType}-merge-report.csv`, report.rows);
 }
 
 function hasStalePreMergeCheck(check) {
@@ -7259,6 +7301,10 @@ async function handleMergeAction(button) {
   }
   if (button.dataset.mergeAction === "refresh-stale-data") {
     await handleStalePreMergeRefresh(button);
+    return;
+  }
+  if (button.dataset.mergeAction === "download-merge-report") {
+    downloadMergeReport(button);
     return;
   }
   if (button.dataset.mergeAction !== "merge") return;

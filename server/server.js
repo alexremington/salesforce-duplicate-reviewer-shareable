@@ -41,6 +41,8 @@ const SALESFORCE_AUTH_CACHE_TTL_MS = 5 * 60 * 1000;
 const ENDPOINT_RESPONSE_CACHE_LIMIT = 8;
 const endpointResponseCache = new Map();
 const MERGE_AUDIT_LOG = path.join(OUTPUT_DIR, "salesforce-merge-log.jsonl");
+const MERGE_REPORT_LATEST_CSV = path.join(OUTPUT_DIR, "salesforce-merge-report-latest.csv");
+const MERGE_REPORT_LATEST_JSON = path.join(OUTPUT_DIR, "salesforce-merge-report-latest.json");
 const MAX_MERGE_VICTIMS = 20;
 const SALESFORCE_ID_PATTERN = /^[a-zA-Z0-9]{15}(?:[a-zA-Z0-9]{3})?$/;
 const MERGE_MASTER_FIELD_ALLOWLIST = new Set(["LeadSource"]);
@@ -86,6 +88,22 @@ const RECOVERY_SNAPSHOT_FIELDS = [
   "LastModifiedDate",
   "SystemModstamp",
   "IsDeleted"
+];
+const MERGE_REPORT_RECORD_HEADERS = [
+  "Salesforce ID",
+  "Name",
+  "First Name",
+  "Last Name",
+  "Email",
+  "Lead Source",
+  "Phone",
+  "Mobile Phone",
+  "Account ID",
+  "Account Name",
+  "Created Date",
+  "Last Modified Date",
+  "System Modstamp",
+  "Is Deleted"
 ];
 
 const CSV_ENDPOINTS = new Map([
@@ -783,6 +801,13 @@ async function mergeSalesforceRecords(body) {
       recoverySnapshot: buildMergeRecoverySnapshot(preMergeCheck),
       mergedAt: new Date().toISOString()
     };
+    const mergeReport = buildMergeReport({
+      mergeRequest,
+      response,
+      preMergeCheck
+    });
+    response.mergeReport = mergeReport;
+    await writeMergeReportArtifacts(mergeReport);
     await appendMergeAudit({ ...auditBase, status: "success", response });
     return response;
   } catch (error) {
@@ -985,6 +1010,135 @@ function buildMergeRecoverySnapshot(check) {
     duplicateIds: check.mergeIds,
     currentRecords: check.currentRecords
   };
+}
+
+function buildMergeReport({ mergeRequest, response, preMergeCheck }) {
+  const mergedAt = response.mergedAt || new Date().toISOString();
+  const timestamp = timestampForFileName(new Date(mergedAt));
+  const fileName = `salesforce-merge-report-${timestamp}.csv`;
+  const latestFileName = "salesforce-merge-report-latest.csv";
+  const manifestFileName = `salesforce-merge-report-${timestamp}.json`;
+  const latestManifestFileName = "salesforce-merge-report-latest.json";
+  const currentRecordsById = new Map(
+    (preMergeCheck?.currentRecords || [])
+      .filter((record) => record && record.Id)
+      .map((record) => [salesforceIdKey(record.Id), record])
+  );
+  const recordsById = new Map();
+  const getRecordSnapshot = (id) => {
+    const normalizedId = salesforceIdKey(id);
+    if (!normalizedId) return null;
+    if (!recordsById.has(normalizedId)) {
+      recordsById.set(normalizedId, buildMergeReportRecordSnapshot({
+        currentRecord: currentRecordsById.get(normalizedId) || null,
+        id: normalizedId
+      }));
+    }
+    return recordsById.get(normalizedId);
+  };
+  const rowHeaders = ["ROLE", ...MERGE_REPORT_RECORD_HEADERS, "STATUS", "DETAILS"];
+  const rows = [
+    rowHeaders,
+    mergeReportRow({
+      role: "Master record",
+      id: mergeRequest.masterId,
+      record: getRecordSnapshot(mergeRequest.masterId),
+      status: "Retained as master",
+      details: "Kept as the Salesforce merge master"
+    })
+  ];
+
+  (response.mergedRecordIds || mergeRequest.mergeIds || []).forEach((id) => {
+    rows.push(mergeReportRow({
+      role: "Duplicate record",
+      id,
+      record: getRecordSnapshot(id),
+      status: "Merged into master",
+      details: "Deleted by Salesforce merge; related records were reparented to the master"
+    }));
+  });
+
+  (response.updatedRelatedIds || []).forEach((id) => {
+    rows.push(mergeReportRow({
+      role: "Related record",
+      id,
+      record: getRecordSnapshot(id),
+      status: "Updated by merge",
+      details: `Reparented to master ${response.masterId}`
+    }));
+  });
+
+  return {
+    generatedAt: mergedAt,
+    fileName,
+    latestFileName,
+    csvPath: path.join(OUTPUT_DIR, fileName),
+    latestCsvPath: MERGE_REPORT_LATEST_CSV,
+    manifestPath: path.join(OUTPUT_DIR, manifestFileName),
+    latestManifestPath: MERGE_REPORT_LATEST_JSON,
+    rowCount: Math.max(0, rows.length - 1),
+    rows
+  };
+}
+
+function buildMergeReportRecordSnapshot({ currentRecord = null, id = "" } = {}) {
+  const snapshot = currentRecord || {};
+  const salesforceId = String(snapshot.Id || id || "");
+  return {
+    "Salesforce ID": salesforceId,
+    Name: String(snapshot.Name || ""),
+    "First Name": String(snapshot.FirstName || ""),
+    "Last Name": String(snapshot.LastName || ""),
+    Email: String(snapshot.Email || ""),
+    "Lead Source": String(snapshot.LeadSource || ""),
+    Phone: String(snapshot.Phone || ""),
+    "Mobile Phone": String(snapshot.MobilePhone || ""),
+    "Account ID": String(snapshot.AccountId || ""),
+    "Account Name": String(snapshot.AccountName || snapshot.Account?.Name || ""),
+    "Created Date": String(snapshot.CreatedDate || ""),
+    "Last Modified Date": String(snapshot.LastModifiedDate || ""),
+    "System Modstamp": String(snapshot.SystemModstamp || ""),
+    "Is Deleted": String(snapshot.IsDeleted ?? "")
+  };
+}
+
+function mergeReportRow({ role, id, record, status, details }) {
+  const snapshot = record || buildMergeReportRecordSnapshot({ id });
+  return [
+    role,
+    snapshot["Salesforce ID"] || String(id || ""),
+    snapshot.Name || "",
+    snapshot["First Name"] || "",
+    snapshot["Last Name"] || "",
+    snapshot.Email || "",
+    snapshot["Lead Source"] || "",
+    snapshot.Phone || "",
+    snapshot["Mobile Phone"] || "",
+    snapshot["Account ID"] || "",
+    snapshot["Account Name"] || "",
+    snapshot["Created Date"] || "",
+    snapshot["Last Modified Date"] || "",
+    snapshot["System Modstamp"] || "",
+    snapshot["Is Deleted"] || "",
+    status,
+    details
+  ];
+}
+
+async function writeMergeReportArtifacts(report) {
+  await fs.mkdir(OUTPUT_DIR, { recursive: true });
+  await fs.writeFile(report.csvPath, rowsToCsv(report.rows));
+  await fs.writeFile(report.latestCsvPath, rowsToCsv(report.rows));
+  const manifest = {
+    generatedAt: report.generatedAt,
+    fileName: report.fileName,
+    latestFileName: report.latestFileName,
+    csvPath: report.csvPath,
+    latestCsvPath: report.latestCsvPath,
+    rowCount: report.rowCount
+  };
+  await fs.writeFile(report.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await fs.writeFile(report.latestManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 function salesforceIdKey(id) {

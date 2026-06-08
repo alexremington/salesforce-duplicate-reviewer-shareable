@@ -32,3 +32,16 @@ These instructions apply to this repository and its subdirectories.
 - Launcher changes must reject or restart stale runtime processes when feature or API contract versions do not match the current source.
 - Use Playwright for smoke testing. Do not attempt to use the Codex in-app browser for smoke tests; the repo Playwright harness is the source of truth for rendered smoke validation.
 - Smoke coverage should exercise primary buttons and fail on scroll traps, hidden overflowing content, layout overlap, and nonfunctional controls.
+
+## Recommended Agent Workflow
+
+- Use `Hume` first for visible UI direction unless the user explicitly waives that step.
+- Keep the main Codex thread as the orchestrator and primary implementation thread.
+- Use the repo-local `architect` agent for scoped planning, merge-safety review, interaction-risk review, and acceptance criteria.
+- Use the repo-local `reviewer` agent after implementation for correctness, portability, merge-safety, and validation-gap review.
+- Use the repo-local `qa-ux` agent to enforce `npm run check`, `npm run check:windows`, and `npm run smoke:ui:local` as the validation floor.
+- Prefer subagents for planning, review, and QA. Do not default to multiple parallel implementation agents editing the same change.
+
+The repo-local custom agents live under `.codex/agents/`, and the reusable workflow lives in `.agents/skills/agentic-delivery/`.
+
+New development-task prompts are hook-enforced through `.codex/config.toml`. Start them with `Use $agentic-delivery:`. For visible UI work, mention `Hume` or explicitly waive Hume in the request.

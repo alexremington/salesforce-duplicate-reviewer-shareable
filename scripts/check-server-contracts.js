@@ -165,6 +165,8 @@ async function assertSalesforceMergeWithWarningCli(baseUrl) {
     masterFields: { LeadSource: "Web" },
     confirmation: "MERGE"
   };
+  const expectedMasterRecord = payload.records[0];
+  const expectedDuplicateRecord = payload.records[1];
   const response = await requestText(`${baseUrl}/api/salesforce/merge`, {
     method: "POST",
     body: payload
@@ -181,6 +183,30 @@ async function assertSalesforceMergeWithWarningCli(baseUrl) {
     !body.mergedRecordIds.includes(payload.mergeIds[0])
   ) {
     throw new Error(`Warning CLI merge contract returned unexpected body: ${response.body}`);
+  }
+  if (
+    !body.mergeReport ||
+    !Array.isArray(body.mergeReport.rows) ||
+    body.mergeReport.rows.length < 2 ||
+    !body.mergeReport.csvPath ||
+    !body.mergeReport.latestCsvPath
+  ) {
+    throw new Error(`Warning CLI merge contract did not return a merge report: ${response.body}`);
+  }
+
+  const reportCsv = await fs.readFile(body.mergeReport.csvPath, "utf8");
+  if (
+    !reportCsv.includes("ROLE,Salesforce ID,Name,First Name,Last Name,Email,Lead Source,Phone,Mobile Phone,Account ID,Account Name,Created Date,Last Modified Date,System Modstamp,Is Deleted,STATUS,DETAILS") ||
+    !reportCsv.includes(expectedMasterRecord.id) ||
+    !reportCsv.includes(expectedMasterRecord.name) ||
+    !reportCsv.includes(expectedMasterRecord.fields.firstName) ||
+    !reportCsv.includes(expectedMasterRecord.fields.lastName) ||
+    !reportCsv.includes(expectedDuplicateRecord.id) ||
+    !reportCsv.includes(expectedDuplicateRecord.name) ||
+    !reportCsv.includes("Retained as master") ||
+    !reportCsv.includes("Merged into master")
+  ) {
+    throw new Error(`Warning CLI merge report file did not contain the expected statuses: ${reportCsv}`);
   }
 }
 

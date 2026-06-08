@@ -242,6 +242,7 @@ async function run() {
     await page.locator(".merge-confirmation-input").fill("MERGE");
     const mergeConfirmationValue = await page.locator(".merge-confirmation-input").inputValue();
     const mergePayload = await captureMergePayload(page);
+    const mergeReportDownloadState = await captureMergeReportDownload(page);
     await page.setViewportSize({ width: 1280, height: 560 });
     const workspaceColumnScroll = await assertVerticalScrollAvailable(page, ".workspace-column", "workspace column");
     const rightPaneScrollModel = await assertRightPaneSingleScrollModel(page);
@@ -534,6 +535,20 @@ async function run() {
       JSON.stringify(mergePayload.preMergePayload.mergeIds || []) !== JSON.stringify(mergePayload.mergeIds || [])
     ) {
       throw new Error(`Expected pre-merge check and merge payload to target the same records: ${JSON.stringify(mergePayload)}`);
+    }
+    if (
+      !mergeReportDownloadState.buttonVisible ||
+      !mergeReportDownloadState.downloaded ||
+      !mergeReportDownloadState.csv.includes("Salesforce ID") ||
+      !mergeReportDownloadState.csv.includes(mergePayload.masterId || "") ||
+      !mergeReportDownloadState.csv.includes((mergePayload.mergeIds || [])[0] || "") ||
+      !mergeReportDownloadState.csv.includes(mergePayload.records?.[0]?.name || "") ||
+      !mergeReportDownloadState.csv.includes(mergePayload.records?.[0]?.fields?.firstName || "") ||
+      !mergeReportDownloadState.csv.includes(mergePayload.records?.[0]?.fields?.lastName || "") ||
+      !mergeReportDownloadState.csv.includes("Retained as master") ||
+      !mergeReportDownloadState.csv.includes("Merged into master")
+    ) {
+      throw new Error(`Expected merge result to expose a downloadable CSV status report: ${JSON.stringify(mergeReportDownloadState)}`);
     }
     if (!accountMergeDisabled) throw new Error("Expected Account merge mode to be disabled.");
     if (!shortcutsVisible) throw new Error("Expected shortcuts modal to be visible.");
@@ -1029,13 +1044,15 @@ async function captureMergePayload(page) {
         missingIds: [],
         deletedIds: [],
         changedFields: [],
-        currentRecords: [],
+        currentRecords: (preMergePayload.records || []).map(toSalesforceCurrentRecord),
         loadedRecords: preMergePayload.records || []
       })
     });
   });
   await page.route("**/api/salesforce/merge", async (route) => {
     payload = JSON.parse(route.request().postData() || "{}");
+    const masterRecord = findMergePayloadRecord(payload, payload.masterId);
+    const duplicateRecord = findMergePayloadRecord(payload, (payload.mergeIds || [])[0]);
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1047,7 +1064,18 @@ async function captureMergePayload(page) {
         masterId: payload.masterId,
         mergedRecordIds: payload.mergeIds || [],
         updatedRelatedIds: [],
-        mergedAt: new Date().toISOString()
+        mergedAt: new Date().toISOString(),
+        mergeReport: {
+          generatedAt: new Date().toISOString(),
+          fileName: "salesforce-merge-report-latest.csv",
+          latestFileName: "salesforce-merge-report-latest.csv",
+          csvPath: "/tmp/salesforce-merge-report-latest.csv",
+          latestCsvPath: "/tmp/salesforce-merge-report-latest.csv",
+          manifestPath: "/tmp/salesforce-merge-report-latest.json",
+          latestManifestPath: "/tmp/salesforce-merge-report-latest.json",
+          rowCount: 2,
+          rows: buildMergeReportRows(payload, masterRecord, duplicateRecord)
+        }
       })
     });
   });
@@ -1061,6 +1089,98 @@ async function captureMergePayload(page) {
     ...(payload || {}),
     preMergePayload
   };
+}
+
+function buildMergeReportRows(payload, masterRecord, duplicateRecord) {
+  return [
+    ["ROLE", "Salesforce ID", "Name", "First Name", "Last Name", "Email", "Lead Source", "Phone", "Mobile Phone", "Account ID", "Account Name", "Created Date", "Last Modified Date", "System Modstamp", "Is Deleted", "STATUS", "DETAILS"],
+    mergeReportRowFromPayloadRecord({
+      role: "Master record",
+      record: masterRecord,
+      fallbackId: payload.masterId,
+      status: "Retained as master",
+      details: "Kept as the Salesforce merge master"
+    }),
+    mergeReportRowFromPayloadRecord({
+      role: "Duplicate record",
+      record: duplicateRecord,
+      fallbackId: (payload.mergeIds || [])[0],
+      status: "Merged into master",
+      details: "Deleted by Salesforce merge and retained related detail"
+    })
+  ];
+}
+
+function mergeReportRowFromPayloadRecord({ role, record, fallbackId, status, details }) {
+  const fields = record?.fields || {};
+  const firstName = String(fields.firstName || "");
+  const lastName = String(fields.lastName || "");
+  const fullName = String(record?.name || fields.fullName || [firstName, lastName].filter(Boolean).join(" ") || fallbackId || "");
+  return [
+    role,
+    String(record?.id || fallbackId || ""),
+    fullName,
+    firstName,
+    lastName,
+    String(fields.email || ""),
+    String(fields.leadSource || ""),
+    String(fields.phone || ""),
+    String(fields.mobile || ""),
+    String(fields.accountId || ""),
+    String(fields.company || ""),
+    String(fields.createdDate || ""),
+    String(fields.lastModifiedDate || ""),
+    String(fields.systemModstamp || ""),
+    String(fields.isDeleted ?? ""),
+    status,
+    details
+  ];
+}
+
+function findMergePayloadRecord(payload, id) {
+  const normalizedId = String(id || "");
+  return (payload.records || []).find((record) => String(record?.id || "") === normalizedId) || null;
+}
+
+function toSalesforceCurrentRecord(record) {
+  const fields = record?.fields || {};
+  return {
+    Id: String(record?.id || ""),
+    IsDeleted: false,
+    CreatedDate: String(fields.createdDate || ""),
+    LastModifiedDate: String(fields.lastModifiedDate || ""),
+    SystemModstamp: String(fields.systemModstamp || ""),
+    Name: String(record?.name || fields.fullName || ""),
+    FirstName: String(fields.firstName || ""),
+    LastName: String(fields.lastName || ""),
+    Email: String(fields.email || ""),
+    LeadSource: String(fields.leadSource || ""),
+    Phone: String(fields.phone || ""),
+    MobilePhone: String(fields.mobile || ""),
+    AccountId: String(fields.accountId || ""),
+    Account: { Name: String(fields.company || "") },
+    AccountName: String(fields.company || "")
+  };
+}
+
+async function captureMergeReportDownload(page) {
+  const button = page.locator(".merge-report-download-button");
+  const state = {
+    buttonVisible: await button.isVisible(),
+    downloaded: false,
+    csv: ""
+  };
+
+  if (!state.buttonVisible) return state;
+
+  const downloadPath = path.join(outDir, "merge-report-download.csv");
+  const downloadPromise = page.waitForEvent("download");
+  await button.click();
+  const download = await downloadPromise;
+  await download.saveAs(downloadPath);
+  state.downloaded = true;
+  state.csv = await fs.readFile(downloadPath, "utf8");
+  return state;
 }
 
 async function captureStaleRefreshFlow(page, refreshedCsv) {
