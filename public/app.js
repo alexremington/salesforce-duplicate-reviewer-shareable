@@ -772,7 +772,13 @@ let reviewStateSaveTimer = 0;
 let pendingReviewStateRecord = null;
 let nextGroupFilterId = 1;
 const mergeMasterSelections = new Map();
+const mergePreviewStates = new Map();
 const mergeInFlightGroupKeys = new Set();
+const mergeReviewSession = {
+  active: false,
+  queueGroupKeys: [],
+  submitting: false
+};
 let shortcutsReturnFocus = null;
 // These caches are tied to immutable group arrays and are cleared on recompute.
 let visibleGroupsCache = null;
@@ -1329,7 +1335,9 @@ function clearLoadedDatasetForPendingLoad() {
   state.fieldResolutions.clear();
   state.separatedRecords.clear();
   mergeMasterSelections.clear();
+  mergePreviewStates.clear();
   mergeInFlightGroupKeys.clear();
+  resetMergeReviewSession();
   scoringContextCache = null;
   groupLookupCache = null;
   visibleGroupsCache = null;
@@ -2173,7 +2181,9 @@ function stageRowsForReview({ rows, fileName, fromObjects, headers, mapping, obj
   state.trainingPairIndexes.clear();
   state.lastMatchingStats = null;
   mergeMasterSelections.clear();
+  mergePreviewStates.clear();
   mergeInFlightGroupKeys.clear();
+  resetMergeReviewSession();
   if (!fromObjects) {
     state.decisions.clear();
     state.mergeResults.clear();
@@ -5262,6 +5272,7 @@ function renderGroupLabelIndicator(labelStatus) {
 
 function selectGroup(groupKey) {
   if (!groupKey || groupKey === state.selectedGroupKey) return;
+  if (mergeReviewSession.active && !mergeReviewSession.queueGroupKeys.includes(groupKey)) return;
   state.selectedGroupKey = groupKey;
   if (els.groupList.querySelector(`[data-group-key="${cssEscape(groupKey)}"]`)) {
     renderGroupSelection();
@@ -6351,6 +6362,12 @@ function detailRenderSignature({ group, activeRecords, separatedRecords, current
     separatedKeys,
     fieldResolutions,
     mergeMaster: mergeMasterSelections.get(groupKey) || "",
+    mergeReviewActive: mergeReviewSession.active,
+    mergeReviewSubmitting: mergeReviewSession.submitting,
+    mergeReviewQueueGroupKeys: mergeReviewSession.queueGroupKeys,
+    mergePreviewMasterId: mergePreviewStates.get(groupKey)?.masterId || "",
+    mergePreviewMergeIds: mergePreviewStates.get(groupKey)?.mergeIds || [],
+    mergePreviewWritebacks: mergePreviewStates.get(groupKey)?.salesforceWritebackCount || 0,
     mergeInFlight: mergeInFlightGroupKeys.has(groupKey),
     mergeResultStatus: mergeResult?.status || "",
     mergeResultMessage: mergeResult?.message || "",
@@ -6420,7 +6437,7 @@ function renderEvaluateWorkspace(group, bestPair, activeRecords, separatedRecord
 
 function renderMergeWorkspace(group, activeRecords, separatedRecords, currentDecision) {
   return `
-    ${renderSalesforceMergePanel(group, activeRecords, currentDecision)}
+    ${mergeReviewSession.active ? renderMergeReviewPanel(group) : renderSalesforceMergePanel(group, activeRecords, currentDecision)}
     ${separatedRecords.length ? renderSeparatedRecords(group, separatedRecords) : ""}
   `;
 }
@@ -6525,6 +6542,17 @@ function renderSalesforceMergePanel(group, activeRecords, currentDecision) {
   const result = state.mergeResults.get(group.key);
   const resolutionContext = createFieldResolutionContext(group, activeRecords);
   const overrideCount = countMergeFieldOverrides(group, activeRecords, mergeState, resolutionContext);
+  const queueGroups = getMergeReviewQueueCandidates();
+  const queueReadyCount = queueGroups.length;
+  const queueCurrentIndex = queueGroups.findIndex((candidate) => candidate.key === group.key);
+  const queueSummary = queueReadyCount
+    ? queueReadyCount === 1
+      ? "1 merge group is ready for read-only review."
+      : `${formatNumber(queueReadyCount)} merge groups are ready for read-only review.`
+    : "Mark duplicate groups ready before starting the read-only review step.";
+  const reviewButtonLabel = queueReadyCount > 1
+    ? `Review ${formatNumber(queueReadyCount)} groups before confirming`
+    : "Review before confirming";
 
   return `
     <section class="salesforce-merge-panel ${escapeHtml(mergeState.statusClass)}" aria-label="Salesforce merge">
@@ -6562,9 +6590,22 @@ function renderSalesforceMergePanel(group, activeRecords, currentDecision) {
             : '<em class="merge-empty">No duplicate Contacts selected</em>'}
         </div>
       </div>
+      <div class="merge-queue-summary">
+        <div class="merge-queue-summary-copy">
+          <strong>Next step: review before confirming</strong>
+          <span>${escapeHtml(queueSummary)}</span>
+          <em>${queueCurrentIndex >= 0
+            ? `Current group is ${formatNumber(queueCurrentIndex + 1)} of ${formatNumber(queueReadyCount)} in the queued merge set.`
+            : "Only groups marked Duplicate and ready for Salesforce merge enter the queued review set."
+          }</em>
+        </div>
+        <div class="merge-queue-summary-count">
+          <span>Queued groups</span>
+          <strong>${formatNumber(queueReadyCount)}</strong>
+        </div>
+      </div>
       <p class="merge-warning">
-        Salesforce merge keeps the selected master Contact and reparents related records from duplicate Contacts.
-        Enforced merge rules are sent with the Salesforce merge request; other field choices document controlling values for review/export.
+        Salesforce merge keeps the selected master Contact and reparents related records from duplicate Contacts. Lead Source changes still apply as Salesforce write-backs; other field choices remain review-only and will be shown in the read-only confirmation preview.
       </p>
       ${mergeState.invalidRecords.length ? renderMissingContactIdNotice(group, mergeState) : ""}
       ${result ? renderMergeResult(result) : ""}
@@ -6574,10 +6615,181 @@ function renderSalesforceMergePanel(group, activeRecords, currentDecision) {
           type="button"
           data-merge-action="merge"
           data-group-key="${escapeHtml(group.key)}"
-          ${mergeState.canSubmit ? "" : "disabled"}
-        >${escapeHtml(mergeState.buttonLabel)}</button>
+          ${mergeState.canSubmit && queueReadyCount ? "" : "disabled"}
+        >${escapeHtml(reviewButtonLabel)}</button>
       </div>
     </section>
+  `;
+}
+
+function renderMergeReviewPanel(group) {
+  const previewState = mergePreviewStates.get(group.key) || null;
+  const queueGroups = getMergeReviewQueueGroups();
+  const currentIndex = queueGroups.findIndex((candidate) => candidate.key === group.key);
+  const currentNumber = currentIndex >= 0 ? currentIndex + 1 : 0;
+  const activePreviewState = previewState || mergePreviewStates.get(queueGroups[0]?.key) || null;
+  const currentGroupLabel = currentNumber
+    ? `Contact group ${group.id}`
+    : "Queued merge review";
+  const reviewCount = queueGroups.length;
+
+  if (!activePreviewState) {
+    return `
+      <section class="salesforce-merge-panel blocked" aria-label="Review before confirming">
+        <div class="salesforce-merge-header">
+          <div>
+            <span>Review before confirming</span>
+            <strong>No queued merge previews are available</strong>
+            <em>Return to Contact merge setup, then refresh the review queue.</em>
+          </div>
+          <span class="merge-status-pill blocked">Needs setup</span>
+        </div>
+        <div class="merge-actions">
+          <button class="button button-secondary" type="button" data-merge-action="cancel-batch-review">Cancel</button>
+        </div>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="salesforce-merge-panel ready merge-review-panel" aria-label="Review before confirming">
+      <div class="salesforce-merge-header">
+        <div>
+          <span>Review before confirming</span>
+          <strong>Read-only merged Contact previews for the queued merge set</strong>
+          <em>Use the left rail or the inline Previous and Next controls to inspect each resulting merged Contact before sending the queued Salesforce merges.</em>
+        </div>
+        <span class="merge-status-pill ready">${mergeReviewSession.submitting ? "Merging" : "Fresh"}</span>
+      </div>
+      <div class="merge-review-summary">
+        <div class="merge-readiness-card">
+          <span>Queued merge groups</span>
+          <strong>${formatNumber(reviewCount)}</strong>
+          <em>${reviewCount === 1 ? "group ready" : "groups ready"}</em>
+        </div>
+        <div class="merge-readiness-card">
+          <span>Current preview</span>
+          <strong>${formatNumber(currentNumber)} of ${formatNumber(reviewCount)}</strong>
+          <em>${escapeHtml(currentGroupLabel)}</em>
+        </div>
+        <div class="merge-readiness-card">
+          <span>Overall confirmation</span>
+          <strong>Affects ${formatNumber(reviewCount)}</strong>
+          <em>${reviewCount === 1 ? "Salesforce merge" : "Salesforce merges"}</em>
+        </div>
+      </div>
+      <div class="merge-review-nav">
+        <div class="merge-review-nav-buttons">
+          <button
+            class="button button-secondary merge-review-previous-button"
+            type="button"
+            data-merge-action="previous-review-group"
+            ${currentIndex <= 0 ? "disabled" : ""}
+          >Previous</button>
+          <button
+            class="button button-primary merge-review-next-button"
+            type="button"
+            data-merge-action="next-review-group"
+            ${currentIndex === -1 || currentIndex >= reviewCount - 1 ? "disabled" : ""}
+          >Next</button>
+        </div>
+        <div class="merge-review-nav-status">
+          <span>Currently reviewing</span>
+          <strong>${escapeHtml(currentGroupLabel)}</strong>
+        </div>
+      </div>
+      ${renderMergeConfirmationPreview(activePreviewState)}
+      <div class="merge-review-footer">
+        <p class="merge-warning">
+          These previews are read-only. To change a master choice or retained field value, cancel review and return to Contact merge setup. No Salesforce merge request is sent until you confirm the full queued set.
+        </p>
+        <div class="merge-actions">
+          <button
+            class="button button-secondary merge-cancel-preview-button"
+            type="button"
+            data-merge-action="cancel-batch-review"
+            ${mergeReviewSession.submitting ? "disabled" : ""}
+          >Cancel</button>
+          <button
+            class="button button-primary merge-confirm-preview-button"
+            type="button"
+            data-merge-action="confirm-merge"
+            ${mergeReviewSession.submitting ? "disabled" : ""}
+          >${mergeReviewSession.submitting ? "Confirming..." : `Confirm ${reviewCount === 1 ? "merge" : "all merges"}`}</button>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderMergeConfirmationPreview(previewState) {
+  return `
+    <section class="merge-confirmation-preview" aria-label="Merge confirmation preview">
+      <div class="merge-confirmation-header">
+        <div>
+          <span>Review before confirming</span>
+          <strong>Review the surviving Contact before sending the Salesforce merge</strong>
+        </div>
+      </div>
+      <dl class="merge-confirmation-meta">
+        <div>
+          <dt>Surviving master</dt>
+          <dd>${escapeHtml(previewState.masterName || "Unnamed Contact")} <span>${escapeHtml(previewState.masterId)}</span></dd>
+        </div>
+        <div>
+          <dt>Duplicate Contacts removed</dt>
+          <dd>${formatNumber(previewState.mergeIds.length)}</dd>
+        </div>
+        <div>
+          <dt>Salesforce field write-backs</dt>
+          <dd>${formatNumber(previewState.salesforceWritebackCount)}</dd>
+        </div>
+      </dl>
+      <div class="merge-preview merge-preview-list">
+        <span>Duplicate Contacts that will merge into the master</span>
+        <div class="merge-id-list merge-id-list-plain">
+          ${previewState.mergeRecordChips.length
+            ? previewState.mergeRecordChips.map((chip) => renderMergePreviewChip(chip)).join("")
+            : '<em class="merge-empty">No duplicate Contacts selected</em>'}
+        </div>
+      </div>
+      <div class="merge-confirmation-fields" aria-label="Resulting Contact fields">
+        <table class="merge-preview-table">
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Surviving value</th>
+              <th>Merge effect</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${previewState.previewFields.map((field) => renderMergePreviewFieldRow(field)).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function renderMergePreviewChip(chip) {
+  return `
+    <div class="merge-preview-list-item">
+      <strong>${escapeHtml(chip.name || "Unnamed record")}</strong>
+      <span>${escapeHtml(chip.id || "")}</span>
+    </div>
+  `;
+}
+
+function renderMergePreviewFieldRow(field) {
+  const effectText = field.kind === "review-only"
+    ? `Review only: ${field.reviewOnlyValue || "—"}`
+    : field.kindLabel;
+  return `
+    <tr class="merge-preview-row ${escapeHtml(field.kind)}" data-merge-preview-kind="${escapeHtml(field.kind)}">
+      <th scope="row">${escapeHtml(field.label)}</th>
+      <td>${escapeHtml(field.resultValue || "—")}</td>
+      <td>${escapeHtml(effectText)}</td>
+    </tr>
   `;
 }
 
@@ -6645,7 +6857,7 @@ function getMergeState(group, activeRecords, currentDecision) {
     title: alreadyMerged
       ? `Merged into ${result.masterId || selectedId}`
       : `${formatNumber(activeRecords.length)} ${activeRecords.length === 1 ? "Contact" : "Contacts"}: 1 master, ${formatNumber(mergeRecords.length)} ${mergeRecords.length === 1 ? "duplicate" : "duplicates"}`,
-    description: blockedReason || "Mark this group Duplicate, choose a master Contact, review field overrides, then confirm the browser prompt.",
+    description: blockedReason || "Mark this group Duplicate, choose a master Contact, review field overrides, then review before confirming.",
     statusClass: mergeStatusClass(result, blockedReason, inFlight),
     statusLabel: mergeStatusLabel(result, blockedReason, inFlight)
   };
@@ -6901,6 +7113,235 @@ function downloadMergeReport(button) {
 
 function hasStalePreMergeCheck(check) {
   return Boolean(check && check.status && check.status !== "fresh");
+}
+
+function getMergeReviewQueueCandidates() {
+  if (state.objectType !== "contact") return [];
+  return filteredGroups().filter((group) => {
+    const activeRecords = getActiveGroupRecords(group);
+    const currentDecision = state.decisions.get(group.key) || "";
+    const mergeState = getMergeState(group, activeRecords, currentDecision);
+    return mergeState.canSubmit;
+  });
+}
+
+function getMergeReviewQueueGroups() {
+  if (!mergeReviewSession.active) return [];
+  return mergeReviewSession.queueGroupKeys
+    .map((groupKey) => findGroupByKey(groupKey))
+    .filter(Boolean);
+}
+
+function resetMergeReviewSession() {
+  mergeReviewSession.active = false;
+  mergeReviewSession.queueGroupKeys = [];
+  mergeReviewSession.submitting = false;
+}
+
+function clearMergePreviewState(groupKey) {
+  const shouldResetReview = !groupKey
+    || !mergeReviewSession.active
+    || mergeReviewSession.queueGroupKeys.includes(groupKey);
+  if (shouldResetReview) {
+    resetMergeReviewSession();
+    mergePreviewStates.clear();
+    return;
+  }
+  mergePreviewStates.delete(groupKey);
+}
+
+function navigateMergeReview(direction) {
+  const queueGroupKeys = mergeReviewSession.queueGroupKeys;
+  if (!mergeReviewSession.active || !queueGroupKeys.length) return;
+  const currentIndex = queueGroupKeys.indexOf(state.selectedGroupKey);
+  const fallbackIndex = direction > 0 ? -1 : queueGroupKeys.length;
+  const nextIndex = Math.max(
+    0,
+    Math.min(queueGroupKeys.length - 1, (currentIndex === -1 ? fallbackIndex : currentIndex) + direction)
+  );
+  selectGroup(queueGroupKeys[nextIndex]);
+}
+
+async function startMergeReviewSession(preferredGroupKey = "") {
+  const queueGroups = getMergeReviewQueueCandidates();
+  if (!queueGroups.length) {
+    window.alert("No duplicate Contact groups are ready for merge review.");
+    return;
+  }
+
+  let refreshAfterStaleCheck = false;
+  let reviewAborted = false;
+  let currentGroup = null;
+  mergePreviewStates.clear();
+  queueGroups.forEach((group) => mergeInFlightGroupKeys.add(group.key));
+  renderGroups({ preserveScroll: true });
+  renderDetail();
+
+  try {
+    for (const group of queueGroups) {
+      currentGroup = group;
+      const activeRecords = getActiveGroupRecords(group);
+      const mergeState = getMergeState(group, activeRecords, state.decisions.get(group.key) || "");
+      const mergeIds = mergeState.mergeRecords.map(({ id }) => id);
+      const masterFieldPayload = buildSalesforceMergeMasterFieldPayload(group, mergeState);
+      const preMergeRecords = buildSalesforcePreMergeRecords(activeRecords);
+      const preMergeCheck = await checkSalesforcePreMergeFreshness({
+        groupKey: group.key,
+        mergeState,
+        mergeIds,
+        records: preMergeRecords
+      });
+
+      if (preMergeCheck.status !== "fresh") {
+        const message = preMergeFreshnessSummary(preMergeCheck);
+        state.mergeResults.set(
+          group.key,
+          sanitizeMergeResult({
+            status: "failed",
+            objectType: state.objectType,
+            masterId: mergeState.selectedId,
+            mergedRecordIds: mergeIds,
+            message,
+            preMergeCheck,
+            mergedAt: new Date().toISOString()
+          })
+        );
+        state.selectedGroupKey = group.key;
+        refreshAfterStaleCheck = confirmPreMergeDatasetRefresh(preMergeCheck);
+        resetMergeReviewSession();
+        mergePreviewStates.clear();
+        reviewAborted = true;
+        break;
+      }
+
+      mergePreviewStates.set(group.key, buildMergePreviewState({
+        group,
+        activeRecords,
+        mergeState,
+        mergeIds,
+        preMergeRecords,
+        masterFieldPayload,
+        preMergeCheck
+      }));
+    }
+
+    if (!reviewAborted) {
+      mergeReviewSession.active = true;
+      mergeReviewSession.queueGroupKeys = queueGroups.map((group) => group.key);
+      mergeReviewSession.submitting = false;
+      const preferredGroup = mergeReviewSession.queueGroupKeys.includes(preferredGroupKey)
+        ? preferredGroupKey
+        : mergeReviewSession.queueGroupKeys[0];
+      if (preferredGroup) state.selectedGroupKey = preferredGroup;
+    }
+  } catch (error) {
+    const preMergeCheck = sanitizePreMergeCheck(error.preMergeCheck);
+    const message = hasStalePreMergeCheck(preMergeCheck)
+      ? preMergeFreshnessSummary(preMergeCheck)
+      : error.message || "Salesforce merge failed.";
+    const activeGroupKey = currentGroup?.key || preferredGroupKey || queueGroups[0]?.key || "";
+    if (activeGroupKey) {
+      state.mergeResults.set(
+        activeGroupKey,
+        sanitizeMergeResult({
+          status: "failed",
+          objectType: state.objectType,
+          masterId: mergePreviewStates.get(activeGroupKey)?.masterId || "",
+          mergedRecordIds: mergePreviewStates.get(activeGroupKey)?.mergeIds || [],
+          message,
+          preMergeCheck,
+          mergedAt: new Date().toISOString()
+        })
+      );
+      state.selectedGroupKey = activeGroupKey;
+    }
+    resetMergeReviewSession();
+    mergePreviewStates.clear();
+    if (canOfferPreMergeDatasetRefresh({ status: "failed", message, preMergeCheck })) {
+      refreshAfterStaleCheck = confirmPreMergeDatasetRefreshFromMessage(message);
+    }
+  } finally {
+    queueGroups.forEach((group) => mergeInFlightGroupKeys.delete(group.key));
+    scheduleReviewStateSave();
+    renderGroups();
+    renderDetail();
+  }
+
+  if (refreshAfterStaleCheck) {
+    await refreshLoadedDatasetFromSource();
+  }
+}
+
+async function handleConfirmedMerge(button) {
+  const queueGroupKeys = [...mergeReviewSession.queueGroupKeys];
+  if (!queueGroupKeys.length || mergeReviewSession.submitting) return;
+  let refreshAfterStaleCheck = false;
+  mergeReviewSession.submitting = true;
+  queueGroupKeys.forEach((groupKey) => mergeInFlightGroupKeys.add(groupKey));
+  renderDetail();
+
+  try {
+    for (const groupKey of queueGroupKeys) {
+      const previewState = mergePreviewStates.get(groupKey);
+      if (!previewState) continue;
+
+      state.selectedGroupKey = groupKey;
+      renderGroups({ preserveScroll: true });
+      renderDetail();
+
+      const response = await fetch("/api/salesforce/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          objectType: state.objectType,
+          groupKey,
+          masterId: previewState.masterId,
+          mergeIds: previewState.mergeIds,
+          records: previewState.records,
+          ...previewState.masterFieldPayload
+        })
+      });
+      const payload = await readApiJson(response);
+      if (!response.ok) throw createApiError(payload, "Salesforce merge failed.");
+
+      state.mergeResults.set(groupKey, sanitizeMergeResult({ ...payload, status: "success" }));
+      state.decisions.set(groupKey, "duplicate");
+    }
+    clearMergePreviewState();
+  } catch (error) {
+    const preMergeCheck = sanitizePreMergeCheck(error.preMergeCheck);
+    const message = hasStalePreMergeCheck(preMergeCheck)
+      ? preMergeFreshnessSummary(preMergeCheck)
+      : error.message || "Salesforce merge failed.";
+    const activeGroupKey = state.selectedGroupKey;
+    const previewState = mergePreviewStates.get(activeGroupKey);
+    state.mergeResults.set(
+      activeGroupKey,
+      sanitizeMergeResult({
+        status: "failed",
+        objectType: state.objectType,
+        masterId: previewState?.masterId || "",
+        mergedRecordIds: previewState?.mergeIds || [],
+        message,
+        preMergeCheck,
+        mergedAt: new Date().toISOString()
+      })
+    );
+    clearMergePreviewState(activeGroupKey);
+    if (canOfferPreMergeDatasetRefresh({ status: "failed", message, preMergeCheck })) {
+      refreshAfterStaleCheck = confirmPreMergeDatasetRefreshFromMessage(message);
+    }
+  } finally {
+    mergeReviewSession.submitting = false;
+    queueGroupKeys.forEach((groupKey) => mergeInFlightGroupKeys.delete(groupKey));
+    scheduleReviewStateSave();
+    renderGroups();
+    renderDetail();
+  }
+
+  if (refreshAfterStaleCheck) {
+    await refreshLoadedDatasetFromSource();
+  }
 }
 
 function isPreMergeFreshnessFailureMessage(message) {
@@ -7252,6 +7693,7 @@ function setRecordSeparated(groupKey, key, separated) {
     state.separatedRecords.delete(groupKey);
   }
 
+  clearMergePreviewState(groupKey);
   visibleGroupsCache = null;
   ensureSelectedGroupVisible();
   renderGroups();
@@ -7267,6 +7709,7 @@ function setMergeMasterSelection(groupKey, value) {
   } else {
     mergeMasterSelections.delete(groupKey);
   }
+  clearMergePreviewState(groupKey);
   renderDetail();
   scheduleReviewStateSave();
 }
@@ -7280,6 +7723,23 @@ async function handleMergeAction(button) {
     await handleStalePreMergeRefresh(button);
     return;
   }
+  if (button.dataset.mergeAction === "cancel-batch-review") {
+    clearMergePreviewState(button.dataset.groupKey || state.selectedGroupKey);
+    renderDetail();
+    return;
+  }
+  if (button.dataset.mergeAction === "previous-review-group") {
+    navigateMergeReview(-1);
+    return;
+  }
+  if (button.dataset.mergeAction === "next-review-group") {
+    navigateMergeReview(1);
+    return;
+  }
+  if (button.dataset.mergeAction === "confirm-merge") {
+    await handleConfirmedMerge(button);
+    return;
+  }
   if (button.dataset.mergeAction === "download-merge-report") {
     downloadMergeReport(button);
     return;
@@ -7287,7 +7747,7 @@ async function handleMergeAction(button) {
   if (button.dataset.mergeAction !== "merge") return;
   const groupKey = button.dataset.groupKey;
   const group = findGroupByKey(groupKey);
-  if (!group || mergeInFlightGroupKeys.has(groupKey)) return;
+  if (!group || mergeInFlightGroupKeys.has(groupKey) || mergeReviewSession.submitting) return;
 
   const activeRecords = getActiveGroupRecords(group);
   const mergeState = getMergeState(group, activeRecords, state.decisions.get(group.key) || "");
@@ -7295,92 +7755,7 @@ async function handleMergeAction(button) {
     window.alert(mergeState.description || "This group is not ready to merge.");
     return;
   }
-
-  const mergeIds = mergeState.mergeRecords.map(({ id }) => id);
-  const masterFieldPayload = buildSalesforceMergeMasterFieldPayload(group, mergeState);
-  const preMergeRecords = buildSalesforcePreMergeRecords(activeRecords);
-  let refreshAfterStaleCheck = false;
-
-  mergeInFlightGroupKeys.add(groupKey);
-  renderDetail();
-
-  try {
-    const preMergeCheck = await checkSalesforcePreMergeFreshness({
-      groupKey,
-      mergeState,
-      mergeIds,
-      records: preMergeRecords
-    });
-
-    if (preMergeCheck.status !== "fresh") {
-      const message = preMergeFreshnessSummary(preMergeCheck);
-      state.mergeResults.set(
-        groupKey,
-        sanitizeMergeResult({
-          status: "failed",
-          objectType: state.objectType,
-          masterId: mergeState.selectedId,
-          mergedRecordIds: mergeIds,
-          message,
-          preMergeCheck,
-          mergedAt: new Date().toISOString()
-        })
-      );
-      refreshAfterStaleCheck = confirmPreMergeDatasetRefresh(preMergeCheck);
-    } else {
-      const confirmed = window.confirm(
-        `Merge ${mergeIds.length} ${mergeIds.length === 1 ? "record" : "records"} into ${mergeState.selectedId} in Salesforce?\n\nThis deletes the duplicate records and reparents related records to the master.`
-      );
-      if (!confirmed) return;
-
-      const response = await fetch("/api/salesforce/merge", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          objectType: state.objectType,
-          groupKey,
-          masterId: mergeState.selectedId,
-          mergeIds,
-          records: preMergeRecords,
-          ...masterFieldPayload
-        })
-      });
-      const payload = await readApiJson(response);
-      if (!response.ok) throw createApiError(payload, "Salesforce merge failed.");
-
-      state.mergeResults.set(groupKey, sanitizeMergeResult({ ...payload, status: "success" }));
-      state.decisions.set(groupKey, "duplicate");
-    }
-  } catch (error) {
-    const preMergeCheck = sanitizePreMergeCheck(error.preMergeCheck);
-    const message = hasStalePreMergeCheck(preMergeCheck)
-      ? preMergeFreshnessSummary(preMergeCheck)
-      : error.message || "Salesforce merge failed.";
-    state.mergeResults.set(
-      groupKey,
-      sanitizeMergeResult({
-        status: "failed",
-        objectType: state.objectType,
-        masterId: mergeState.selectedId,
-        mergedRecordIds: mergeIds,
-        message,
-        preMergeCheck,
-        mergedAt: new Date().toISOString()
-      })
-    );
-    if (canOfferPreMergeDatasetRefresh({ status: "failed", message, preMergeCheck })) {
-      refreshAfterStaleCheck = confirmPreMergeDatasetRefreshFromMessage(message);
-    }
-  } finally {
-    mergeInFlightGroupKeys.delete(groupKey);
-    scheduleReviewStateSave();
-    renderGroups();
-    renderDetail();
-  }
-
-  if (refreshAfterStaleCheck) {
-    await refreshLoadedDatasetFromSource();
-  }
+  await startMergeReviewSession(groupKey);
 }
 
 async function handleMissingContactIdRefresh(button) {
@@ -7453,6 +7828,41 @@ function buildSalesforcePreMergeRecords(records) {
       };
     })
     .filter(Boolean);
+}
+
+function buildMergePreviewState({ group, activeRecords, mergeState, mergeIds, preMergeRecords, masterFieldPayload, preMergeCheck }) {
+  const resolutionContext = createFieldResolutionContext(group, activeRecords);
+  const previewFields = OBJECT_CONFIG[state.objectType].displayFields.map((field) => {
+    const resolution = getFieldResolution(group, field, resolutionContext);
+    const masterValue = String(getDisplayFieldValue(mergeState.selectedRecord, field) || "");
+    const reviewOnlyValue = resolution.acceptedValue != null && normalizeResolutionValue(resolution.acceptedValue) !== normalizeResolutionValue(masterValue)
+      ? resolution.acceptedValue
+      : "";
+    return {
+      field,
+      label: FIELD_LABELS[field] || field,
+      kind: reviewOnlyValue ? "review-only" : "master-kept",
+      kindLabel: reviewOnlyValue ? "Review only" : "Master kept",
+      resultValue: masterValue,
+      reviewOnlyValue
+    };
+  });
+
+  return {
+    groupKey: group.key,
+    masterId: mergeState.selectedId,
+    masterName: displayName(mergeState.selectedRecord),
+    mergeIds: [...mergeIds],
+    mergeRecordChips: mergeState.mergeRecords.map(({ record, id }) => ({
+      name: displayName(record),
+      id
+    })),
+    records: preMergeRecords,
+    masterFieldPayload,
+    preMergeCheck: sanitizePreMergeCheck(preMergeCheck),
+    previewFields,
+    salesforceWritebackCount: previewFields.filter((field) => field.kind === "salesforce-writeback").length
+  };
 }
 
 function buildSalesforcePreMergeSourceRow(record) {
