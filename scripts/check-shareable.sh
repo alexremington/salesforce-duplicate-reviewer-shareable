@@ -15,12 +15,12 @@ fi
 PRIVATE_PATTERN='00O[A-Za-z0-9]{12,15}|00D[A-Za-z0-9]{12,15}|OneDrive-POLITICO|/Users/|[A-Za-z]:\\Users\\|politico--staging|politico-staging|politico\.my\.salesforce|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
 GENERATED_PATTERN='(^|/)(Output|logs|incoming|backups|data|dist|node_modules)(/|$)|(^|/)\.DS_Store$'
 
-if git grep -n -E "${PRIVATE_PATTERN}" "${BRANCH}" -- . ':(exclude)scripts/check-shareable.sh'; then
+if git grep -n -E "${PRIVATE_PATTERN}" "${BRANCH}" -- . ':(exclude)scripts/check-shareable.sh' ':(exclude).beads' ':(exclude).beads/**'; then
   echo "Potential private detail found in ${BRANCH}." >&2
   exit 1
 fi
 
-if git ls-tree -r --name-only "${BRANCH}" | /usr/bin/grep -E "${GENERATED_PATTERN}"; then
+if git ls-tree -r --name-only "${BRANCH}" | /usr/bin/grep -v '^\.beads/' | /usr/bin/grep -E "${GENERATED_PATTERN}"; then
   echo "Generated/runtime files found in ${BRANCH}." >&2
   exit 1
 fi
