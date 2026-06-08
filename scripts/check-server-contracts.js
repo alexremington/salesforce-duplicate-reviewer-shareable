@@ -6,6 +6,7 @@ const http = require("node:http");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
+const vm = require("node:vm");
 const { buildCodexTrainingCommand } = require("../server/codex-training");
 
 const PROJECT_DIR = path.resolve(__dirname, "..");
@@ -96,7 +97,8 @@ async function main() {
     await assertRetiredMergeGateAbsent();
     await assertStaticApp(baseUrl);
     await assertLatestEndpointCaching(baseUrl);
-    await assertCodexTrainingLaunchCommand();
+    await assertCodexTrainingLaunchCommand(baseUrl);
+    await assertAccountScopeDivergenceRegression();
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/premerge-check");
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/merge");
     await assertSalesforcePreMergeWithWarningCli(baseUrl);
@@ -181,7 +183,7 @@ async function assertLatestEndpointCaching(baseUrl) {
   }
 }
 
-async function assertCodexTrainingLaunchCommand() {
+async function assertCodexTrainingLaunchCommand(baseUrl) {
   const command = buildCodexTrainingCommand({
     rootDir: "/tmp/duplicate-reviewer",
     prompt: "Read /tmp/duplicate-reviewer/Output/codex-training-request-latest.md and start fresh.",
@@ -190,6 +192,23 @@ async function assertCodexTrainingLaunchCommand() {
 
   if (!command.includes("codex") || command.includes("resume") || command.includes("gpt-5.5")) {
     throw new Error(`Codex launch command still reuses an existing session or hardcodes the expensive model: ${command}`);
+  }
+
+  const legacyTargetSessionFile = path.join(PROJECT_DIR, "Output", "codex-target-session-id.txt");
+  try {
+    const legacyTargetSessionText = await fs.readFile(legacyTargetSessionFile, "utf8");
+    const legacyTargetSessionId = legacyTargetSessionText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line && !line.startsWith("#"));
+    if (legacyTargetSessionId) {
+      throw new Error(
+        `Legacy Codex target-session file still exists at ${legacyTargetSessionFile}: ${legacyTargetSessionId}. ` +
+        "The Send to Codex button must start fresh instead of resuming an old session."
+      );
+    }
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
   }
 
   const configuredCommand = buildCodexTrainingCommand({
@@ -205,6 +224,82 @@ async function assertCodexTrainingLaunchCommand() {
     !configuredCommand.includes(`model_reasoning_effort="medium"`)
   ) {
     throw new Error(`Codex launch command did not preserve explicit model overrides: ${configuredCommand}`);
+  }
+
+  const codexRequestResponse = await requestText(`${baseUrl}/api/codex/training-labels`, {
+    method: "POST",
+    body: {
+      objectType: "contact",
+      fileName: "salesforce-report-latest.json",
+      datasetKey: "contact:2:latest",
+      sourceDataset: {
+        endpoint: "/api/staging-contacts/latest.json",
+        fileName: "salesforce-report-latest.json",
+        displayName: "Latest Contacts",
+        objectType: "contact",
+        format: "json"
+      },
+      rowCount: 2,
+      groupCount: 1,
+      labelCount: 1,
+      separationCount: 0,
+      requestedAction: "Use the loaded source dataset copy, not the repo root.",
+      rows: [
+        [
+          "object_type",
+          "file_name",
+          "group_key",
+          "group_score",
+          "min_pair_score",
+          "left_salesforce_id",
+          "right_salesforce_id",
+          "left_record_key",
+          "right_record_key",
+          "left_name",
+          "right_name",
+          "pair_score",
+          "label",
+          "confidence",
+          "reasons",
+          "field_scores_json",
+          "created_at",
+          "updated_at"
+        ],
+        [
+          "contact",
+          "salesforce-report-latest.json",
+          "group-1",
+          88,
+          86,
+          "003T00000000001",
+          "003T00000000002",
+          "003T00000000001",
+          "003T00000000002",
+          "Ada Lovelace",
+          "Ada Lovelace",
+          88,
+          "match",
+          "high",
+          "Example",
+          "[]",
+          "2026-06-08T00:00:00.000Z",
+          "2026-06-08T00:00:00.000Z"
+        ]
+      ],
+      separatedRows: []
+    }
+  });
+  if (codexRequestResponse.statusCode !== 200) {
+    throw new Error(`Codex training-label endpoint failed during payload regression check: HTTP ${codexRequestResponse.statusCode}: ${codexRequestResponse.body}`);
+  }
+  const codexRequestPayload = JSON.parse(codexRequestResponse.body);
+  const generatedRequestMarkdown = await fs.readFile(codexRequestPayload.latestRequestPath, "utf8");
+  if (
+    !generatedRequestMarkdown.includes("## Source Dataset") ||
+    !generatedRequestMarkdown.includes("Endpoint: /api/staging-contacts/latest.json") ||
+    !generatedRequestMarkdown.includes("Display name: Latest Contacts")
+  ) {
+    throw new Error(`Codex request markdown did not include the source dataset metadata: ${generatedRequestMarkdown}`);
   }
 }
 
@@ -245,10 +340,115 @@ async function assertStaticApp(baseUrl) {
   if (
     response.statusCode !== 200 ||
     !response.body.includes("Salesforce Account and Contact Matching") ||
-    !response.body.includes('app.js?v=duplicate-reviewer-cli-warning-safe-v1')
+    !response.body.includes('app.js?v=duplicate-reviewer-cli-warning-safe-v3')
   ) {
     throw new Error(`Static app contract failed: HTTP ${response.statusCode}`);
   }
+}
+
+async function assertAccountScopeDivergenceRegression() {
+  const api = loadAppApi();
+  const csv = [
+    "Id,Name,Website,BillingStreet,BillingCity,BillingState,BillingPostalCode,BillingCountry,CurrencyIsoCode,Ultimate_Parent_Account__c",
+    "001A,Southern Methodist University Office of the President,smu.edu,6425 Boaz St,Dallas,Texas,752750221,United States,USD,Southern Methodist University",
+    "001B,Southern Methodist University,smu.edu,,,,,United States,USD,Southern Methodist University"
+  ].join("\n");
+  const parsed = api.parseCsv(csv);
+  const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
+  const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
+  const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.account.fields);
+  const preparedRows = api.prepareRows(rows, "account", mapping);
+
+  api.state.objectType = "account";
+  api.state.rows = rows;
+  api.state.headers = headers;
+  api.state.mapping = mapping;
+
+  const fieldStats = api.buildFieldStats(preparedRows, "account");
+  const score = api.scoreAccountPair(preparedRows[0], preparedRows[1], fieldStats);
+  if (Math.round(score.value) !== 85 || !score.reasons.includes("Different account scope")) {
+    throw new Error(
+      `Account scope divergence regression failed: expected exact website to cap at 85 with a scope reason, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
+    );
+  }
+}
+
+function loadAppApi() {
+  const context = {
+    console,
+    Blob,
+    URL,
+    Intl,
+    FileReader: function FileReader() {},
+    indexedDB: undefined,
+    document: createMockDocument()
+  };
+  context.globalThis = context;
+  vm.createContext(context);
+
+  const appCode = require("node:fs").readFileSync(path.join(PROJECT_DIR, "public", "app.js"), "utf8");
+  vm.runInContext(
+    `${appCode}
+globalThis.__api = {
+  OBJECT_CONFIG,
+  state,
+  parseCsv,
+  inferHeaders,
+  autoMapHeaders,
+  prepareRows,
+  buildFieldStats,
+  scoreAccountPair,
+  getValue
+};`,
+    context
+  );
+  return context.__api;
+}
+
+function createMockDocument() {
+  const elements = new Map();
+  return {
+    getElementById(id) {
+      if (!elements.has(id)) elements.set(id, createMockElement(id));
+      return elements.get(id);
+    },
+    addEventListener() {},
+    querySelectorAll() {
+      return [];
+    },
+    createElement(tag) {
+      return createMockElement(tag);
+    }
+  };
+}
+
+function createMockElement(id) {
+  return {
+    id,
+    hidden: false,
+    value: id === "threshold" ? "86" : "",
+    textContent: "",
+    innerHTML: "",
+    disabled: false,
+    checked: false,
+    indeterminate: false,
+    dataset: {},
+    classList: {
+      add() {},
+      remove() {},
+      toggle() {}
+    },
+    setAttribute() {},
+    addEventListener() {},
+    append() {},
+    querySelectorAll() {
+      return [];
+    },
+    querySelector() {
+      return null;
+    },
+    click() {}
+  };
 }
 
 async function assertUnsupportedMergeRoute(baseUrl, routePath) {

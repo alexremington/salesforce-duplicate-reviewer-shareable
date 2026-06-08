@@ -453,6 +453,8 @@ const ACCOUNT_SCOPE_DIVERGENCE_TOKENS = new Set([
   "angeles",
   "authority",
   "broadband",
+  "branch",
+  "department",
   "brussels",
   "estate",
   "expressway",
@@ -461,11 +463,15 @@ const ACCOUNT_SCOPE_DIVERGENCE_TOKENS = new Set([
   "group",
   "holdings",
   "los",
+  "office",
+  "president",
   "pty",
   "real",
   "retirement",
+  "section",
   "strategies",
   "supply",
+  "unit",
   "system"
 ]);
 const CONTACT_CONTRADICTION_THRESHOLD = 0;
@@ -3965,15 +3971,19 @@ function hasAccountScopeDivergence(fieldScores, left, right) {
   if (!hasEntityTokenContainment(left.name, right.name)) return false;
   if (hasStrongAccountIdentityCorroboration(fieldScores, left, right)) return false;
 
+  return hasAccountScopeDivergenceSignal(left, right);
+}
+
+function hasStrongAccountIdentityCorroboration(fieldScores, left, right) {
+  if (fieldScores.website === 1 && !hasAccountScopeDivergenceSignal(left, right)) return true;
+  return fieldScores.ultimateParentAccount === 1 && hasDifferentUltimateParent(left) && hasDifferentUltimateParent(right);
+}
+
+function hasAccountScopeDivergenceSignal(left, right) {
   return (
     accountScopeSpecificTokens(left.name, right.name).some(isAccountScopeDivergenceToken) ||
     accountScopeSpecificTokens(right.name, left.name).some(isAccountScopeDivergenceToken)
   );
-}
-
-function hasStrongAccountIdentityCorroboration(fieldScores, left, right) {
-  if (fieldScores.website === 1) return true;
-  return fieldScores.ultimateParentAccount === 1 && hasDifferentUltimateParent(left) && hasDifferentUltimateParent(right);
 }
 
 function hasAccountExactNameWeakWebsiteConflict(fieldScores, left, right) {
@@ -8565,12 +8575,13 @@ async function sendTrainingLabelsToCodex() {
         objectType: state.objectType,
         fileName: state.fileName,
         datasetKey: state.datasetKey,
+        sourceDataset: state.datasetSource,
         rowCount: state.rows.length,
         groupCount: state.groups.length,
         labelCount,
         separationCount: separatedCount,
         requestedAction:
-          "Read the latest training-label CSV and separated-record JSON, evaluate where the duplicate matching logic disagrees with the user's labels and manual separations, and improve the matching/scoring logic safely.",
+          "Read the latest training-label CSV, separated-record JSON, and source dataset metadata. Use the source dataset endpoint or file described in the request; do not assume the source JSON lives in the repo root. Compare the user's labels and manual separations against the app's current scoring output, then improve the matching/scoring logic safely.",
         openCodexSession: true,
         rows: buildTrainingLabelRows(),
         separatedRows: buildSeparatedRecordTrainingRows()

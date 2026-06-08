@@ -28,7 +28,7 @@ const SF_ORG_ALIAS = process.env.SF_ORG_ALIAS || "politico-staging";
 const SF_INSTANCE_URL = process.env.SF_INSTANCE_URL || "https://politico--staging.sandbox.my.salesforce.com";
 const SF_API_VERSION = process.env.SF_API_VERSION || "v67.0";
 const SF_CLI_BIN = String(process.env.SF_CLI_BIN || "").trim();
-const FEATURE_VERSION = "duplicate-reviewer-cli-warning-safe-v1";
+const FEATURE_VERSION = "duplicate-reviewer-cli-warning-safe-v3";
 const API_CONTRACT_VERSION = "duplicate-reviewer-api-contract-v2";
 const DEFAULT_PATH = managedPlatform.defaultCommandPath();
 const salesforceMergeService = createSalesforceMergeService();
@@ -289,6 +289,7 @@ async function handleRequest(request, response) {
       objectType: String(body.objectType || ""),
       fileName: String(body.fileName || ""),
       datasetKey: String(body.datasetKey || ""),
+      sourceDataset: sanitizeCodexSourceDataset(body.sourceDataset),
       rowCount: Number(body.rowCount || 0),
       groupCount: Number(body.groupCount || 0),
       labelCount,
@@ -1722,6 +1723,7 @@ function timestampForFileName(date) {
 }
 
 function buildCodexTrainingRequest(manifest) {
+  const sourceDataset = sanitizeCodexSourceDataset(manifest.sourceDataset);
   return [
     "# Codex Training Label Review Request",
     "",
@@ -1737,6 +1739,14 @@ function buildCodexTrainingRequest(manifest) {
     "## Requested Action",
     "",
     manifest.requestedAction,
+    "",
+    "## Source Dataset",
+    "",
+    `- Endpoint: ${sourceDataset.endpoint || "unknown"}`,
+    `- File name: ${sourceDataset.fileName || "unknown"}`,
+    `- Display name: ${sourceDataset.displayName || "unknown"}`,
+    `- Object type: ${sourceDataset.objectType || "unknown"}`,
+    `- Format: ${sourceDataset.format || "unknown"}`,
     "",
     "## Files",
     "",
@@ -1755,6 +1765,26 @@ function buildCodexTrainingRequest(manifest) {
     "5. Run the relevant syntax checks/tests and summarize what changed.",
     ""
   ].join("\n");
+}
+
+function sanitizeCodexSourceDataset(sourceDataset) {
+  if (!sourceDataset || typeof sourceDataset !== "object") {
+    return {
+      endpoint: "",
+      fileName: "",
+      displayName: "",
+      objectType: "",
+      format: ""
+    };
+  }
+
+  return {
+    endpoint: String(sourceDataset.endpoint || ""),
+    fileName: String(sourceDataset.fileName || ""),
+    displayName: String(sourceDataset.displayName || ""),
+    objectType: String(sourceDataset.objectType || ""),
+    format: String(sourceDataset.format || "")
+  };
 }
 
 async function openCodexTrainingSession(requestPath) {
