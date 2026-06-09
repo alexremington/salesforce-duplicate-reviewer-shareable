@@ -220,6 +220,7 @@ p {
 }
 
 #csvInput,
+#workspaceImportInput,
 #trainingImportInput {
   position: absolute;
   width: 1px;
