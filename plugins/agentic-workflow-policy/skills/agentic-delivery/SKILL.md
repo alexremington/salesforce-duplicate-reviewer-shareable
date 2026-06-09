@@ -15,3 +15,6 @@ Use this skill for non-trivial Duplicate Reviewer work that benefits from explic
 4. Keep code-writing single-threaded unless the user explicitly wants parallel implementation.
 5. Use `reviewer` to check merge safety, portability, regressions, and missing proof.
 6. Use `qa-ux` to require the repo validation path: `npm run check`, `npm run check:windows`, and `npm run smoke:ui:local`.
+7. Use `launcher-runtime-triage` when a launcher-backed app may be serving stale copied assets or runtime state.
+8. Use `brittle-ui-validation` when hit-testing, overlap, drag targets, overflow, or other brittle UI interactions need proof.
+9. Use `visible-change-delivery` when a user-visible change needs design, regression, and release discipline.

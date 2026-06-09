@@ -59,3 +59,21 @@ These instructions apply to this repository and its subdirectories.
 The repo-local custom agents live under `.codex/agents/`, and the reusable workflow lives in `.agents/skills/agentic-delivery/`.
 
 New development-task prompts are hook-enforced through `.codex/config.toml`, so no special `agentic-delivery` prefix is required. For visible UI work, mention `Hume` only when design direction is still unresolved or you want design review.
+
+## Testing Ladder
+
+Use the shortest proof that still matches the failure mode, then escalate only if the first layer is insufficient.
+
+- Source changed: confirm the intended file and code path changed.
+- Runtime aligned: confirm the launched app or copied runtime is serving the change, not just the checkout.
+- Interaction proven: for pointer, drag, menu, or overflow bugs, verify the exact human gesture path in the launched UI.
+- Regression named: add or update a named test that would have failed before the fix.
+- Gate complete: run the repo-local validation set that applies to the change.
+
+For brittle interaction work, check `elementFromPoint`, bounding boxes, overlap, and `pointer-events` before assuming state or screenshots prove anything.
+
+Useful reusable skills:
+
+- `launcher-runtime-triage` for copied-runtime and launcher-backed app drift.
+- `brittle-ui-validation` for hit-testing, overlays, and other false-positive-prone UI work.
+- `visible-change-delivery` for user-visible changes that need design, regression, and release discipline.
