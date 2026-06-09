@@ -417,6 +417,7 @@ const CONTACT_FIELD_WEIGHTS = {
 };
 const CONTACT_COMPANY_DIVERGENCE_THRESHOLD = 0.5;
 const CONTACT_COMPANY_DIVERGENCE_CAP = 80;
+const CONTACT_STRONG_IDENTITY_CONFLICT_CAP = 79;
 const CONTACT_COMPANY_GEOGRAPHY_CONFLICT_CAP = 72;
 const CONTACT_COMPANY_ALIGNMENT_THRESHOLD = 0.85;
 const CONTACT_EMAIL_ORG_CORROBORATION_FLOOR = 88;
@@ -3525,6 +3526,16 @@ function scoreContactPair(left, right, cache = null) {
     (fullNameSimilarity || 0) >= 0.98 &&
     (companySimilarity || 0) < CONTACT_COMPANY_DIVERGENCE_THRESHOLD &&
     !strongIdentityCorroboration;
+  const strongCompanyCorroboration =
+    exactEmail ||
+    sameEmailDomain ||
+    emailOrgCorroboration ||
+    (companySimilarity || 0) >= CONTACT_COMPANY_ALIGNMENT_THRESHOLD;
+  const exactIdentityCompanyConflict =
+    exactFullName &&
+    companyConflict &&
+    (exactLinkedIn || exactAnyPhone) &&
+    !strongCompanyCorroboration;
   const exactNameCompany =
     Boolean(left.fullName && right.fullName && left.company && right.company) &&
     exactFullName &&
@@ -3553,6 +3564,9 @@ function scoreContactPair(left, right, cache = null) {
   } else {
     if (companyDivergenceWithoutCorroboration) {
       value = Math.min(value, CONTACT_COMPANY_DIVERGENCE_CAP);
+    }
+    if (exactIdentityCompanyConflict) {
+      value = Math.min(value, CONTACT_STRONG_IDENTITY_CONFLICT_CAP);
     }
     if ((fullNameSimilarity || 0) >= 0.98 && emailOrgCorroboration) {
       value = Math.max(value, CONTACT_EMAIL_ORG_CORROBORATION_FLOOR);
@@ -3586,6 +3600,7 @@ function scoreContactPair(left, right, cache = null) {
   if ((companySimilarity || 0) >= 0.86 && companySimilarity < 1) reasons.push("Near-exact company");
   if (companyGeographyConflict) reasons.push("Conflicting geographic company names");
   if (companyDivergenceWithoutCorroboration) reasons.push("Different company without corroborating contact data");
+  if (exactIdentityCompanyConflict) reasons.push("Exact contact data with conflicting company");
   if (givenNameConflict) reasons.push("Conflicting first names");
 
   return {
@@ -5332,18 +5347,18 @@ function selectGroup(groupKey) {
   if (mergeReviewSession.active && !mergeReviewSession.queueGroupKeys.includes(groupKey)) return;
   state.selectedGroupKey = groupKey;
   if (els.groupList.querySelector(`[data-group-key="${cssEscape(groupKey)}"]`)) {
-    renderGroupSelection();
+    renderGroupSelection({ scrollSelectedIntoView: true });
   } else {
     renderGroups();
   }
   renderDetail();
 }
 
-function renderGroupSelection() {
+function renderGroupSelection({ scrollSelectedIntoView = false } = {}) {
   els.groupList.querySelectorAll(".group-item").forEach((item) => {
     const selected = item.dataset.groupKey === state.selectedGroupKey;
     item.classList.toggle("is-selected", selected);
-    if (selected) item.scrollIntoView({ block: "nearest" });
+    if (selected && scrollSelectedIntoView) item.scrollIntoView({ block: "nearest" });
   });
 }
 

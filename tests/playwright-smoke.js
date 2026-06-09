@@ -12,6 +12,7 @@ const {
 } = require("../plugins/agentic-workflow-policy/scripts/playwright_hit_test_helpers");
 const {
   accountSmokeCsv,
+  contactExactIdentityConflictSmokeCsv,
   contactLastNameChangeSmokeCsv,
   contactMissingIdSmokeCsv,
   contactSmokeCsv,
@@ -46,6 +47,7 @@ async function run() {
   const csvPath = path.join(outDir, "contacts-smoke.csv");
   const missingContactIdCsvPath = path.join(outDir, "contacts-missing-ids.csv");
   const lastNameChangeCsvPath = path.join(outDir, "contacts-last-name-change.csv");
+  const exactIdentityConflictCsvPath = path.join(outDir, "contacts-exact-identity-conflict.csv");
   const accountCsvPath = path.join(outDir, "accounts-smoke.csv");
   const largeContactCsvPath = path.join(outDir, "contacts-large-smoke.csv");
   const contactCsv = contactSmokeCsv();
@@ -55,6 +57,7 @@ async function run() {
   await fs.writeFile(csvPath, contactCsv);
   await fs.writeFile(missingContactIdCsvPath, contactMissingIdSmokeCsv());
   await fs.writeFile(lastNameChangeCsvPath, contactLastNameChangeSmokeCsv());
+  await fs.writeFile(exactIdentityConflictCsvPath, contactExactIdentityConflictSmokeCsv());
   await fs.writeFile(accountCsvPath, accountSmokeCsv());
   await fs.writeFile(largeContactCsvPath, largeContactCsv);
 
@@ -65,6 +68,7 @@ async function run() {
     const fileModeRedirect = await assertFileModeRedirect(browser);
     const emptyImportButtonState = await assertEmptyImportButtonOpensFileChooser(browser, csvPath);
     const lastNameChangeCandidateState = await assertLastNameChangeCandidateMatch(browser, lastNameChangeCsvPath);
+    const exactIdentityConflictState = await assertExactIdentityConflictSeparated(browser, exactIdentityConflictCsvPath);
     const largeContactPerformance = await assertLargeContactCsvPerformance(browser, largeContactCsvPath);
 
     const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
@@ -298,11 +302,21 @@ async function run() {
       throw new Error(`Large Contact CSV candidate attempts exceeded budget: ${JSON.stringify(largeContactPerformance.matchingStats)}`);
     }
     if (
+      !largeContactPerformance.groupListScrollLockState ||
+      largeContactPerformance.groupListScrollLockState.after.afterScrollTop <= largeContactPerformance.groupListScrollLockState.before.scrollTop ||
+      largeContactPerformance.groupListScrollLockState.after.selectedVisible
+    ) {
+      throw new Error(`Expected Match Groups to keep scrolling after the selected item is pinned at the top: ${JSON.stringify(largeContactPerformance.groupListScrollLockState)}`);
+    }
+    if (
       lastNameChangeCandidateState.groupCount !== 1 ||
       lastNameChangeCandidateState.firstGroupScore < 86 ||
       !lastNameChangeCandidateState.matchingStats?.candidatePairs
     ) {
       throw new Error(`Expected last-name-change Contact pair to survive candidate pruning: ${JSON.stringify(lastNameChangeCandidateState)}`);
+    }
+    if (exactIdentityConflictState.groupCount !== 0) {
+      throw new Error(`Expected exact phone/LinkedIn conflict Contact pair to stay below the duplicate threshold: ${JSON.stringify(exactIdentityConflictState)}`);
     }
     assertPerformanceBudget("large Contact CSV worker import", largeContactPerformance.elapsedMs, PERFORMANCE_BUDGETS.largeContactCsvWorkerMs);
     if (!lightTheme.colorScheme.includes("light") || !darkTheme.colorScheme.includes("dark") || lightTheme.bodyBg === darkTheme.bodyBg) {
@@ -736,6 +750,35 @@ async function assertLastNameChangeCandidateMatch(browser, filePath) {
   }
 }
 
+async function assertExactIdentityConflictSeparated(browser, filePath) {
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const diagnostics = [];
+  page.on("console", (message) => {
+    if (["error", "warning"].includes(message.type())) {
+      diagnostics.push(`${message.type()}: ${message.text()}`);
+    }
+  });
+  page.on("pageerror", (error) => diagnostics.push(`pageerror: ${error.message}`));
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('[data-empty-action="choose-csv"]').waitFor({ state: "visible", timeout: 5000 });
+    const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
+    await page.locator('[data-empty-action="choose-csv"]').click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles(filePath);
+    await waitForLoadingModalHidden(page, "Exact identity conflict Contact load", diagnostics);
+    await setRangeValue(page, "#threshold", "80");
+    await setRangeValue(page, "#maxThreshold", "99");
+    await page.locator("#applyControlsButton").click();
+    await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
+    return {
+      ...(await datasetLoadState(page))
+    };
+  } finally {
+    await page.close();
+  }
+}
+
 async function assertLargeContactCsvPerformance(browser, filePath) {
   const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
   const diagnostics = [];
@@ -755,9 +798,11 @@ async function assertLargeContactCsvPerformance(browser, filePath) {
     await fileChooser.setFiles(filePath);
     await waitForLoadingModalHidden(page, "Large Contact CSV performance load", diagnostics, PERFORMANCE_BUDGETS.largeContactCsvWorkerMs);
     await waitForFirstGroup(page, "Large Contact CSV performance load");
+    const groupListScrollLockState = await exerciseGroupListScrollAfterSelection(page);
     return {
       elapsedMs: Date.now() - startedAt,
-      ...(await datasetLoadState(page))
+      ...(await datasetLoadState(page)),
+      groupListScrollLockState
     };
   } finally {
     await page.close();
@@ -1927,6 +1972,34 @@ async function groupListTopState(page) {
       scoresAscending: scores.every((score, index) => index === 0 || scores[index - 1] <= score)
     };
   });
+}
+
+async function exerciseGroupListScrollAfterSelection(page) {
+  const list = page.locator("#groupList");
+  await list.scrollIntoViewIfNeeded();
+  await list.hover();
+  const before = await list.evaluate((element) => ({
+    scrollTop: element.scrollTop,
+    maxScrollTop: Math.max(0, element.scrollHeight - element.clientHeight),
+    selectedVisible: !!element.querySelector(".group-item.is-selected")
+  }));
+  await page.locator(".group-item").first().click();
+  await page.mouse.wheel(0, 300);
+  await page.waitForTimeout(150);
+  const after = await list.evaluate((element) => {
+    const selected = element.querySelector(".group-item.is-selected");
+    const listRect = element.getBoundingClientRect();
+    const selectedRect = selected?.getBoundingClientRect();
+    const selectedVisible = !!selectedRect && selectedRect.bottom > listRect.top && selectedRect.top < listRect.bottom;
+    return {
+      afterScrollTop: element.scrollTop,
+      maxScrollTop: Math.max(0, element.scrollHeight - element.clientHeight),
+      selectedVisible,
+      selectedTop: selectedRect ? selectedRect.top - listRect.top : null,
+      selectedBottom: selectedRect ? selectedRect.bottom - listRect.top : null
+    };
+  });
+  return { before, after };
 }
 
 async function assertRootScrollPolicy(page) {

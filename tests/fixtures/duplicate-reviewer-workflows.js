@@ -58,6 +58,38 @@ function contactLastNameChangeSmokeCsv() {
   ]);
 }
 
+function contactExactIdentityConflictSmokeCsv() {
+  return csvRows([
+    ["Id", "First Name", "Last Name", "Company", "Email", "Lead Source", "Created Date", "Phone", "Mobile", "LinkedIn__c", "ZI_Person_LinkedIn_URL__c"],
+    [
+      "003L00000000011",
+      "Taylor",
+      "Mason",
+      "Northstar Analytics",
+      "taylor.mason@northstar.example",
+      "Web",
+      "2024-04-01",
+      "(555) 010-4321",
+      "",
+      "https://www.linkedin.com/in/taylor-mason-1010",
+      "https://www.linkedin.com/in/taylor-mason-1010/"
+    ],
+    [
+      "003L00000000012",
+      "Taylor",
+      "Mason",
+      "Civic Harbor",
+      "taylor.mason@civicharbor.example",
+      "Referral",
+      "2025-04-01",
+      "(555) 010-4321",
+      "",
+      "https://www.linkedin.com/in/taylor-mason-1010",
+      "https://www.linkedin.com/in/taylor-mason-1010/"
+    ]
+  ]);
+}
+
 function accountSmokeCsv() {
   return csvRows([
     ["Id", "Name", "Website", "Billing Street", "Billing City", "Billing State", "Billing Postal Code", "Billing Country"],
@@ -95,6 +127,7 @@ function csvCell(value) {
 module.exports = {
   accountSmokeCsv,
   contactLastNameChangeSmokeCsv,
+  contactExactIdentityConflictSmokeCsv,
   contactMissingIdSmokeCsv,
   contactSmokeCsv,
   largeContactSmokeCsv
