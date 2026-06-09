@@ -21,8 +21,8 @@ This app is a dependency-free browser tool. `public/index.html` loads `public/st
 6. `render()` updates the source panel, field mapping, metrics, match group list, navigation state, and active detail view.
 7. User decisions, pair-level calibration labels, field-resolution choices, separated records, and selected batch groups live in `state`.
 8. `exportDecisions()` writes duplicate decisions to a canonical-record CSV download.
-9. Review state for real dataset loads is persisted in IndexedDB and restored by dataset key when the same dataset is loaded again.
-10. Pair-level calibration labels live in `state.trainingLabels` and export/import separately through `exportTrainingLabels()` and `importTrainingLabels()`.
+9. Review/workspace state for real dataset loads is persisted in IndexedDB and restored by dataset key when the same dataset is loaded again.
+10. The same workspace state can be exported and imported as JSON through `Export > Workspace` and `Import > Workspace`; pair-level calibration labels still have separate CSV export/import for compatibility.
 
 ## State Model
 
@@ -55,7 +55,7 @@ Important state fields:
 
 Recent-file records include `objectType` so reloading a recent CSV restores whether it was loaded as Contacts or Accounts. The record ID also prefixes the object type, allowing the same file name to be stored once per object type.
 
-Review-state records are stored in the same IndexedDB database under `REVIEW_STATE_STORE`. They are keyed by `state.datasetKey` rather than file name alone, and include training labels, duplicate/not-duplicate decisions, field-resolution overrides, and separated-record choices. `restoreReviewStateForCurrentDataset()` runs after `recompute()` so group-key-scoped state can be validated against the current groups before rendering.
+Review/workspace-state records are stored in the same IndexedDB database under `REVIEW_STATE_STORE`. They are keyed by `state.datasetKey` rather than file name alone, and include training labels, duplicate/not-duplicate decisions, field-resolution overrides, separated-record choices, merge results, merge-master selections, and source dataset metadata. `restoreReviewStateForCurrentDataset()` runs after `recompute()` so group-key-scoped state can be validated against the current groups before rendering.
 
 If an exact `datasetKey` lookup misses, restore falls back to compatible saved states with the same object type, row count, file name, and header signature. This protects users when the dataset-key algorithm changes; fallback restores are immediately saved again under the current key.
 

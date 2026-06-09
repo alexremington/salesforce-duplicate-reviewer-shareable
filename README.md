@@ -102,7 +102,7 @@ Merge results are saved with the browser review state and server-side audit entr
 
 Each duplicate group includes a pair-labeling panel. Use `Match`, `Not Match`, or `Unsure` to label the displayed pair; the panel advances to the next unlabeled pair in the group.
 
-Labels and review choices are saved automatically in the browser for the loaded dataset. When the same dataset is loaded again, the app restores saved pair labels, duplicate/not-duplicate judgments, accepted field values, and separated-record choices from local IndexedDB storage.
+Labels and review choices are saved automatically in the browser for the loaded dataset. When the same dataset is loaded again, the app restores saved pair labels, duplicate/not-duplicate judgments, accepted field values, and separated-record choices from local IndexedDB storage. You can also export the whole workspace from `Export > Workspace` and import it again from `Import > Workspace` after reloading the matching dataset.
 
 Use `Export > Labels` to download a pair-level calibration CSV. Use `Import > Labels` to restore labels from one of those exported CSVs into the currently loaded dataset and save them in local browser storage. `Unsure` rows are exported for auditability, but they should usually be excluded from model calibration.
 

@@ -37,6 +37,13 @@ Every Duplicate Reviewer feature request should include a Hume pass before code 
 - The preview must preserve the existing page and pane scroll model, with no overlap between navigation, summary, value preview, and overall action area on desktop or mobile.
 - Any preview content that reflects review-only accepted values rather than actual Salesforce write-back fields must be labeled clearly.
 
+### Workspace Export and Restore
+
+- This feature belongs in the existing topbar `Import` and `Export` menus and should not add a new panel or workflow branch.
+- The exported workspace should feel like the existing menu-driven CSV actions: compact, accessible, and immediately available once a dataset is loaded.
+- The workspace import path should restore the current review state for the matching dataset without changing the page layout or introducing a separate restore screen.
+- The topbar menu layout and scroll model must stay intact on desktop and mobile, with no new overlap between menu items or controls.
+
 ## Build And Test Gate
 
 Before a Duplicate Reviewer change is ready:

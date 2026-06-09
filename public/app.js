@@ -841,9 +841,12 @@ const els = {
   exportButton: document.getElementById("exportButton"),
   exportMenuButton: document.getElementById("exportMenuButton"),
   exportMenu: document.getElementById("exportMenu"),
+  workspaceExportButton: document.getElementById("workspaceExportButton"),
   trainingExportButton: document.getElementById("trainingExportButton"),
   codexTrainingButton: document.getElementById("codexTrainingButton"),
+  workspaceImportButton: document.getElementById("workspaceImportButton"),
   trainingImportButton: document.getElementById("trainingImportButton"),
+  workspaceImportInput: document.getElementById("workspaceImportInput"),
   trainingImportInput: document.getElementById("trainingImportInput"),
   shortcutsButton: document.getElementById("shortcutsButton"),
   shortcutsModal: document.getElementById("shortcutsModal"),
@@ -951,15 +954,28 @@ els.exportButton.addEventListener("click", () => {
   setExportMenuOpen(false);
   exportDecisions();
 });
+els.workspaceExportButton.addEventListener("click", () => {
+  setExportMenuOpen(false);
+  exportWorkspace();
+});
 els.trainingExportButton.addEventListener("click", () => {
   setExportMenuOpen(false);
   exportTrainingLabels();
 });
 els.codexTrainingButton.addEventListener("click", sendTrainingLabelsToCodex);
+els.workspaceImportButton.addEventListener("click", () => {
+  setCsvObjectMenuOpen(false);
+  els.workspaceImportInput.value = "";
+  els.workspaceImportInput.click();
+});
 els.trainingImportButton.addEventListener("click", () => {
   setCsvObjectMenuOpen(false);
   els.trainingImportInput.value = "";
   els.trainingImportInput.click();
+});
+els.workspaceImportInput.addEventListener("change", (event) => {
+  const [file] = event.target.files;
+  if (file) importWorkspace(file);
 });
 els.trainingImportInput.addEventListener("change", (event) => {
   const [file] = event.target.files;
@@ -1840,10 +1856,13 @@ function serializeCurrentReviewState() {
   return {
     id: state.datasetKey,
     version: 1,
+    kind: "workspace",
+    workspaceVersion: 1,
     objectType: state.objectType,
     fileName: state.fileName,
     rowCount: state.rows.length,
     headers: [...state.headers],
+    sourceDataset: { ...state.datasetSource },
     trainingLabels: [...state.trainingLabels.entries()],
     decisions: [...state.decisions.entries()],
     mergeResults: [...state.mergeResults.entries()],
@@ -1853,6 +1872,7 @@ function serializeCurrentReviewState() {
       groupKey,
       [...recordKeys]
     ]),
+    savedAt: new Date().toISOString(),
     updatedAt: Date.now()
   };
 }
@@ -5393,6 +5413,14 @@ function renderTrainingExportButton() {
   const labelCount = trainingLabelCount();
   const separatedCount = separatedRecordTrainingCount();
   const hasTrainingSignal = labelCount > 0 || separatedCount > 0;
+  const hasWorkspace = Boolean(state.datasetKey);
+  els.workspaceExportButton.disabled = !hasWorkspace;
+  els.workspaceExportButton.textContent = "Workspace";
+  els.workspaceExportButton.setAttribute(
+    "aria-label",
+    hasWorkspace ? "Export workspace" : "Export workspace"
+  );
+  els.workspaceExportButton.classList.toggle("is-active", hasWorkspace);
   els.trainingExportButton.disabled = !labelCount;
   els.trainingExportButton.textContent = "Labels";
   els.trainingExportButton.setAttribute(
@@ -5415,12 +5443,16 @@ function renderTrainingExportButton() {
     codexTrainingSummary ? `Send ${codexTrainingSummary} to Codex` : "Send to Codex"
   );
   els.codexTrainingButton.classList.toggle("is-active", hasTrainingSignal);
+  els.workspaceImportButton.disabled = !hasWorkspace;
   els.trainingImportButton.disabled = !state.rows.length;
   updateExportMenuButtonState();
 }
 
 function updateExportMenuButtonState() {
-  const hasExports = !els.exportButton.disabled || !els.trainingExportButton.disabled;
+  const hasExports =
+    !els.workspaceExportButton.disabled ||
+    !els.exportButton.disabled ||
+    !els.trainingExportButton.disabled;
   els.exportMenuButton.classList.toggle("is-active", hasExports);
 }
 
@@ -8761,6 +8793,15 @@ function exportTrainingLabels() {
   downloadCsv(`${state.objectType}-training-labels.csv`, buildTrainingLabelRows());
 }
 
+function exportWorkspace() {
+  if (!state.datasetKey) return;
+  downloadJson(`${state.objectType}-workspace.json`, serializeWorkspaceRecord());
+}
+
+function serializeWorkspaceRecord() {
+  return serializeCurrentReviewState();
+}
+
 function buildTrainingLabelRows() {
   const groupsByKey = new Map(state.groups.map((group) => [group.key, group]));
   const recordsByKey = new Map(state.rows.map((record) => [recordKey(record), record]));
@@ -8951,6 +8992,69 @@ function importTrainingLabels(file) {
   reader.readAsText(file);
 }
 
+function importWorkspace(file) {
+  if (!state.datasetKey) {
+    state.reviewStateStatus = "Load a file-based dataset before importing a workspace";
+    renderSource();
+    return;
+  }
+
+  showLoadingModal("Importing Workspace", `Reading ${file.name}.`);
+  const reader = new FileReader();
+  reader.onload = async () => {
+    await nextPaint();
+    try {
+      showLoadingModal("Importing Workspace", "Matching workspace data to the loaded dataset.");
+      await nextPaint();
+      const parsed = JSON.parse(String(reader.result || ""));
+      const workspaceRecord = normalizeWorkspaceImportRecord(parsed);
+      if (!workspaceRecord || (!isCompatibleReviewState(workspaceRecord) && workspaceRecord.id !== state.datasetKey)) {
+        throw new Error("Workspace could not be matched to the loaded dataset.");
+      }
+      const result = workspaceRecord ? applySavedReviewState(workspaceRecord) : null;
+      if (!result) throw new Error("Workspace could not be matched to the loaded dataset.");
+      state.reviewStateStatus = workspaceImportStatus(result);
+      visibleGroupsCache = null;
+      ensureSelectedGroupVisible();
+      renderSource();
+      renderTrainingExportButton();
+      renderGroups();
+      renderDetail();
+      if (Object.values(result).some((value) => Number(value) > 0)) scheduleReviewStateSave();
+    } catch {
+      state.reviewStateStatus = "Workspace could not be imported";
+      renderSource();
+    } finally {
+      hideLoadingModal();
+    }
+  };
+  reader.onerror = () => {
+    state.reviewStateStatus = "Workspace could not be imported";
+    hideLoadingModal();
+    renderSource();
+  };
+  reader.readAsText(file);
+}
+
+function normalizeWorkspaceImportRecord(data) {
+  if (!data || typeof data !== "object") return null;
+  if (data.reviewState && typeof data.reviewState === "object") return data.reviewState;
+  if (data.workspace && typeof data.workspace === "object") return data.workspace;
+  if (Array.isArray(data.trainingLabels) || Array.isArray(data.decisions)) return data;
+  return null;
+}
+
+function workspaceImportStatus(counts = {}) {
+  const parts = [];
+  if (counts.labels) parts.push(`${formatNumber(counts.labels)} ${counts.labels === 1 ? "label" : "labels"}`);
+  if (counts.decisions) parts.push(`${formatNumber(counts.decisions)} ${counts.decisions === 1 ? "decision" : "decisions"}`);
+  if (counts.mergeResults) parts.push(`${formatNumber(counts.mergeResults)} merge ${counts.mergeResults === 1 ? "result" : "results"}`);
+  if (counts.mergeMasterSelections) parts.push(`${formatNumber(counts.mergeMasterSelections)} merge ${counts.mergeMasterSelections === 1 ? "master" : "masters"}`);
+  if (counts.fieldResolutions) parts.push(`${formatNumber(counts.fieldResolutions)} field ${counts.fieldResolutions === 1 ? "choice" : "choices"}`);
+  if (counts.separatedRecords) parts.push(`${formatNumber(counts.separatedRecords)} separated ${counts.separatedRecords === 1 ? "record" : "records"}`);
+  return parts.length ? `Imported workspace with ${parts.join(", ")}` : "Imported workspace";
+}
+
 function importTrainingLabelRows(rows) {
   const index = buildSourceRecordKeyIndex();
   let imported = 0;
@@ -9053,6 +9157,17 @@ function compareTrainingLabels(left, right) {
 function downloadCsv(filename, rows) {
   const csv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadJson(filename, data) {
+  const json = `${JSON.stringify(data, null, 2)}\n`;
+  const blob = new Blob([json], { type: "application/json;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;

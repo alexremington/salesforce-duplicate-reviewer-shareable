@@ -52,6 +52,7 @@ async function run() {
   const exactIdentityConflictCsvPath = path.join(outDir, "contacts-exact-identity-conflict.csv");
   const accountCsvPath = path.join(outDir, "accounts-smoke.csv");
   const largeContactCsvPath = path.join(outDir, "contacts-large-smoke.csv");
+  const workspaceExportPath = path.join(outDir, "workspace-export.json");
   const contactCsv = contactSmokeCsv();
   const largeContactCsv = largeContactSmokeCsv();
   const contactSmokeRowCount = csvDataRowCount(contactCsv);
@@ -122,8 +123,16 @@ async function run() {
     await page.keyboard.press("Escape");
     const csvMenuClosed = await page.locator("#csvObjectMenu").isHidden();
     await page.locator("#exportMenuButton").click();
+    await page.getByRole("menuitem", { name: "Workspace" }).waitFor({ state: "visible", timeout: 5000 });
     await page.getByRole("menuitem", { name: "Decisions" }).waitFor({ state: "visible", timeout: 5000 });
     const exportMenuState = await exportMenuStateForSmoke(page);
+    const workspaceExportIndex = exportMenuState.options.indexOf("Workspace");
+    if (workspaceExportIndex < 0) {
+      throw new Error(`Expected export menu to include Workspace export: ${JSON.stringify(exportMenuState)}`);
+    }
+    if (exportMenuState.disabled[workspaceExportIndex]) {
+      throw new Error(`Expected Workspace export to be enabled after loading a dataset: ${JSON.stringify(exportMenuState)}`);
+    }
     await page.keyboard.press("Escape");
     const exportMenuClosed = await page.locator("#exportMenu").isHidden();
     await page.locator("#demoButton").click();
@@ -206,6 +215,20 @@ async function run() {
     await page.locator(".record-decision-badge.duplicate").first().waitFor({ state: "visible", timeout: 5000 });
 
     const duplicateBadges = await page.locator(".record-decision-badge.duplicate").count();
+    const workspaceExportState = await captureWorkspaceExport(page, workspaceExportPath);
+    if (workspaceExportState.kind !== "workspace" || workspaceExportState.workspaceVersion !== 1) {
+      throw new Error(`Expected workspace export metadata to mark the file as a workspace record: ${JSON.stringify(workspaceExportState)}`);
+    }
+    if (!Array.isArray(workspaceExportState.trainingLabels) || !workspaceExportState.trainingLabels.length) {
+      throw new Error(`Expected workspace export to include saved training labels: ${JSON.stringify(workspaceExportState)}`);
+    }
+    if (!Array.isArray(workspaceExportState.decisions) || !workspaceExportState.decisions.length) {
+      throw new Error(`Expected workspace export to include saved decisions: ${JSON.stringify(workspaceExportState)}`);
+    }
+    const workspaceRoundTripState = await assertWorkspaceExportRoundTrip(browser, workspaceExportPath, csvPath);
+    if (workspaceRoundTripState.decisionCount < 1 || workspaceRoundTripState.trainingLabelCount < 1) {
+      throw new Error(`Expected workspace import to restore decisions and labels in a fresh context: ${JSON.stringify(workspaceRoundTripState)}`);
+    }
     await page.screenshot({ path: path.join(outDir, "desktop-duplicate.png"), fullPage: false });
 
     await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Not Duplicate", exact: true }).click();
@@ -296,6 +319,9 @@ async function run() {
 
     if (!emptyChooseVisible) throw new Error("Expected empty-state Import action to be visible.");
     if (!emptyDemoVisible) throw new Error("Expected empty-state Load Demo action to be visible.");
+    if (!emptyImportButtonState.workspaceImportDisabledBeforeLoad) {
+      throw new Error(`Expected Workspace import to stay disabled before a dataset is loaded: ${JSON.stringify(emptyImportButtonState)}`);
+    }
     if (!emptyImportButtonState.fileChooserOpened || emptyImportButtonState.rowCount !== contactSmokeRowCount || !emptyImportButtonState.groupCount) {
       throw new Error(`Expected empty-state Import to open a file picker and load a dataset: ${JSON.stringify(emptyImportButtonState)}`);
     }
@@ -709,6 +735,10 @@ async function assertEmptyImportButtonOpensFileChooser(browser, filePath) {
   try {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.locator('[data-empty-action="choose-csv"]').waitFor({ state: "visible", timeout: 5000 });
+    await page.locator("#chooseCsvButton").click();
+    await page.getByRole("menuitem", { name: "Workspace" }).waitFor({ state: "visible", timeout: 5000 });
+    const workspaceImportDisabledBeforeLoad = await page.getByRole("menuitem", { name: "Workspace" }).isDisabled();
+    await page.keyboard.press("Escape");
     const startedAt = Date.now();
     const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
     await page.locator('[data-empty-action="choose-csv"]').click();
@@ -718,6 +748,7 @@ async function assertEmptyImportButtonOpensFileChooser(browser, filePath) {
     await waitForFirstGroup(page, "Empty-state Import load");
     return {
       fileChooserOpened: true,
+      workspaceImportDisabledBeforeLoad,
       elapsedMs: Date.now() - startedAt,
       ...(await datasetLoadState(page))
     };
@@ -1357,6 +1388,70 @@ async function captureMergeReportDownload(page) {
   state.downloaded = true;
   state.csv = await fs.readFile(downloadPath, "utf8");
   return state;
+}
+
+async function captureWorkspaceExport(page, exportPath) {
+  await page.locator("#exportMenuButton").click();
+  await page.getByRole("menuitem", { name: "Workspace" }).waitFor({ state: "visible", timeout: 5000 });
+  const button = page.locator("#workspaceExportButton");
+  const state = {
+    buttonVisible: await button.isVisible(),
+    downloaded: false,
+    json: null
+  };
+
+  if (!state.buttonVisible) return state;
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("menuitem", { name: "Workspace" }).click();
+  const download = await downloadPromise;
+  await download.saveAs(exportPath);
+  state.downloaded = true;
+  state.json = JSON.parse(await fs.readFile(exportPath, "utf8"));
+  return state.json;
+}
+
+async function importWorkspaceThroughMenu(page, filePath) {
+  await page.locator("#chooseCsvButton").click();
+  await page.getByRole("menuitem", { name: "Workspace" }).waitFor({ state: "visible", timeout: 5000 });
+  const startedAt = Date.now();
+  const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
+  await page.getByRole("menuitem", { name: "Workspace" }).click();
+  const fileChooser = await fileChooserPromise;
+  await fileChooser.setFiles(filePath);
+  await waitForLoadingModalHidden(page, "Topbar Import Workspace load");
+  await waitForFirstGroup(page, "Topbar Import Workspace load");
+  return {
+    fileChooserOpened: true,
+    elapsedMs: Date.now() - startedAt,
+    ...(await datasetLoadState(page))
+  };
+}
+
+async function assertWorkspaceExportRoundTrip(browser, exportPath, datasetPath) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 960 } });
+  const page = await context.newPage();
+  try {
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await importContactsThroughMenu(page, datasetPath);
+    await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
+    await waitForFirstGroup(page, "Workspace round-trip dataset reload");
+    const importState = await importWorkspaceThroughMenu(page, exportPath);
+    await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
+    await waitForFirstGroup(page, "Workspace round-trip import");
+    const state = await page.evaluate(() => ({
+      decisionCount: [...state.decisions.values()].filter((decision) => decision === "duplicate").length,
+      trainingLabelCount: state.trainingLabels.size,
+      reviewStateStatus: state.reviewStateStatus
+    }));
+    return {
+      ...state,
+      importState
+    };
+  } finally {
+    await context.close();
+  }
 }
 
 async function captureStaleRefreshFlow(page, refreshedCsv) {

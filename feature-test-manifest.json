@@ -1,8 +1,59 @@
 {
   "version": 1,
   "app": "salesforce-duplicate-reviewer",
-  "updatedAt": "2026-06-04T19:07:19Z",
+  "updatedAt": "2026-06-09T20:00:00Z",
   "features": [
+    {
+      "id": "workspace-export-restore",
+      "title": "Workspace Export and Restore",
+      "app": "salesforce-duplicate-reviewer",
+      "status": "in-progress",
+      "visibleUi": true,
+      "brief": "docs/features/workspace-export-restore.md",
+      "requirements": [
+        "Keep the current CSV dataset loader as the source of truth for the source records.",
+        "Save the active review state as a single workspace record in browser persistence and export that same record as JSON.",
+        "Restore duplicate/not-duplicate decisions, training labels, field-resolution choices, separated records, merge results, and merge master selections from the workspace JSON.",
+        "Keep the existing Decisions and Labels CSV exports available for downstream workflows and backward compatibility.",
+        "Keep the workspace controls inside the existing Import and Export menus. Do not add a new panel or separate workflow surface."
+      ],
+      "acceptanceCriteria": [
+        "The Import menu includes a Workspace action that opens a JSON file picker.",
+        "The Export menu includes a Workspace action that downloads a JSON file.",
+        "The exported workspace JSON includes the current dataset metadata plus the saved review state.",
+        "Importing a matching workspace file restores the saved review state in a fresh browser context after the same dataset is loaded again.",
+        "The current CSV-based dataset import path still works unchanged.",
+        "The workspace export/import path remains reachable with the existing menu and keyboard behavior on desktop and mobile."
+      ],
+      "fixtures": [
+        "At least one Contacts dataset with duplicate groups and saved review state so the round-trip can prove label and decision restoration.",
+        "Demo data should still load normally even if no workspace file has been exported yet.",
+        "No Salesforce write action is required; this is a local JSON handoff for review state."
+      ],
+      "tests": [
+        {
+          "name": "Fast checks",
+          "command": "npm run check",
+          "status": "pending"
+        },
+        {
+          "name": "Targeted Playwright smoke",
+          "command": "npm run smoke:ui:local",
+          "status": "pending"
+        }
+      ],
+      "crossPlatform": {
+        "mac": "pending",
+        "windows": "pending"
+      },
+      "risks": [],
+      "humeDesign": {
+        "reviewed": true,
+        "notes": "Keep the workspace actions inside the existing Import and Export menus. Do not add a new panel or separate workflow surface, and preserve the current topbar layout and scroll model."
+      },
+      "createdAt": "2026-06-09T20:00:00Z",
+      "updatedAt": "2026-06-09T20:00:00Z"
+    },
     {
       "id": "dataset-export-with-scores",
       "title": "Dataset Export With Scores",
