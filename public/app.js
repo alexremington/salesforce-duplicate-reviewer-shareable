@@ -6165,7 +6165,11 @@ function activeGroupFilterEntries() {
       filter: normalizeGroupFilter(filter),
       number: index + 1
     }))
-    .filter(({ filter }) => groupFilterIsComplete(filter));
+    .filter(({ filter }) => groupFilterIsComplete(filter))
+    .map((entry) => ({
+      ...entry,
+      meta: groupFilterMeta(entry.filter.field)
+    }));
 }
 
 function groupFilterIsComplete(filter) {
@@ -6291,20 +6295,18 @@ function evaluateGroupFilterAst(node, lookup) {
 function groupMatchesFilters(group, activeEntries, logic) {
   if (!activeEntries.length) return true;
   return group.records.some((record) => {
-    const results = new Map(
-      state.filters.map((filter, index) => {
-        const active = activeEntries.find((entry) => entry.number === index + 1);
-        return [index + 1, active ? groupFilterMatchesRecord(group, record, active.filter) : false];
-      })
-    );
-    return logic.evaluate((number) => results.get(number));
+    const results = new Array(state.filters.length + 1);
+    for (const entry of activeEntries) {
+      results[entry.number] = groupFilterMatchesRecord(group, record, entry.filter, entry.meta);
+    }
+    return logic.evaluate((number) => Boolean(results[number]));
   });
 }
 
-function groupFilterMatchesRecord(group, record, filter) {
-  const meta = groupFilterMeta(filter.field);
-  const rawValue = groupFilterRawValue(group, record, filter.field, meta);
-  return filterValueMatches(rawValue, filter, meta);
+function groupFilterMatchesRecord(group, record, filter, meta = null) {
+  const resolvedMeta = meta || groupFilterMeta(filter.field);
+  const rawValue = groupFilterRawValue(group, record, filter.field, resolvedMeta);
+  return filterValueMatches(rawValue, filter, resolvedMeta);
 }
 
 function groupFilterRawValue(group, record, field, meta) {

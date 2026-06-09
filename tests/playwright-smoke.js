@@ -39,6 +39,7 @@ const PERFORMANCE_BUDGETS = {
   latestContactsJsonMs: 30000,
   topbarImportContactsMs: 15000,
   largeContactCsvWorkerMs: 30000,
+  largeContactCsvFilterApplyMs: 3000,
   largeContactCandidateAttempts: 500000
 };
 const GROUP_ITEM_VISIBLE_TIMEOUT_MS = 30000;
@@ -804,10 +805,31 @@ async function assertLargeContactCsvPerformance(browser, filePath) {
     await waitForLoadingModalHidden(page, "Large Contact CSV performance load", diagnostics, PERFORMANCE_BUDGETS.largeContactCsvWorkerMs);
     await waitForFirstGroup(page, "Large Contact CSV performance load");
     const groupListScrollLockState = await exerciseGroupListScrollAfterSelection(page);
+    const matchControlsButton = page.getByRole("button", { name: /Match Controls/ });
+    if (await matchControlsButton.getAttribute("aria-expanded") !== "true") {
+      await matchControlsButton.click();
+    }
+    const largeContactFilterStartedAt = Date.now();
+    const firstFilterRow = page.locator(".filter-row").first();
+    await firstFilterRow.locator(".filter-field-select").selectOption("email");
+    await firstFilterRow.locator(".filter-operator-select").selectOption("contains");
+    await firstFilterRow.locator(".filter-value-control").fill("person1@perf1.example");
+    await page.locator("#applyControlsButton").click();
+    await page.waitForFunction(() => {
+      const groupCount = document.querySelector("#groupCount");
+      return groupCount?.textContent?.replace(/,/g, "").trim() === "1";
+    }, null, { timeout: 30000 });
+    const largeContactFilterApplyElapsedMs = Date.now() - largeContactFilterStartedAt;
+    assertPerformanceBudget(
+      "large Contact CSV custom filter apply",
+      largeContactFilterApplyElapsedMs,
+      PERFORMANCE_BUDGETS.largeContactCsvFilterApplyMs
+    );
     return {
       elapsedMs: Date.now() - startedAt,
       ...(await datasetLoadState(page)),
-      groupListScrollLockState
+      groupListScrollLockState,
+      largeContactFilterApplyElapsedMs
     };
   } finally {
     await page.close();
