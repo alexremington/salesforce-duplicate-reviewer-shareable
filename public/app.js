@@ -10378,18 +10378,16 @@ function buildScoredDatasetRows() {
   if (!exportHeaders.includes("group")) exportHeaders.push("group");
   if (!exportHeaders.includes("score")) exportHeaders.push("score");
 
-  const normalGroupByRowIndex = new Map();
-  const excludedGroupByRowIndex = new Map();
+  const groupByRowIndex = new Map();
   state.groups.forEach((group) => {
     group.records.forEach((record) => {
-      const target = isExcludedGroup(group) ? excludedGroupByRowIndex : normalGroupByRowIndex;
-      if (!target.has(record.__rowIndex)) target.set(record.__rowIndex, group);
+      groupByRowIndex.set(record.__rowIndex, group);
     });
   });
 
   const rows = [exportHeaders];
   state.rows.forEach((record) => {
-    const group = normalGroupByRowIndex.get(record.__rowIndex) || excludedGroupByRowIndex.get(record.__rowIndex) || null;
+    const group = groupByRowIndex.get(record.__rowIndex) || null;
     rows.push(
       exportHeaders.map((header) => {
         if (header === "group") return group ? group.id : "";
