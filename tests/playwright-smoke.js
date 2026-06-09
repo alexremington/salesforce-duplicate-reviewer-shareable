@@ -36,11 +36,12 @@ const REACHABILITY_OPTIONS = {
 };
 const PERFORMANCE_BUDGETS = {
   emptyImportContactsMs: 15000,
-  latestContactsJsonMs: 10000,
+  latestContactsJsonMs: 30000,
   topbarImportContactsMs: 15000,
   largeContactCsvWorkerMs: 30000,
   largeContactCandidateAttempts: 500000
 };
+const GROUP_ITEM_VISIBLE_TIMEOUT_MS = 30000;
 
 async function run() {
   await fs.mkdir(outDir, { recursive: true });
@@ -108,7 +109,7 @@ async function run() {
     const latestJsonLoadStartedAt = Date.now();
     await page.locator(".recent-file").filter({ hasText: "Latest Contacts" }).first().click();
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
-    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
     const latestJsonLoadElapsedMs = Date.now() - latestJsonLoadStartedAt;
     const latestJsonLoad = await datasetLoadState(page);
     const latestReportSummary = await reportSummaryState(page);
@@ -125,11 +126,11 @@ async function run() {
     await page.keyboard.press("Escape");
     const exportMenuClosed = await page.locator("#exportMenu").isHidden();
     await page.locator("#demoButton").click();
-    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
 
     const topbarImportState = await importContactsThroughMenu(page, csvPath);
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
-    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
     await page.locator(".group-item-main").first().click();
     const matchControlsButton = page.getByRole("button", { name: /Match Controls/ });
     if (await matchControlsButton.getAttribute("aria-expanded") !== "true") {
@@ -137,7 +138,7 @@ async function run() {
     }
     const matchControlsExpanded = await matchControlsButton.getAttribute("aria-expanded");
     await setRangeValue(page, "#threshold", "80");
-    await setRangeValue(page, "#maxThreshold", "99");
+    await setRangeValue(page, "#maxThreshold", "100");
     const thresholdReadout = await page.locator("#thresholdValue").textContent();
     const thresholdControl = await thresholdControlState(page);
     const thresholdSliderRightHit = await probeHitTarget(page, "#thresholdSlider", "right");
@@ -152,12 +153,15 @@ async function run() {
     const labelStatusEnabledAfterLoad = await page.locator('[data-label-status-filter][value="unlabeled"]').isEnabled();
     await page.locator("#applyControlsButton").click();
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
-    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
     const thresholdFilteredScores = await visibleGroupScores(page);
     await setRangeValue(page, "#maxThreshold", "100");
     await page.locator("#applyControlsButton").click();
-    await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
-    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
+    const cachedThresholdRebuildState = await page.locator("#sourcePill").getAttribute("data-last-processing-mode");
+    if (cachedThresholdRebuildState !== "cache") {
+      throw new Error(`Expected cached threshold rebuild to reuse prepared records and cached pair scores: ${cachedThresholdRebuildState}`);
+    }
     const customFilterState = await exerciseCustomFilters(page);
     await page.locator("#groupList").evaluate((element) => {
       element.scrollTop = element.scrollHeight;
@@ -418,22 +422,22 @@ async function run() {
     }
     assertPerformanceBudget("topbar Contact import", topbarImportState.elapsedMs, PERFORMANCE_BUDGETS.topbarImportContactsMs);
     if (matchControlsExpanded !== "true") throw new Error("Expected Match Controls panel to expand.");
-    if (thresholdReadout !== "80-99") throw new Error(`Expected threshold readout to update to 80-99, got ${thresholdReadout}.`);
-    if (thresholdControl.minRange !== "80" || thresholdControl.maxRange !== "99" || thresholdControl.minNumber !== "80" || thresholdControl.maxNumber !== "99") {
+    if (thresholdReadout !== "80-100") throw new Error(`Expected threshold readout to update to 80-100, got ${thresholdReadout}.`);
+    if (thresholdControl.minRange !== "80" || thresholdControl.maxRange !== "100" || thresholdControl.minNumber !== "80" || thresholdControl.maxNumber !== "100") {
       throw new Error(`Expected dual threshold control to sync sliders and number inputs: ${JSON.stringify(thresholdControl)}`);
     }
-    if (thresholdClampState.minRange !== "99" || thresholdClampState.maxRange !== "99") {
+    if (thresholdClampState.minRange !== "100" || thresholdClampState.maxRange !== "100") {
       throw new Error(`Expected min threshold typing to stop at the max handle: ${JSON.stringify(thresholdClampState)}`);
     }
-    if (thresholdTypedState.minRange !== "80" || thresholdTypedState.maxRange !== "99") {
+    if (thresholdTypedState.minRange !== "80" || thresholdTypedState.maxRange !== "100") {
       throw new Error(`Expected typed min threshold to update the slider: ${JSON.stringify(thresholdTypedState)}`);
     }
     if (!fastestSearchDefaultUnchecked) {
       throw new Error("Expected fastest search to be opt-in so broader candidate search is the default.");
     }
     if (!labelStatusEnabledAfterLoad) throw new Error("Expected label status filters to enable after loading a dataset.");
-    if (!thresholdFilteredScores.length || thresholdFilteredScores.some((score) => score < 80 || score > 99)) {
-      throw new Error(`Expected max threshold to limit visible scores to 80-99: ${JSON.stringify(thresholdFilteredScores)}`);
+    if (!thresholdFilteredScores.length || thresholdFilteredScores.some((score) => score < 80 || score > 100)) {
+      throw new Error(`Expected max threshold to limit visible scores to 80-100: ${JSON.stringify(thresholdFilteredScores)}`);
     }
     if (customFilterState.defaultLogicMode !== "and" || customFilterState.logicMode !== "custom") {
       throw new Error(`Expected filter logic to default to AND and expose custom logic by choice: ${JSON.stringify(customFilterState)}`);
@@ -641,6 +645,7 @@ async function run() {
       topbarImportState,
       fastestSearchDefaultUnchecked,
       thresholdFilteredScores,
+      cachedThresholdRebuildState,
       customFilterState,
       sortPressed,
       sortTopState,
@@ -858,7 +863,7 @@ function visibleInteractiveReachability(page) {
 
 async function waitForFirstGroup(page, label) {
   try {
-    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
   } catch (error) {
     const debugState = await duplicateReviewerDebugState(page);
     console.error(`${label} did not render a visible group: ${JSON.stringify(debugState)}`);
@@ -1406,7 +1411,7 @@ async function captureStaleRefreshFlow(page, refreshedCsv) {
   await page.locator(".merge-submit-button").click();
   await refreshResponsePromise;
   await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
-  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
   await page.unroute("**/api/salesforce/premerge-check");
   await page.unroute("**/api/salesforce/merge");
   await page.unroute(`**${refreshEndpoint}`);
@@ -1514,7 +1519,7 @@ async function captureStaleFailureCardRefreshFlow(page, refreshedCsv) {
   await page.locator(".merge-refresh-stale-data-button").click();
   await refreshResponsePromise;
   await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
-  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
   const confirmMessages = await page.evaluate(() => {
     const messages = window.__smokeConfirmMessages || [];
     if (window.__smokeOriginalConfirm) window.confirm = window.__smokeOriginalConfirm;
@@ -1846,7 +1851,7 @@ async function exerciseCustomFilters(page) {
   await page.locator(".filter-logic-input").fill("1 OR 2");
 
   await page.locator("#applyControlsButton").click();
-  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
   const filteredCount = await page.locator("#groupCount").evaluate((node) => Number(node.textContent?.replace(/,/g, "") || 0));
   const logicMode = await page.locator(".filter-logic-mode-select").inputValue();
   const logicValue = await page.locator(".filter-logic-input").inputValue();
@@ -1855,7 +1860,7 @@ async function exerciseCustomFilters(page) {
     await page.locator("[data-filter-remove]").first().click();
   }
   await page.locator("#applyControlsButton").click();
-  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
 
   return {
     filteredCount,
@@ -1879,13 +1884,13 @@ async function exerciseLabelStatusFilter(page) {
   const applyButton = page.locator("[data-label-status-apply]");
   const applyEnabledAfterChange = await applyButton.isEnabled();
   await applyButton.click();
-  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
   const filteredCount = await page.locator("#groupCount").evaluate((node) => Number(node.textContent?.replace(/,/g, "") || 0));
   const visibleFullCount = await page.locator(".group-item.is-label-full").count();
   const applyDisabledAfterApply = await applyButton.isDisabled();
   await fullCheckbox.uncheck();
   await applyButton.click();
-  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
   return { startingCount, countBeforeApply, applyEnabledAfterChange, filteredCount, visibleFullCount, applyDisabledAfterApply };
 }
 

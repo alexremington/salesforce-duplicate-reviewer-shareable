@@ -362,6 +362,7 @@ const MAX_HIGH_RECALL_CANDIDATE_PAIRS = 250000;
 const CANDIDATE_ATTEMPT_LIMIT_FACTOR = 5;
 const MATCHING_YIELD_INTERVAL_MS = 32;
 const SCORING_CHUNK_SIZE = 1200;
+const MATCHING_CACHE_MIN_THRESHOLD = 70;
 const GROUP_ITEM_ESTIMATED_HEIGHT = 108;
 const GROUP_LIST_OVERSCAN = 8;
 const GROUP_LIST_VIRTUALIZATION_THRESHOLD = 60;
@@ -776,6 +777,8 @@ const state = {
 
 let pendingCsvObjectType = "";
 let scoringContextCache = null;
+let matchingArtifactsCache = null;
+let matchingArtifactsWarmCacheJob = null;
 let reviewStateSaveTimer = 0;
 let pendingReviewStateRecord = null;
 let nextGroupFilterId = 1;
@@ -1347,6 +1350,8 @@ function clearLoadedDatasetForPendingLoad() {
   mergeInFlightGroupKeys.clear();
   resetMergeReviewSession();
   scoringContextCache = null;
+  matchingArtifactsCache = null;
+  matchingArtifactsWarmCacheJob = null;
   groupLookupCache = null;
   visibleGroupsCache = null;
 }
@@ -2166,6 +2171,8 @@ async function applyProcessedDataset(result, { fromObjects = false } = {}) {
   });
   await updateLoadingProgress("Rendering duplicate groups.", 98);
   applyComputedGroups(result.groups || [], result.matchingStats || null);
+  scheduleMatchingArtifactsWarmCache();
+  if (result.matchingArtifacts) cacheMatchingArtifacts(result.matchingArtifacts);
   await updateLoadingProgress("Ready.", 100);
   return fromObjects ? Promise.resolve() : restoreReviewStateForCurrentDataset();
 }
@@ -2188,6 +2195,8 @@ function stageRowsForReview({ rows, fileName, fromObjects, headers, mapping, obj
   state.trainingLabels.clear();
   state.trainingPairIndexes.clear();
   state.lastMatchingStats = null;
+  matchingArtifactsCache = null;
+  matchingArtifactsWarmCacheJob = null;
   mergeMasterSelections.clear();
   mergePreviewStates.clear();
   mergeInFlightGroupKeys.clear();
@@ -2221,6 +2230,8 @@ async function recompute({ title = "Matching Records", message = "Preparing reco
     state.lastMatchingStats = result.matchingStats || null;
     await updateLoadingProgress("Rendering duplicate groups.", 98);
     applyComputedGroups(result.groups || [], result.matchingStats || null);
+    scheduleMatchingArtifactsWarmCache();
+    if (result.matchingArtifacts) cacheMatchingArtifacts(result.matchingArtifacts);
     await updateLoadingProgress("Ready.", 100);
   } catch (error) {
     if (!isAbortError(error)) throw error;
@@ -2243,6 +2254,99 @@ function applyComputedGroups(groups, matchingStats = null) {
   visibleGroupsCache = null;
   ensureSelectedGroupVisible();
   render();
+}
+
+function cacheMatchingArtifacts(artifacts, groups = []) {
+  if (!artifacts || !Array.isArray(artifacts.preparedRows) || !Array.isArray(artifacts.pairScores)) {
+    matchingArtifactsCache = null;
+    return;
+  }
+
+  matchingArtifactsCache = {
+    rows: state.rows,
+    objectType: normalizeObjectType(artifacts.objectType || state.objectType, state.objectType),
+    mappingSignature: mappingSignature(artifacts.mapping || state.mapping),
+    highRecallMode: Boolean(artifacts.highRecallMode),
+    thresholdFloor: Number(artifacts.thresholdFloor) || MATCHING_CACHE_MIN_THRESHOLD,
+    preparedRows: artifacts.preparedRows,
+    fieldStats: artifacts.fieldStats || null,
+    pairScores: artifacts.pairScores,
+    matchingStats: artifacts.matchingStats || null,
+    groups: Array.isArray(groups) ? groups : []
+  };
+  scheduleMatchingArtifactsWarmCache();
+}
+
+function scheduleMatchingArtifactsWarmCache() {
+  if (!canUseMatchingWorker()) return;
+  if (matchingArtifactsCache && matchingArtifactsCache.thresholdFloor <= MATCHING_CACHE_MIN_THRESHOLD) return;
+  if (state.threshold <= MATCHING_CACHE_MIN_THRESHOLD) return;
+  if (matchingArtifactsWarmCacheJob) return;
+
+  const rows = state.rows;
+  const objectType = state.objectType;
+  const mapping = state.mapping;
+  const headers = state.headers;
+  const highRecallMode = state.highRecallMode;
+  const mappingKey = mappingSignature(mapping);
+
+  const warmCacheJob = processMatchingJob({
+    mode: "recompute",
+    rows,
+    objectType,
+    headers,
+    mapping,
+    threshold: state.threshold,
+    highRecallMode,
+    artifactThreshold: MATCHING_CACHE_MIN_THRESHOLD,
+    includeMatchingArtifacts: true
+  }, async () => {})
+    .then((result) => {
+      if (
+        state.rows === rows &&
+        state.objectType === objectType &&
+        state.highRecallMode === highRecallMode &&
+        mappingSignature(state.mapping) === mappingKey
+      ) {
+        if (result.matchingArtifacts) cacheMatchingArtifacts(result.matchingArtifacts, result.groups || []);
+      }
+    })
+    .catch((error) => {
+      if (!isAbortError(error)) {
+        console.warn("Background matching cache warmup failed", error);
+      }
+    })
+    .finally(() => {
+      if (matchingArtifactsWarmCacheJob === warmCacheJob) {
+        matchingArtifactsWarmCacheJob = null;
+      }
+    });
+  matchingArtifactsWarmCacheJob = warmCacheJob;
+}
+
+async function rebuildMatchesFromCachedArtifacts({ title = "Matching Records", message = "Rebuilding cached matches." } = {}) {
+  if (!matchingArtifactsCache) {
+    return recompute({ title, message });
+  }
+
+  const shouldOwnModal = !state.loadingModal.active;
+  if (shouldOwnModal) {
+    showLoadingModal(title, message, 0);
+    await nextPaint();
+  }
+
+  try {
+    const result = await rebuildGroupsFromMatchingArtifacts(matchingArtifactsCache, state.threshold, updateLoadingProgress);
+    state.lastProcessingMode = result.processingMode || "";
+    state.lastMatchingStats = result.matchingStats || null;
+    await updateLoadingProgress("Rendering duplicate groups.", 98);
+    applyComputedGroups(result.groups || [], result.matchingStats || null);
+    await updateLoadingProgress("Ready.", 100);
+  } catch (error) {
+    if (!isAbortError(error)) throw error;
+  } finally {
+    if (shouldOwnModal) hideLoadingModal();
+  }
 }
 
 function processMatchingJob(payload, progress = async () => {}) {
@@ -2294,7 +2398,16 @@ async function processMatchingJobOnMain(payload, progress = async () => {}) {
     const mapping = dataset.mapping || autoMapHeaders(headers, OBJECT_CONFIG[dataset.objectType].fields);
     stageMatchingContext(rows, dataset.objectType, headers, mapping);
     await progress("Matching records.", 7);
-    const { groups, matchingStats } = await buildGroupsAsync(rows, dataset.objectType, mapping, payload.threshold, payload.highRecallMode, progress);
+    const { groups, matchingStats, matchingArtifacts } = await buildGroupsAsync(
+      rows,
+      dataset.objectType,
+      mapping,
+      payload.threshold,
+      payload.highRecallMode,
+      progress,
+      Number.isFinite(Number(payload.artifactThreshold)) ? Number(payload.artifactThreshold) : payload.threshold,
+      Boolean(payload.includeMatchingArtifacts)
+    );
     return {
       ...dataset,
       rows,
@@ -2302,6 +2415,7 @@ async function processMatchingJobOnMain(payload, progress = async () => {}) {
       mapping,
       groups,
       matchingStats,
+      matchingArtifacts,
       processingMode: "main"
     };
   }
@@ -2314,15 +2428,17 @@ async function processMatchingJobOnMain(payload, progress = async () => {}) {
     const objectType = normalizeObjectType(payload.objectType, state.objectType);
     const mapping = payload.mapping || {};
     stageMatchingContext(rows, objectType, payload.headers || inferHeaders(rows), mapping);
-    const { groups, matchingStats } = await buildGroupsAsync(
+    const { groups, matchingStats, matchingArtifacts } = await buildGroupsAsync(
       rows,
       objectType,
       mapping,
       payload.threshold,
       payload.highRecallMode,
-      progress
+      progress,
+      Number.isFinite(Number(payload.artifactThreshold)) ? Number(payload.artifactThreshold) : payload.threshold,
+      Boolean(payload.includeMatchingArtifacts)
     );
-    return { groups, matchingStats, processingMode: "main" };
+    return { groups, matchingStats, matchingArtifacts, processingMode: "main" };
   }
 
   throw new Error(`Unsupported matching job: ${payload.mode || "unknown"}`);
@@ -2355,12 +2471,24 @@ async function applyMatchControls() {
   const nextThreshold = Number(els.threshold.value);
   const nextMaxThreshold = Number(els.maxThreshold.value);
   const nextHighRecallMode = !els.highRecallMode.checked;
-  const shouldRecompute = nextThreshold !== state.threshold || nextHighRecallMode !== state.highRecallMode;
+  const thresholdChanged = nextThreshold !== state.threshold;
+  const highRecallChanged = nextHighRecallMode !== state.highRecallMode;
+  const canReuseMatchingArtifacts =
+    Boolean(matchingArtifactsCache) &&
+    matchingArtifactsCache.rows === state.rows &&
+    matchingArtifactsCache.objectType === state.objectType &&
+    matchingArtifactsCache.mappingSignature === mappingSignature(state.mapping) &&
+    matchingArtifactsCache.highRecallMode === nextHighRecallMode &&
+    nextThreshold >= matchingArtifactsCache.thresholdFloor;
 
   state.threshold = nextThreshold;
   state.maxThreshold = nextMaxThreshold;
   state.highRecallMode = nextHighRecallMode;
-  if (shouldRecompute) {
+  if (thresholdChanged || highRecallChanged) {
+    if (thresholdChanged && !highRecallChanged && canReuseMatchingArtifacts) {
+      await rebuildMatchesFromCachedArtifacts({ title: "Updating Matches", message: "Reusing prepared records and cached pair scores." });
+      return;
+    }
     await recompute({ title: "Updating Matches", message: "Rebuilding candidate matches." });
   } else {
     visibleGroupsCache = null;
@@ -2666,7 +2794,16 @@ function readMappingFromControls() {
  * buckets then decide which row pairs are worth scoring, which keeps large CSVs
  * away from all-pairs comparison in normal cases.
  */
-async function buildGroupsAsync(rows, objectType, mapping, threshold, highRecallMode = false, progress = async () => {}) {
+async function buildGroupsAsync(
+  rows,
+  objectType,
+  mapping,
+  threshold,
+  highRecallMode = false,
+  progress = async () => {},
+  artifactThreshold = threshold,
+  includeMatchingArtifacts = false
+) {
   const startedAt = performance.now();
   if (!rows.length) {
     await progress("No records to match.", 100);
@@ -2688,18 +2825,19 @@ async function buildGroupsAsync(rows, objectType, mapping, threshold, highRecall
   }
 
   await progress("Preparing records.", 8);
-  const { preparedRows, scorer } = await getScoringContextAsync(rows, objectType, mapping, progress);
+  const { preparedRows, fieldStats, scorer } = await getScoringContextAsync(rows, objectType, mapping, progress);
 
   await progress("Finding candidate pairs.", 22);
   const pairKeys = objectType === "contact"
-    ? await getContactCandidatePairsAsync(preparedRows, highRecallMode, candidatePairLimit(highRecallMode), threshold, progress)
-    : await getAccountCandidatePairsAsync(preparedRows, highRecallMode, candidatePairLimit(highRecallMode), threshold, progress);
+    ? await getContactCandidatePairsAsync(preparedRows, highRecallMode, candidatePairLimit(highRecallMode), artifactThreshold, progress)
+    : await getAccountCandidatePairsAsync(preparedRows, highRecallMode, candidatePairLimit(highRecallMode), artifactThreshold, progress);
 
   await progress(`Scoring ${formatNumber(pairKeys.size)} candidate pairs.`, 44);
-  const pairs = await scoreCandidatePairsAsync(pairKeys, preparedRows, scorer, threshold, progress);
+  const pairs = await scoreCandidatePairsAsync(pairKeys, preparedRows, scorer, artifactThreshold, progress);
+  const currentPairs = pairs.filter((pair) => pair.value >= threshold);
 
   await progress("Building match groups.", 82);
-  const groupsByRoot = collectPairGroups(pairs, rows.length);
+  const groupsByRoot = collectPairGroups(currentPairs, rows.length);
   await yieldToBrowser();
 
   const groups = [...groupsByRoot.values()]
@@ -2715,6 +2853,7 @@ async function buildGroupsAsync(rows, objectType, mapping, threshold, highRecall
       objectType,
       rowCount: rows.length,
       threshold,
+      cacheThreshold: artifactThreshold,
       highRecallMode,
       elapsedMs: Math.round(performance.now() - startedAt),
       candidatePairs: pairKeys.size,
@@ -2724,9 +2863,39 @@ async function buildGroupsAsync(rows, objectType, mapping, threshold, highRecall
       maxBucketSize: pairKeys.bucketStats?.maxBucketSize || 0,
       oversizedBucketCount: pairKeys.bucketStats?.oversizedBucketCount || 0,
       scoredPairs: pairs.scoreStats?.scoredPairs || pairKeys.size,
-      retainedPairs: pairs.scoreStats?.retainedPairs || pairs.length,
+      retainedPairs: currentPairs.length,
       resultGroups: groups.length
-    }
+    },
+    ...(includeMatchingArtifacts
+      ? {
+          matchingArtifacts: {
+            objectType,
+            mapping,
+            highRecallMode,
+            thresholdFloor: artifactThreshold,
+            preparedRows,
+            fieldStats,
+            pairScores: pairs.map(serializePairScore),
+            matchingStats: {
+              objectType,
+              rowCount: rows.length,
+              threshold,
+              cacheThreshold: artifactThreshold,
+              highRecallMode,
+              elapsedMs: Math.round(performance.now() - startedAt),
+              candidatePairs: pairKeys.size,
+              candidateAttempts: pairKeys.searchStats?.attempts || 0,
+              candidateAttemptCapHit: Boolean(pairKeys.searchStats?.attemptCapHit),
+              bucketCount: pairKeys.bucketStats?.bucketCount || 0,
+              maxBucketSize: pairKeys.bucketStats?.maxBucketSize || 0,
+              oversizedBucketCount: pairKeys.bucketStats?.oversizedBucketCount || 0,
+              scoredPairs: pairs.scoreStats?.scoredPairs || pairKeys.size,
+              retainedPairs: currentPairs.length,
+              resultGroups: groups.length
+            }
+          }
+        }
+      : {})
   };
 }
 
@@ -2795,6 +2964,35 @@ function createContactScoreCache() {
   };
 }
 
+function serializePairScore(pair) {
+  return {
+    key: pair.key || symmetricPairKey(recordKey(pair.left), recordKey(pair.right)),
+    leftIndex: pair.left.__rowIndex,
+    rightIndex: pair.right.__rowIndex,
+    value: pair.value,
+    fieldMatchRatio: pair.fieldMatchRatio || 0,
+    type: pair.type || "",
+    reasons: Array.isArray(pair.reasons) ? [...pair.reasons] : [],
+    fieldScores: pair.fieldScores ? { ...pair.fieldScores } : {}
+  };
+}
+
+function inflatePairScore(pairScore, preparedRows) {
+  const left = preparedRows[pairScore.leftIndex];
+  const right = preparedRows[pairScore.rightIndex];
+  if (!left || !right) return null;
+  return {
+    key: pairScore.key,
+    left,
+    right,
+    value: pairScore.value,
+    fieldMatchRatio: pairScore.fieldMatchRatio || 0,
+    type: pairScore.type || "",
+    reasons: Array.isArray(pairScore.reasons) ? [...pairScore.reasons] : [],
+    fieldScores: pairScore.fieldScores ? { ...pairScore.fieldScores } : {}
+  };
+}
+
 async function scoreCandidatePairsAsync(pairKeys, preparedRows, scorer, threshold, progress = async () => {}) {
   const keys = [...pairKeys];
   const pairs = [];
@@ -2821,6 +3019,72 @@ async function scoreCandidatePairsAsync(pairKeys, preparedRows, scorer, threshol
     retainedPairs: pairs.length
   };
   return pairs;
+}
+
+function isMatchingArtifactsCacheValid(cache, rows, objectType, mapping, highRecallMode) {
+  return Boolean(cache)
+    && cache.rows === rows
+    && cache.objectType === objectType
+    && cache.mappingSignature === mappingSignature(mapping)
+    && cache.highRecallMode === highRecallMode;
+}
+
+function mappingSignature(mapping) {
+  return JSON.stringify(
+    Object.entries(mapping || {})
+      .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+  );
+}
+
+async function rebuildGroupsFromMatchingArtifacts(cache, threshold, progress = async () => {}) {
+  if (!isMatchingArtifactsCacheValid(cache, state.rows, state.objectType, state.mapping, state.highRecallMode)) {
+    return buildGroupsAsync(state.rows, state.objectType, state.mapping, threshold, state.highRecallMode, progress);
+  }
+
+  const startedAt = performance.now();
+  await progress("Reusing prepared records.", 8);
+
+  const preparedRows = cache.preparedRows;
+  const scorer = createPairScorer(cache.objectType || state.objectType, cache.fieldStats);
+
+  await progress("Reusing cached pair scores.", 44);
+  const pairs = cache.pairScores
+    .map((pairScore) => inflatePairScore(pairScore, preparedRows))
+    .filter(Boolean);
+  const currentPairs = pairs.filter((pair) => pair.value >= threshold);
+
+  await progress("Building match groups.", 82);
+  const groupsByRoot = collectPairGroups(currentPairs, state.rows.length);
+  await yieldToBrowser();
+
+  const groups = [...groupsByRoot.values()]
+    .map((group) => summarizeGroup(group, preparedRows, scorer))
+    .filter((group) => group.score >= threshold)
+    .sort(compareGroups)
+    .map((group, index) => ({ ...group, id: index + 1 }));
+
+  const visibleGroups = groups.length || !Array.isArray(cache.groups) || !cache.groups.length
+    ? groups
+    : cache.groups
+        .filter((group) => group.score >= threshold && group.score <= state.maxThreshold)
+        .map((group, index) => ({ ...group, id: index + 1 }));
+
+  await progress("Rendering duplicate groups.", 96);
+  return {
+    groups: visibleGroups,
+    matchingStats: {
+      ...(cache.matchingStats || {}),
+      objectType: state.objectType,
+      rowCount: state.rows.length,
+      threshold,
+      cacheThreshold: cache.thresholdFloor || MATCHING_CACHE_MIN_THRESHOLD,
+      highRecallMode: state.highRecallMode,
+      elapsedMs: Math.round(performance.now() - startedAt),
+      retainedPairs: currentPairs.length,
+      resultGroups: visibleGroups.length
+    },
+    processingMode: "cache"
+  };
 }
 
 function collectPairGroups(pairs, rowCount) {
@@ -5032,6 +5296,9 @@ function renderSource() {
   els.fileName.textContent = state.loadingFileName || state.fileName || "Dataset import";
   els.fileMeta.textContent = sourceMetaText(config);
   els.sourcePill.textContent = state.isLoadingFile ? "Loading" : state.rows.length ? "Loaded" : "No file";
+  els.sourcePill.dataset.lastProcessingMode = state.lastProcessingMode || "";
+  els.sourcePill.dataset.groupCount = String(state.groups.length || 0);
+  els.sourcePill.dataset.resultGroups = String(state.lastMatchingStats?.resultGroups || 0);
   if (state.loadError && !state.isLoadingFile) els.sourcePill.textContent = "Error";
   els.sourcePill.classList.toggle("is-loaded", Boolean(state.rows.length) && !state.isLoadingFile);
   els.sourcePill.classList.toggle("is-loading", state.isLoadingFile);
