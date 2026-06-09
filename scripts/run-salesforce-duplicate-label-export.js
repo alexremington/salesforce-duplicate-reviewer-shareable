@@ -4,6 +4,7 @@ const childProcess = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const readline = require("node:readline/promises");
+const managedPlatform = require("../vendor/managed-app/scripts/platform");
 
 const PROJECT_DIR = path.resolve(__dirname, "..");
 const DEFAULT_ORG_ALIAS = "politico";
@@ -11,6 +12,11 @@ const DEFAULT_INSTANCE_URL = "https://politico.my.salesforce.com";
 const DEFAULT_API_VERSION = "v64.0";
 const DUPLICATE_ITEMS_CSV_NAME = "salesforce-duplicate-record-items-latest.csv";
 const DUPLICATE_ITEMS_JSON_NAME = "salesforce-duplicate-record-items-latest.json";
+const RUNTIME_ENV = managedPlatform.withCommandPath(
+  process.env,
+  managedPlatform.defaultCommandPath({ env: process.env, platform: process.platform, includeSalesforceCli: true }),
+  process.platform
+);
 
 main().catch((error) => {
   console.error(error.message || error);
@@ -98,6 +104,7 @@ async function runExport({
 
   const accessToken = fetchSalesforceAccessToken(orgAlias);
   runNodeScript("scripts/fetch-salesforce-bulk-query.js", {
+    ...RUNTIME_ENV,
     SF_ACCESS_TOKEN: accessToken,
     SF_INSTANCE_URL: instanceUrl,
     SF_API_VERSION: apiVersion
@@ -109,12 +116,12 @@ async function runExport({
     "--poll-ms", pollMs
   ]);
 
-  runNodeScript("scripts/csv-to-salesforce-json.js", process.env, [
+  runNodeScript("scripts/csv-to-salesforce-json.js", RUNTIME_ENV, [
     "--input", latestCsvPath,
     "--output", latestJsonPath
   ]);
 
-  runNodeScript("scripts/export-salesforce-duplicate-training-labels.js", process.env, [
+  runNodeScript("scripts/export-salesforce-duplicate-training-labels.js", RUNTIME_ENV, [
     "--duplicate-items", latestCsvPath,
     "--source", sourcePath,
     "--object", objectType,
@@ -196,7 +203,12 @@ function defaultQueryFile(objectType) {
 }
 
 function fetchSalesforceAccessToken(orgAlias) {
-  const raw = childProcess.execFileSync("sf", ["org", "auth", "show-access-token", "--target-org", orgAlias, "--json"], {
+  const sfExecutable = managedPlatform.resolveExecutable("sf", {
+    env: RUNTIME_ENV,
+    platform: process.platform
+  }) || "sf";
+  const raw = childProcess.execFileSync(sfExecutable, ["org", "auth", "show-access-token", "--target-org", orgAlias, "--json"], {
+    env: RUNTIME_ENV,
     encoding: "utf8"
   });
   const parsed = JSON.parse(raw);
@@ -210,10 +222,7 @@ function runNodeScript(scriptRelativePath, extraEnv, args) {
   const scriptPath = path.join(PROJECT_DIR, scriptRelativePath);
   const result = childProcess.spawnSync(process.execPath, [scriptPath, ...args], {
     cwd: PROJECT_DIR,
-    env: {
-      ...process.env,
-      ...extraEnv
-    },
+    env: { ...RUNTIME_ENV, ...extraEnv },
     stdio: "inherit"
   });
   if (result.status !== 0) {

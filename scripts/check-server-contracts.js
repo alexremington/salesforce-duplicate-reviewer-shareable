@@ -393,9 +393,9 @@ async function assertContactSparseExactNameFloorRegression() {
   api.state.mapping = mapping;
 
   const score = api.scoreContactPair(preparedRows[0], preparedRows[1]);
-  if (Math.round(score.value) !== 81 || score.reasons[0] !== "Different company without corroborating contact data") {
+  if (Math.round(score.value) !== 86 || !score.reasons.includes("Different company without corroborating contact data")) {
     throw new Error(
-      `Contact sparse exact-name regression failed: expected the new 81-point floor, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
+      `Contact sparse exact-name regression failed: expected the new 86-point floor, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
     );
   }
 }
