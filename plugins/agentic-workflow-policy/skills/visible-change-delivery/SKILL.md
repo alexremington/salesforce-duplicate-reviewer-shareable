@@ -14,7 +14,7 @@ Use this skill for user-visible work that needs a disciplined path from design t
 3. Implement the source change and the regression together.
 4. Run the repo-local validation gates that apply to the change.
 5. Verify the launched app or runtime copy, not only the checkout.
-6. Finish with clean status, then commit and push when the user expects the work shared.
+6. Finish with clean status, run `npm run closeout`, then commit and push when the user expects the work shared.
 
 ## Rules
 

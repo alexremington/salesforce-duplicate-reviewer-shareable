@@ -2,8 +2,8 @@
 
 Run this before committing or sharing Duplicate Reviewer changes.
 
-1. Confirm `git status --short` and account for every changed, untracked, or generated file.
-2. Run `npm run verify:release` and keep the generated `.managed-app-pipeline/<timestamp>-release/summary.md` as release evidence.
+1. Run `npm run verify:release` and keep the generated `.managed-app-pipeline/<timestamp>-release/summary.md` as release evidence.
+2. Run `npm run closeout` and account for every changed, untracked, or generated file before handoff or push.
 3. Confirm the release evidence includes `npm run check:features`. New feature work must have a `feature-test-manifest.json` entry and a linked `docs/features/<slug>.md` brief before release.
 4. Confirm the release evidence includes the shared Hume design check. Visible UI changes must align with `docs/HUME-DESIGN-REVIEW.md`.
 5. Confirm the release evidence includes `npm run check`. This includes syntax, metadata, shareable-branch safety, and live server contract checks.

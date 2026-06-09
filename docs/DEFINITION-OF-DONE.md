@@ -23,6 +23,7 @@ A Duplicate Reviewer change is done when the implementation, verification, and s
 - Every fixed user-visible bug has a named regression assertion in the check or smoke harness.
 - `npm run check` passes, including live server contract checks for current health and API routes.
 - `npm run smoke:ui:local` passes after UI changes.
+- `npm run closeout` passes before the work is handed off or pushed.
 - Stale runtime checks reject or restart any running server whose health or API contract does not match the current source.
 - CI is green before treating the change as ready to share.
 - Setup, maintenance, or handoff docs are updated when behavior changes.

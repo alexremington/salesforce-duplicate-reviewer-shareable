@@ -45,6 +45,7 @@ These instructions apply to this repository and its subdirectories.
 - If a commit intentionally retires or renames a protected flow, update the guardrail and smoke assertions in the same change before pushing.
 - Do not commit a broad sync or cleanup that deletes protected workflow code unless you have manually reviewed the removed sections and confirmed the replacement behavior is intentional.
 - Treat `npm run check` as the minimum pre-commit gate, then run `npm run smoke:ui:local` before pushing any user-visible change.
+- Run `npm run closeout` before handoff so the working tree is clean and every remaining file is accounted for.
 - If a change touches the launcher or cached runtime path, confirm the live served bundle still reflects the current source before committing.
 
 ## Recommended Agent Workflow
