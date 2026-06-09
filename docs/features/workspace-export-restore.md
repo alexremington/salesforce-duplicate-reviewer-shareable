@@ -1,6 +1,6 @@
 # Workspace Export and Restore
 
-Status: in progress
+Status: complete
 Manifest ID: workspace-export-restore
 
 ## User Story
