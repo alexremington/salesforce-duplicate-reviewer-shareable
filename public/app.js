@@ -423,6 +423,8 @@ const CONTACT_COMPANY_GEOGRAPHY_CONFLICT_CAP = 72;
 const CONTACT_COMPANY_ALIGNMENT_THRESHOLD = 0.85;
 const CONTACT_EMAIL_ORG_CORROBORATION_FLOOR = 88;
 const CONTACT_CORROBORATED_EXACT_NAME_FLOOR = 86;
+const CONTACT_SPARSE_EXACT_NAME_FLOOR = 81;
+const CONTACT_EXACT_NAME_NEAR_COMPANY_CAP = 79;
 const CONTACT_FIRST_NAME_COMPANY_DOMAIN_FLOOR = 86;
 const CONTACT_SHORT_GIVEN_NAME_CONFLICT_CAP = 85;
 const CONTACT_EMAIL_CONTEXT_CORROBORATION_MIN = 0.5;
@@ -3837,6 +3839,20 @@ function scoreContactPair(left, right, cache = null) {
     }
     if (hasCorroboratedExactContactName(exactFullName, left, right, companySimilarity, emailSimilarity, sameEmailDomain, emailOrgCorroboration)) {
       value = Math.max(value, CONTACT_CORROBORATED_EXACT_NAME_FLOOR);
+    }
+    if (exactFullName && (companySimilarity || 0) === 0 && !strongIdentityCorroboration) {
+      value = Math.max(value, CONTACT_SPARSE_EXACT_NAME_FLOOR);
+    }
+    if (
+      exactFullName &&
+      (companySimilarity || 0) >= 0.86 &&
+      (companySimilarity || 0) < 0.9 &&
+      (emailSimilarity || 0) < 0.2 &&
+      !strongIdentityCorroboration &&
+      !sameEmailDomain &&
+      !emailOrgCorroboration
+    ) {
+      value = Math.min(value, CONTACT_EXACT_NAME_NEAR_COMPANY_CAP);
     }
     if (hasContactFirstNameCompanyDomainCorroboration(left, right, companySimilarity, sameEmailDomain)) {
       value = Math.max(value, CONTACT_FIRST_NAME_COMPANY_DOMAIN_FLOOR);

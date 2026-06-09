@@ -99,6 +99,7 @@ async function main() {
     await assertLatestEndpointCaching(baseUrl);
     await assertCodexTrainingLaunchCommand(baseUrl);
     await assertAccountScopeDivergenceRegression();
+    await assertContactSparseExactNameFloorRegression();
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/premerge-check");
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/merge");
     await assertSalesforcePreMergeWithWarningCli(baseUrl);
@@ -373,6 +374,32 @@ async function assertAccountScopeDivergenceRegression() {
   }
 }
 
+async function assertContactSparseExactNameFloorRegression() {
+  const api = loadAppApi();
+  const csv = [
+    "Id,Name,Company,Email,Phone,Mobile,LinkedIn__c,ZI_Person_LinkedIn_URL__c",
+    "003A00000000001,Taylor Mason,,taylor.mason@alpha.example,,,,",
+    "003A00000000002,Taylor Mason,,taylor.mason@sample.net,,,,"
+  ].join("\n");
+  const parsed = api.parseCsv(csv);
+  const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
+  const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
+  const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.contact.fields);
+  const preparedRows = api.prepareRows(rows, "contact", mapping);
+
+  api.state.objectType = "contact";
+  api.state.rows = rows;
+  api.state.headers = headers;
+  api.state.mapping = mapping;
+
+  const score = api.scoreContactPair(preparedRows[0], preparedRows[1]);
+  if (Math.round(score.value) !== 81 || score.reasons[0] !== "Different company without corroborating contact data") {
+    throw new Error(
+      `Contact sparse exact-name regression failed: expected the new 81-point floor, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
+    );
+  }
+}
+
 function loadAppApi() {
   const context = {
     console,
@@ -398,6 +425,7 @@ globalThis.__api = {
   prepareRows,
   buildFieldStats,
   scoreAccountPair,
+  scoreContactPair,
   getValue
 };`,
     context
