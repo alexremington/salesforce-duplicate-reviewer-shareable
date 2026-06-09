@@ -1,3 +1,2 @@
-SELECT DuplicateRecordSetId, DuplicateRecordSet.SObjectType, RecordId
+SELECT DuplicateRecordSetId, RecordId
 FROM DuplicateRecordItem
-WHERE DuplicateRecordSet.SObjectType = 'Contact'

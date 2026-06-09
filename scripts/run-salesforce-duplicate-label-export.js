@@ -36,7 +36,7 @@ async function main() {
   const orgAlias = process.env.SF_ORG_ALIAS || DEFAULT_ORG_ALIAS;
   const instanceUrl = process.env.SF_INSTANCE_URL || DEFAULT_INSTANCE_URL;
   const apiVersion = process.env.SF_API_VERSION || DEFAULT_API_VERSION;
-  const queryFile = process.env.SF_SOQL_FILE || defaultQueryFile(objectType);
+  const queryFile = resolveQueryFile(objectType);
   const pollMs = String(process.env.BULK_POLL_MS || 60000);
 
   if (!objectType) {
@@ -51,7 +51,7 @@ async function main() {
       orgAlias,
       instanceUrl,
       apiVersion,
-      queryFile: defaultQueryFile(promptedObjectType),
+    queryFile: resolveQueryFile(promptedObjectType),
       pollMs
     });
   }
@@ -167,7 +167,7 @@ function printDryRun(parsed) {
   const duplicateItemsDir = parsed.duplicateItemsDir || process.env.DUPLICATE_ITEMS_DIR || defaultDuplicateItemsDir(objectType);
   const outputFile = parsed.outputFile || process.env.OUTPUT_FILE || defaultOutputFile(objectType);
   const sourceCsv = parsed.sourceCsv || process.env.SOURCE_CSV || defaultSourceCsv(objectType);
-  const queryFile = process.env.SF_SOQL_FILE || defaultQueryFile(objectType);
+  const queryFile = resolveQueryFile(objectType);
 
   console.log(`Project: ${PROJECT_DIR}`);
   console.log(`Object type: ${objectType}`);
@@ -201,6 +201,22 @@ function defaultOutputDir(objectType) {
 
 function defaultQueryFile(objectType) {
   return path.join(PROJECT_DIR, "queries", `${objectType}-duplicate-record-items.soql`);
+}
+
+function defaultQueryExampleFile(objectType) {
+  return path.join(PROJECT_DIR, "queries", `${objectType}-duplicate-record-items.soql.example`);
+}
+
+function resolveQueryFile(objectType) {
+  const explicit = process.env.SF_SOQL_FILE;
+  if (explicit) return explicit;
+
+  const candidates = [defaultQueryFile(objectType), defaultQueryExampleFile(objectType)];
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) return candidate;
+  }
+
+  return defaultQueryFile(objectType);
 }
 
 function defaultSourceCsv(objectType) {
