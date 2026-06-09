@@ -99,6 +99,7 @@ async function main() {
     await assertLatestEndpointCaching(baseUrl);
     await assertCodexTrainingLaunchCommand(baseUrl);
     await assertAccountScopeDivergenceRegression();
+    await assertAccountExactWebsiteCorroborationRegression();
     await assertContactSparseExactNameFloorRegression();
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/premerge-check");
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/merge");
@@ -370,6 +371,33 @@ async function assertAccountScopeDivergenceRegression() {
   if (Math.round(score.value) !== 85 || !score.reasons.includes("Different account scope")) {
     throw new Error(
       `Account scope divergence regression failed: expected exact website to cap at 85 with a scope reason, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
+    );
+  }
+}
+
+async function assertAccountExactWebsiteCorroborationRegression() {
+  const api = loadAppApi();
+  const csv = [
+    "Id,Name,BillingStreet,BillingCity,CurrencyIsoCode",
+    "001C,European Service Network S.A.,1 Rue Example,Brussels,USD",
+    "001D,European Service Network S.A.,1 Rue Example,Brussels,EUR"
+  ].join("\n");
+  const parsed = api.parseCsv(csv);
+  const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
+  const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
+  const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.account.fields);
+  const preparedRows = api.prepareRows(rows, "account", mapping);
+
+  api.state.objectType = "account";
+  api.state.rows = rows;
+  api.state.headers = headers;
+  api.state.mapping = mapping;
+
+  const fieldStats = api.buildFieldStats(preparedRows, "account");
+  const score = api.scoreAccountPair(preparedRows[0], preparedRows[1], fieldStats);
+  if (Math.round(score.value) !== 92 || !score.reasons.includes("Exact duplicate corroboration")) {
+    throw new Error(
+      `Account exact-billing corroboration regression failed: expected the Salesforce-calibrated floor at 92, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
     );
   }
 }

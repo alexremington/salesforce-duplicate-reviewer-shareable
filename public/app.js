@@ -4370,9 +4370,10 @@ function applyAccountExactDuplicateFloor(value, fieldScores, left, right) {
 
 function hasStrongExactAccountDuplicateCorroboration(fieldScores, left, right) {
   if (fieldScores.name !== 1) return false;
-  if (!hasStrongExactBillingAddress(fieldScores)) return false;
-
-  return fieldScores.website === 1 || fieldScores.ultimateParentAccount === 1 || left.hasStatusMarker || right.hasStatusMarker;
+  if (fieldScores.website === 1) return true;
+  if (fieldScores.ultimateParentAccount === 1) return true;
+  if (hasStrongExactBillingAddress(fieldScores)) return true;
+  return left.hasStatusMarker || right.hasStatusMarker;
 }
 
 function hasStrongExactBillingAddress(fieldScores) {

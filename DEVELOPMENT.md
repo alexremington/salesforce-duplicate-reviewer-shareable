@@ -203,6 +203,8 @@ Use `scripts/check-account-calibration.js` after account or contact scoring chan
 
 The `--assert-threshold` option turns the report into a regression check. It exits non-zero if a labeled `match` scores below the threshold or a labeled `not_match` scores at or above the threshold. The script intentionally ignores `unsure` labels for pass/fail checks.
 
+Live Salesforce duplicate-item exports are especially useful for account calibration because they surface exact-name pairs that should stay high even when the duplicate set only corroborates them through a shared website, parent, or billing address.
+
 ## Best-Practice Alignment
 
 The current logic follows several common deduplication practices: typed normalization, blocking/candidate generation, weighted field scoring, explicit blank-value handling, frequency-aware positive evidence discounting for accounts, contradiction penalties for diverging account fields, whole-cluster scoring, and human review before export.
