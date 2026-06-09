@@ -1,6 +1,6 @@
 # Multi-Group Merge Preview Confirmation
 
-Status: in-progress
+Status: complete
 Manifest ID: merge-preview-confirmation
 
 ## User Story
@@ -57,7 +57,7 @@ Manifest ID: merge-preview-confirmation
 
 ## Release Evidence
 
-- Fast check evidence: pending implementation
-- Playwright evidence: pending implementation
-- Release pipeline evidence: not required before local feature completion
-- Known gaps: queued-group selection rules and whether only `Duplicate`-marked groups enter the review set should be finalized during implementation.
+- Fast check evidence: `npm run check` passed on 2026-06-09.
+- Playwright evidence: `npm run smoke:ui:local` passed on 2026-06-09.
+- Release pipeline evidence: handled by repo closeout.
+- Known gaps: none documented.

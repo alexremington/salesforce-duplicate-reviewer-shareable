@@ -1,6 +1,6 @@
 # Dataset Export With Scores
 
-Status: in-progress
+Status: complete
 Manifest ID: dataset-export-with-scores
 
 ## User Story
@@ -51,7 +51,7 @@ Manifest ID: dataset-export-with-scores
 
 ## Release Evidence
 
-- Fast check evidence: pending.
-- Playwright evidence: pending.
-- Release pipeline evidence: pending.
-- Known gaps: none documented yet.
+- Fast check evidence: `npm run check` passed on 2026-06-09.
+- Playwright evidence: `npm run smoke:ui:local` passed on 2026-06-09.
+- Release pipeline evidence: handled by repo closeout.
+- Known gaps: none documented.

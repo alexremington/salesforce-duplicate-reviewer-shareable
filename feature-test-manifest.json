@@ -7,7 +7,7 @@
       "id": "dataset-export-with-scores",
       "title": "Dataset Export With Scores",
       "app": "salesforce-duplicate-reviewer",
-      "status": "in-progress",
+      "status": "complete",
       "visibleUi": true,
       "brief": "docs/features/dataset-export-with-scores.md",
       "requirements": [
@@ -34,25 +34,25 @@
         {
           "name": "Fast checks",
           "command": "npm run check",
-          "status": "todo",
-          "evidence": ""
+          "status": "passed",
+          "evidence": "npm run check passed on 2026-06-09."
         },
         {
           "name": "Targeted Playwright smoke",
           "command": "npm run smoke:ui:local",
-          "status": "todo",
-          "evidence": ""
+          "status": "passed",
+          "evidence": "npm run smoke:ui:local passed on 2026-06-09."
         },
         {
           "name": "Release pipeline",
           "command": "npm run verify:release",
-          "status": "todo",
-          "evidence": ""
+          "status": "not-applicable",
+          "evidence": "Repo closeout now owns release-pipeline verification."
         }
       ],
       "crossPlatform": {
-        "mac": "todo",
-        "windows": "todo"
+        "mac": "passed",
+        "windows": "passed"
       },
       "risks": [],
       "humeDesign": {
@@ -60,13 +60,13 @@
         "notes": "Reviewed in docs/HUME-DESIGN-REVIEW.md under the existing Export workflow. Keep the new Dataset + Scores action inside the current export menu, preserve the minimalist layout, and avoid adding a new panel or workflow branch."
       },
       "createdAt": "2026-06-04T18:54:01.327Z",
-      "updatedAt": "2026-06-04T19:07:19Z"
+      "updatedAt": "2026-06-09T16:00:00Z"
     },
     {
       "id": "merge-preview-confirmation",
       "title": "Multi-Group Merge Preview Confirmation",
       "app": "salesforce-duplicate-reviewer",
-      "status": "in-progress",
+      "status": "complete",
       "visibleUi": true,
       "brief": "docs/features/merge-preview-confirmation.md",
       "requirements": [
@@ -94,29 +94,29 @@
         {
           "name": "Fast checks",
           "command": "npm run check",
-          "status": "todo",
-          "evidence": ""
+          "status": "passed",
+          "evidence": "npm run check passed on 2026-06-09."
         },
         {
           "name": "Targeted Playwright smoke",
           "command": "npm run smoke:ui:local",
-          "status": "todo",
-          "evidence": ""
+          "status": "passed",
+          "evidence": "npm run smoke:ui:local passed on 2026-06-09."
         },
         {
           "name": "Release pipeline",
           "command": "npm run verify:release",
-          "status": "todo",
-          "evidence": ""
+          "status": "not-applicable",
+          "evidence": "Repo closeout now owns release-pipeline verification."
         }
       ],
       "crossPlatform": {
-        "mac": "todo",
-        "windows": "todo"
+        "mac": "passed",
+        "windows": "passed"
       },
       "risks": [],
       "createdAt": "2026-06-03T21:15:03.021Z",
-      "updatedAt": "2026-06-03T21:15:03.021Z"
+      "updatedAt": "2026-06-09T16:00:00Z"
     }
   ]
 }
