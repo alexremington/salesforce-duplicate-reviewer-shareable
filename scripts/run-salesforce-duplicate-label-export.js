@@ -3,6 +3,7 @@
 const childProcess = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+const os = require("node:os");
 const readline = require("node:readline/promises");
 const managedPlatform = require("../vendor/managed-app/scripts/platform");
 
@@ -29,7 +30,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const objectType = normalizeObjectType(args.objectType || process.env.OBJECT_TYPE || "");
   const interactive = process.stdin.isTTY && process.stdout.isTTY;
-  const sourceCsv = args.sourceCsv || process.env.SOURCE_CSV || (interactive ? await prompt("Path to source CSV: ") : "");
+  const sourceCsv = args.sourceCsv || process.env.SOURCE_CSV || existingDefaultSourceCsv(objectType) || (interactive ? await prompt("Path to source CSV: ") : "");
   const outputFile = args.outputFile || process.env.OUTPUT_FILE || defaultOutputFile(objectType);
   const duplicateItemsDir = args.duplicateItemsDir || process.env.DUPLICATE_ITEMS_DIR || defaultDuplicateItemsDir(objectType);
   const orgAlias = process.env.SF_ORG_ALIAS || DEFAULT_ORG_ALIAS;
@@ -44,7 +45,7 @@ async function main() {
     if (!promptedObjectType) throw new Error("Missing or unsupported object type. Pass --object account or --object contact.");
     return runExport({
       objectType: promptedObjectType,
-      sourceCsv: sourceCsv || (await prompt("Path to source CSV: ")),
+      sourceCsv: sourceCsv || existingDefaultSourceCsv(promptedObjectType) || (await prompt("Path to source CSV: ")),
       outputFile,
       duplicateItemsDir,
       orgAlias,
@@ -63,7 +64,7 @@ async function main() {
 
   await runExport({
     objectType,
-    sourceCsv: sourceCsv || (await prompt("Path to source CSV: ")),
+    sourceCsv: sourceCsv || existingDefaultSourceCsv(objectType) || (await prompt("Path to source CSV: ")),
     outputFile,
     duplicateItemsDir,
     orgAlias,
@@ -165,7 +166,7 @@ function printDryRun(parsed) {
   const objectType = normalizeObjectType(parsed.objectType || process.env.OBJECT_TYPE || "") || "account";
   const duplicateItemsDir = parsed.duplicateItemsDir || process.env.DUPLICATE_ITEMS_DIR || defaultDuplicateItemsDir(objectType);
   const outputFile = parsed.outputFile || process.env.OUTPUT_FILE || defaultOutputFile(objectType);
-  const sourceCsv = parsed.sourceCsv || process.env.SOURCE_CSV || "<required>";
+  const sourceCsv = parsed.sourceCsv || process.env.SOURCE_CSV || defaultSourceCsv(objectType);
   const queryFile = process.env.SF_SOQL_FILE || defaultQueryFile(objectType);
 
   console.log(`Project: ${PROJECT_DIR}`);
@@ -200,6 +201,41 @@ function defaultOutputDir(objectType) {
 
 function defaultQueryFile(objectType) {
   return path.join(PROJECT_DIR, "queries", `${objectType}-duplicate-record-items.soql`);
+}
+
+function defaultSourceCsv(objectType) {
+  const resolvedObjectType = normalizeObjectType(objectType);
+  if (!resolvedObjectType) return "";
+
+  const envSource =
+    resolvedObjectType === "contact" ? process.env.STAGING_CONTACTS_CSV : process.env.STAGING_ACCOUNTS_CSV;
+  if (envSource) return envSource;
+
+  const stagingRoot = process.env.DUPLICATE_REVIEWER_STAGING_ROOT || defaultStagingRoot();
+  const outDir = path.join(stagingRoot, "Output", `staging-${resolvedObjectType === "contact" ? "contacts" : "accounts"}`);
+  return path.join(outDir, "salesforce-report-latest.csv");
+}
+
+function existingDefaultSourceCsv(objectType) {
+  const candidate = defaultSourceCsv(objectType);
+  return candidate && fs.existsSync(candidate) ? candidate : "";
+}
+
+function defaultStagingRoot() {
+  if (process.platform === "win32") {
+    return path.join(os.homedir(), "OneDrive - POLITICO", "Salesforce Pulls", "Duplicate Reviewer", "staging");
+  }
+
+  return path.join(
+    os.homedir(),
+    "Library",
+    "CloudStorage",
+    "OneDrive-POLITICO",
+    "Automation Projects",
+    "Salesforce Pulls",
+    "Duplicate Reviewer",
+    "staging"
+  );
 }
 
 function fetchSalesforceAccessToken(orgAlias) {

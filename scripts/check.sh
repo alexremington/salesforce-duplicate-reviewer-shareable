@@ -69,6 +69,16 @@ if ! grep -Fq "sf org auth show-access-token" scripts/run-salesforce-bulk-query.
   echo "Bulk query wrapper did not use sf org auth show-access-token."
   exit 1
 fi
+
+labelsDryRun="$(node scripts/run-salesforce-duplicate-label-export.js --object contact --dry-run)"
+case "${labelsDryRun}" in
+  *"Source CSV: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.csv"*) ;;
+  *)
+    echo "${labelsDryRun}"
+    echo "Duplicate labels export did not default to the canonical staging Contacts CSV."
+    exit 1
+    ;;
+esac
 accountsDryRun="$(scripts/run-staging-accounts-bulk-query.sh --dry-run)"
 case "${accountsDryRun}" in
   *"/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-accounts"*) ;;

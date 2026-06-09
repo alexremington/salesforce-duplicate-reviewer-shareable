@@ -164,7 +164,7 @@ If you want a clickable launcher instead of Terminal, open:
 - `Launch Duplicate Labels Export - Mac.command`
 - `Launch Duplicate Labels Export - Windows.cmd`
 
-Those launchers prompt for the object type and source CSV path, then call the portable Node launcher.
+Those launchers default to the canonical staging Contacts or Accounts CSV when it exists, fall back to prompting only if the file is missing, then call the portable Node launcher.
 
 ## Local Server Helpers
 

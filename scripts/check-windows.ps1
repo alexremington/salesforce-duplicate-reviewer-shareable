@@ -83,6 +83,18 @@ if ($LASTEXITCODE -ne 0) {
   throw 'Server contract checks failed.'
 }
 
+Write-Host 'Checking duplicate labels export defaults...'
+$labelsDryRun = (& node scripts/run-salesforce-duplicate-label-export.js --object contact --dry-run) -join "`n"
+$expectedLabelsSource = if ($IsWindows) {
+  'Source CSV: C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.csv'
+} else {
+  "Source CSV: $HOME/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.csv"
+}
+if ($labelsDryRun -notmatch [regex]::Escape($expectedLabelsSource)) {
+  Write-Host $labelsDryRun
+  throw 'Duplicate labels export did not default to the canonical staging Contacts CSV.'
+}
+
 Write-Host 'Checking staging routing defaults...'
 $contactsOutDir = 'C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts'
 $accountsOutDir = 'C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-accounts'

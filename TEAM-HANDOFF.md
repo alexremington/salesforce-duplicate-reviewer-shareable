@@ -12,7 +12,7 @@ Share a GitHub Release archive or a clean clone of the public-safe branch. Do no
 4. Open `public/index.html` for file-only review, or start the server with the Mac `.command` or Windows `.cmd` launcher.
 5. Use `Choose CSV` or `Load Demo` to confirm the UI renders correctly.
 
-For duplicate-label exports, double-click `Launch Duplicate Labels Export - Mac.command` on macOS or `Launch Duplicate Labels Export - Windows.cmd` on Windows. Those launchers prompt for the object type and source CSV, then write app-ready training labels under `Output/` by default.
+For duplicate-label exports, double-click `Launch Duplicate Labels Export - Mac.command` on macOS or `Launch Duplicate Labels Export - Windows.cmd` on Windows. Those launchers default to the canonical staging Contacts or Accounts CSV when it exists, fall back to prompting only if the file is missing, then write app-ready training labels under `Output/` by default.
 
 Use the launcher for normal server-backed work. When latest Contact or Account exports exist under `Output/`, the app adds them to `Recent files` automatically.
 
