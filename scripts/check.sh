@@ -41,6 +41,30 @@ case "${contactsDryRun}" in
     exit 1
     ;;
 esac
+case "${contactsDryRun}" in
+  *"Bulk poll interval ms: 5000"*) ;;
+  *)
+    echo "${contactsDryRun}"
+    echo "Staging Contacts bulk polling was not pinned to the faster handoff interval."
+    exit 1
+    ;;
+esac
+case "${contactsDryRun}" in
+  *"Latest JSON: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.json"*) ;;
+  *)
+    echo "${contactsDryRun}"
+    echo "Staging Contacts did not preserve the canonical latest JSON output flow."
+    exit 1
+    ;;
+esac
+case "${contactsDryRun}" in
+  *"Compatibility CSV: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.csv"*) ;;
+  *)
+    echo "${contactsDryRun}"
+    echo "Staging Contacts did not preserve the canonical compatibility CSV output flow."
+    exit 1
+    ;;
+esac
 if ! grep -Fq "sf org auth show-access-token" scripts/run-salesforce-bulk-query.sh; then
   echo "Bulk query wrapper did not use sf org auth show-access-token."
   exit 1
@@ -51,6 +75,30 @@ case "${accountsDryRun}" in
   *)
     echo "${accountsDryRun}"
     echo "Staging Accounts did not resolve to the canonical Salesforce Pulls staging folder."
+    exit 1
+    ;;
+esac
+case "${accountsDryRun}" in
+  *"Bulk poll interval ms: 5000"*) ;;
+  *)
+    echo "${accountsDryRun}"
+    echo "Staging Accounts bulk polling was not pinned to the faster handoff interval."
+    exit 1
+    ;;
+esac
+case "${accountsDryRun}" in
+  *"Latest JSON: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-accounts/salesforce-report-latest.json"*) ;;
+  *)
+    echo "${accountsDryRun}"
+    echo "Staging Accounts did not preserve the canonical latest JSON output flow."
+    exit 1
+    ;;
+esac
+case "${accountsDryRun}" in
+  *"Compatibility CSV: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-accounts/salesforce-report-latest.csv"*) ;;
+  *)
+    echo "${accountsDryRun}"
+    echo "Staging Accounts did not preserve the canonical compatibility CSV output flow."
     exit 1
     ;;
 esac

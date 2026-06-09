@@ -18,7 +18,7 @@ export DUPLICATE_REVIEWER_STAGING_ROOT="${DUPLICATE_REVIEWER_STAGING_ROOT:-${HOM
 export OUT_DIR="${OUT_DIR:-${DUPLICATE_REVIEWER_STAGING_ROOT}/Output/staging-accounts}"
 export LATEST_CSV_NAME="${LATEST_CSV_NAME:-salesforce-report-latest.csv}"
 export LATEST_JSON_NAME="${LATEST_JSON_NAME:-salesforce-report-latest.json}"
-export BULK_POLL_MS="${BULK_POLL_MS:-60000}"
+export BULK_POLL_MS="${BULK_POLL_MS:-5000}"
 
 if [[ "${1:-}" == "--background" ]]; then
   shift
