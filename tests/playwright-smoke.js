@@ -91,7 +91,7 @@ async function run() {
     const brandLogo = await brandLogoState(page);
     await page.screenshot({ path: path.join(outDir, "desktop-empty.png"), fullPage: false });
     const emptyInteractiveReachability = await visibleInteractiveReachability(page);
-    const workspaceImportVisible = await page.locator("#workspaceImportInput").isVisible();
+    const workspaceImportBox = await page.locator("#workspaceImportInput").boundingBox();
     await page.emulateMedia({ colorScheme: "dark" });
     await page.waitForTimeout(100);
     const darkTheme = await themeColorState(page);
@@ -377,8 +377,8 @@ async function run() {
     if (!brandLogo.actionsCentered || !brandLogo.actionRowsBalanced || !brandLogo.actionsComfortable) {
       throw new Error(`Expected Duplicate Reviewer header buttons to be centered in balanced, legible rows: ${JSON.stringify(brandLogo)}`);
     }
-    if (workspaceImportVisible) {
-      throw new Error("Expected the workspace import file input to stay hidden behind the Import menu.");
+    if (!workspaceImportBox || workspaceImportBox.width > 4 || workspaceImportBox.height > 4) {
+      throw new Error(`Expected the workspace import file input to stay tiny and out of the header flow: ${JSON.stringify(workspaceImportBox)}`);
     }
     if (brandLogo.actionTexts.join("|") !== "Import|Export >|?|Send to Codex|Demo Data") {
       throw new Error(`Expected Duplicate Reviewer header actions to be simplified and ordered: ${JSON.stringify(brandLogo)}`);
