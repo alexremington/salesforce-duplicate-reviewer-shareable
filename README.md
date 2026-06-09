@@ -113,6 +113,8 @@ Copy one of the example SOQL files and edit it for your org:
 ```bash
 cp queries/contacts.soql.example queries/contacts.soql
 cp queries/accounts.soql.example queries/accounts.soql
+cp queries/account-duplicate-record-items.soql.example queries/account-duplicate-record-items.soql
+cp queries/contact-duplicate-record-items.soql.example queries/contact-duplicate-record-items.soql
 ```
 
 Run a fetch with environment variables:
@@ -127,6 +129,42 @@ scripts/run-salesforce-bulk-query.sh
 ```
 
 Generated CSV/JSON exports are written under `Output/`, which is ignored by Git.
+
+## Salesforce Duplicate Sets To Match Labels
+
+If Salesforce is already flagging duplicates, you can turn those duplicate sets into training labels for Match Score calibration.
+
+1. Export the duplicate items query above with `scripts/run-salesforce-bulk-query.sh`.
+2. Export your source dataset with the matching account or contact query.
+3. Convert both CSVs into app-ready labels:
+
+```bash
+node scripts/export-salesforce-duplicate-training-labels.js \
+  --duplicate-items "/path/to/duplicate-record-items.csv" \
+  --source "/path/to/source.csv" \
+  --object account \
+  --output "/path/to/account-duplicate-training-labels.csv"
+```
+
+The exported CSV uses the same label format as the app's `Export > Labels` workflow, so you can load it back into Duplicate Reviewer or feed it into `scripts/check-account-calibration.js`.
+
+For a one-command version that fetches the duplicate-items CSV and then builds the label file, use:
+
+```bash
+node scripts/run-salesforce-duplicate-label-export.js \
+  --object account \
+  --source "/path/to/accounts.csv" \
+  --output "/path/to/account-duplicate-training-labels.csv"
+```
+
+Use `--object contact` for the Contact workflow. The Node launcher writes object-specific outputs under `Output/account-duplicate-label-export/` or `Output/contact-duplicate-label-export/` by default.
+
+If you want a clickable launcher instead of Terminal, open:
+
+- `Launch Duplicate Labels Export - Mac.command`
+- `Launch Duplicate Labels Export - Windows.cmd`
+
+Those launchers prompt for the object type and source CSV path, then call the portable Node launcher.
 
 ## Local Server Helpers
 

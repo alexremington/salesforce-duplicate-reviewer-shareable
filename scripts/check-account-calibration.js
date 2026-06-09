@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const fs = require("node:fs");
+const path = require("node:path");
 const vm = require("node:vm");
 
 const DEFAULT_THRESHOLDS = [86, 90, 95, 99];
@@ -122,7 +123,7 @@ function loadAppApi() {
   context.globalThis = context;
   vm.createContext(context);
 
-  const appCode = fs.readFileSync("public/app.js", "utf8");
+  const appCode = fs.readFileSync(path.join(__dirname, "..", "public", "app.js"), "utf8");
   vm.runInContext(
     `${appCode}
 globalThis.__api = {

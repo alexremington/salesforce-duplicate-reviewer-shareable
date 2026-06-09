@@ -10,6 +10,8 @@
     "check:windows": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-windows.ps1",
     "check:shareable": "scripts/check-shareable.sh",
     "closeout": "node scripts/closeout.js",
+    "export:salesforce-duplicate-labels": "node scripts/export-salesforce-duplicate-training-labels.js",
+    "export:duplicate-labels": "node scripts/run-salesforce-duplicate-label-export.js",
     "feature:sync-status": "node scripts/sync-feature-status.js",
     "feature:new": "node ../automation-shared-resources/scripts/feature-new.js .",
     "sync:shared": "node ../automation-shared-resources/scripts/sync-shared-resources.js .",

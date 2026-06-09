@@ -1,0 +1,3 @@
+SELECT DuplicateRecordSetId, DuplicateRecordSet.SObjectType, RecordId
+FROM DuplicateRecordItem
+WHERE DuplicateRecordSet.SObjectType = 'Contact'
