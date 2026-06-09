@@ -8,6 +8,9 @@ const {
   visibleInteractiveReachability: sharedVisibleInteractiveReachability
 } = require("../vendor/managed-app/scripts/smoke-test-harness");
 const {
+  probeHitTarget
+} = require("../plugins/agentic-workflow-policy/scripts/playwright_hit_test_helpers");
+const {
   accountSmokeCsv,
   contactLastNameChangeSmokeCsv,
   contactMissingIdSmokeCsv,
@@ -133,6 +136,10 @@ async function run() {
     await setRangeValue(page, "#maxThreshold", "99");
     const thresholdReadout = await page.locator("#thresholdValue").textContent();
     const thresholdControl = await thresholdControlState(page);
+    const thresholdSliderRightHit = await probeHitTarget(page, "#thresholdSlider", "right");
+    if (thresholdSliderRightHit.id === "thresholdMaxNumber") {
+      throw new Error(`Expected threshold slider right edge to stay on the slider surface, not the numeric input: ${JSON.stringify(thresholdSliderRightHit)}`);
+    }
     await setNumberValue(page, "#thresholdMinNumber", "105");
     const thresholdClampState = await thresholdControlState(page);
     await setNumberValue(page, "#thresholdMinNumber", "80");
