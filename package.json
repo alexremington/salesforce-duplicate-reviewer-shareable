@@ -10,6 +10,7 @@
     "check:windows": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-windows.ps1",
     "check:shareable": "scripts/check-shareable.sh",
     "closeout": "node scripts/closeout.js",
+    "feature:sync-status": "node scripts/sync-feature-status.js",
     "feature:new": "node ../automation-shared-resources/scripts/feature-new.js .",
     "sync:shared": "node ../automation-shared-resources/scripts/sync-shared-resources.js .",
     "verify:all": "node ../automation-shared-resources/scripts/managed-app-pipeline.js --tier smoke",
