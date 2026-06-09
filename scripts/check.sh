@@ -46,6 +46,7 @@ if ! grep -Fq "sf org display" scripts/run-salesforce-bulk-query.sh; then
   exit 1
 fi
 labelsDryRun="$(node scripts/run-salesforce-duplicate-label-export.js --object contact --dry-run)"
+shareableStagingRoot="${HOME}/Salesforce Pulls/Duplicate Reviewer/staging"
 case "${labelsDryRun}" in
   *"SOQL file: ${PROJECT_DIR}/queries/contact-duplicate-record-items.soql"*) ;;
   *)
@@ -55,7 +56,7 @@ case "${labelsDryRun}" in
     ;;
 esac
 case "${labelsDryRun}" in
-  *"Source CSV: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.csv"*) ;;
+  *"Source CSV: ${shareableStagingRoot}/Output/staging-contacts/salesforce-report-latest.csv"*) ;;
   *)
     echo "${labelsDryRun}"
     echo "Duplicate labels export did not default to the canonical staging Contacts CSV."

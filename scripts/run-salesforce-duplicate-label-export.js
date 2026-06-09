@@ -9,7 +9,7 @@ const managedPlatform = require("../vendor/managed-app/scripts/platform");
 
 const PROJECT_DIR = path.resolve(__dirname, "..");
 const DEFAULT_ORG_ALIAS = "politico";
-const DEFAULT_INSTANCE_URL = "https://politico.my.salesforce.com";
+const DEFAULT_INSTANCE_URL = "https://your-org.my.salesforce.com";
 const DEFAULT_API_VERSION = "v64.0";
 const DUPLICATE_ITEMS_CSV_NAME = "salesforce-duplicate-record-items-latest.csv";
 const DUPLICATE_ITEMS_JSON_NAME = "salesforce-duplicate-record-items-latest.json";
@@ -239,19 +239,10 @@ function existingDefaultSourceCsv(objectType) {
 
 function defaultStagingRoot() {
   if (process.platform === "win32") {
-    return path.join(os.homedir(), "OneDrive - POLITICO", "Salesforce Pulls", "Duplicate Reviewer", "staging");
+    return path.join(os.homedir(), "Salesforce Pulls", "Duplicate Reviewer", "staging");
   }
 
-  return path.join(
-    os.homedir(),
-    "Library",
-    "CloudStorage",
-    "OneDrive-POLITICO",
-    "Automation Projects",
-    "Salesforce Pulls",
-    "Duplicate Reviewer",
-    "staging"
-  );
+  return path.join(os.homedir(), "Salesforce Pulls", "Duplicate Reviewer", "staging");
 }
 
 function fetchSalesforceAccessToken(orgAlias) {
