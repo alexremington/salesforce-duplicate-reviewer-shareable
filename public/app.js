@@ -165,11 +165,6 @@ const FIELD_LABELS = {
   phone: "Phone",
   ziPhone: "ZI Phone",
   mobile: "Mobile",
-  mailingStreet: "Mailing Street",
-  mailingCity: "Mailing City",
-  mailingState: "Mailing State",
-  mailingPostalCode: "Mailing Postal Code",
-  mailingCountry: "Mailing Country",
   mirrorOf: "Mirror of",
   name: "Name",
   website: "Website",
@@ -500,13 +495,6 @@ const CONTACT_SHARED_COMPANY_EXACT_PHONE_NAME_CONFLICT_CAP = 78;
 const CONTACT_SHARED_COMPANY_EXACT_PHONE_NAME_CONFLICT_REASON = "Shared company and exact phone with conflicting names";
 const CONTACT_EMAIL_CONTEXT_CORROBORATION_MIN = 0.5;
 const CONTACT_MIRROR_RELATIONSHIP_REASON = "Entitled Contact mirror";
-const CONTACT_EXCLUDED_MERGE_BLOCK_MESSAGE = "This Contact pair is excluded by the Entitled Contact mirror rule and cannot enter the Salesforce merge queue.";
-const CONTACT_MODEL_COMPARISON_THRESHOLD = 70;
-const CONTACT_ORGANIZATION_ALIASES = new Map([
-  ["osu", "ohio state university"],
-  ["the ohio state university", "ohio state university"],
-  ["ohio state", "ohio state university"]
-]);
 const TRAINING_LABELS = {
   match: "Match",
   not_match: "Not Match",
@@ -3705,6 +3693,7 @@ function getScoringContext(rows, objectType, mapping) {
 
   const preparedRows = prepareRows(rows, objectType, mapping);
   const fieldStats = buildFieldStats(preparedRows, objectType);
+  const mirrorConflicts = objectType === "contact" ? buildContactMirrorConflictMap(preparedRows) : null;
   const scorer = createPairScorer(objectType, fieldStats);
   scoringContextCache = {
     rows,
@@ -3712,6 +3701,7 @@ function getScoringContext(rows, objectType, mapping) {
     mapping,
     preparedRows,
     fieldStats,
+    mirrorConflicts,
     scorer
   };
   return scoringContextCache;
@@ -3729,6 +3719,7 @@ async function getScoringContextAsync(rows, objectType, mapping, progress = asyn
 
   const preparedRows = await prepareRowsAsync(rows, objectType, mapping, progress);
   const fieldStats = await buildFieldStatsAsync(preparedRows, objectType, progress);
+  const mirrorConflicts = objectType === "contact" ? buildContactMirrorConflictMap(preparedRows) : null;
   const scorer = createPairScorer(objectType, fieldStats);
   scoringContextCache = {
     rows,
@@ -3736,6 +3727,7 @@ async function getScoringContextAsync(rows, objectType, mapping, progress = asyn
     mapping,
     preparedRows,
     fieldStats,
+    mirrorConflicts,
     scorer
   };
   return scoringContextCache;
@@ -3982,40 +3974,6 @@ function collectPairGroups(pairs, rowCount, conflictMap = null) {
   return groupsByRoot;
 }
 
-function buildContactComparisonSummary(
-  legacyPairs,
-  newPairs,
-  preparedRows,
-  mirrorConflicts,
-  comparisonThreshold = CONTACT_MODEL_COMPARISON_THRESHOLD,
-  currentThreshold = CONTACT_MODEL_COMPARISON_THRESHOLD
-) {
-  const legacyComparisonPairs = legacyPairs.filter((pair) => pair.value >= comparisonThreshold);
-  const newComparisonPairs = newPairs.filter((pair) => pair.value >= comparisonThreshold);
-  const legacyComparisonGroups = [...collectPairGroups(legacyComparisonPairs, preparedRows.length, mirrorConflicts).values()]
-    .map((group) => summarizeGroup(group, preparedRows, createLegacyPairScorer("contact")))
-    .filter((group) => group.score >= comparisonThreshold);
-  const newComparisonGroups = [...collectPairGroups(newComparisonPairs, preparedRows.length, mirrorConflicts).values()]
-    .map((group) => summarizeGroup(group, preparedRows, createPairScorer("contact")))
-    .filter((group) => group.score >= comparisonThreshold);
-  const legacyGroupKeys = new Set(legacyComparisonGroups.map((group) => group.key));
-  const newGroupKeys = new Set(newComparisonGroups.map((group) => group.key));
-
-  return {
-    threshold: comparisonThreshold,
-    currentThreshold,
-    legacyPairCount: legacyComparisonPairs.length,
-    newPairCount: newComparisonPairs.length,
-    deltaPairCount: newComparisonPairs.length - legacyComparisonPairs.length,
-    legacyGroupCount: legacyComparisonGroups.length,
-    newGroupCount: newComparisonGroups.length,
-    deltaGroupCount: newComparisonGroups.length - legacyComparisonGroups.length,
-    lostGroupCount: [...legacyGroupKeys].filter((key) => !newGroupKeys.has(key)).length,
-    gainedGroupCount: [...newGroupKeys].filter((key) => !legacyGroupKeys.has(key)).length,
-    redFlagged: newComparisonGroups.length < legacyComparisonGroups.length
-  };
-}
-
 function buildContactMirrorConflictMap(preparedRows) {
   const rowsByReferenceKey = new Map();
   const conflictsByIndex = new Map();
@@ -4227,12 +4185,6 @@ function prepareContactRow(row, mapping, index, cache) {
   const phone = cachedTransform(cache.phones, getValue(row, mapping.phone), normalizePhone);
   const ziPhone = cachedTransform(cache.phones, getValue(row, mapping.ziPhone), normalizePhone);
   const mobile = cachedTransform(cache.phones, getValue(row, mapping.mobile), normalizePhone);
-  const mailingStreet = cachedTransform(cache.addresses, getValue(row, mapping.mailingStreet), normalizeAddress);
-  const mailingCity = cachedTransform(cache.text, getValue(row, mapping.mailingCity), normalizeText);
-  const mailingState = cachedTransform(cache.states, getValue(row, mapping.mailingState), normalizeState);
-  const mailingPostalCode = cachedTransform(cache.postalCodes, getValue(row, mapping.mailingPostalCode), normalizePostalCode);
-  const mailingPostalPrefix = mailingPostalCode.slice(0, 5);
-  const mailingCountry = cachedTransform(cache.countries, getValue(row, mapping.mailingCountry), normalizeCountry);
   const recordIdKey = normalizeContactReferenceKey(getValue(row, mapping.recordId));
   const recordNameKey = normalizeContactReferenceKey(name.fullName || [name.firstName, name.lastName].filter(Boolean).join(" "));
   const mirrorOfKey = normalizeContactReferenceKey(getValue(row, mapping.mirrorOf));
@@ -4757,11 +4709,7 @@ function pairKey(left, right) {
   return left < right ? `${left}|${right}` : `${right}|${left}`;
 }
 
-function scoreContactPairLegacy(left, right, cache = null) {
-  return scoreContactPair(left, right, cache, "legacy");
-}
-
-function scoreContactPair(left, right, cache = null, model = "new") {
+function scoreContactPair(left, right, cache = null) {
   if (hasMirrorContactRelationship(left, right)) {
     return {
       left: left.row,
@@ -4778,12 +4726,7 @@ function scoreContactPair(left, right, cache = null, model = "new") {
         ziPersonLinkedInUrl: null,
         phone: null,
         ziPhone: null,
-        mobile: null,
-        mailingStreet: null,
-        mailingCity: null,
-        mailingState: null,
-        mailingPostalCode: null,
-        mailingCountry: null
+        mobile: null
       }
     };
   }

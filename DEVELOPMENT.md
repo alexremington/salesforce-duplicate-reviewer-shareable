@@ -104,6 +104,8 @@ Contact field weights:
 
 Name remains the highest-weighted contact signal in aggregate, but it is scored as an ordered sequence rather than as separate first-name and last-name boxes. Company / Account remains strong enough that same-last-name contacts with similar but different first names, such as `Francis` / `Francois` or `Frances` / `Francis`, do not override disagreement on Company / Account. Exact-name Contact pairs are also capped below the default threshold when Company is strongly different and there is no strong corroborating Email, LinkedIn, or Phone evidence; this prevents sparse files from treating an exact name plus a weak company string match as sufficient proof. Business/government email-domain corroboration is allowed to override that sparse-company cap, including related domain roots such as `raytheon.com` and `raytheon.com.au`; generic personal domains are excluded from that corroboration.
 
+Entitled Contact mirrors are a Contact-only hard exclusion. If a loaded Contact's mapped `Mirror of` lookup resolves to another loaded Contact by Salesforce ID or mirrored display name, the pair scores as a non-duplicate, is excluded from duplicate-group formation, and carries the `Entitled Contact mirror` reason.
+
 The group score is the average of every pair score in the active cluster. `minPairScore` is tracked separately and displayed as a cohesion warning. `matchedFieldPercent` is the average share of comparable fields whose pair score is at least `MATCHED_FIELD_THRESHOLD`.
 
 Groups are sorted by:
