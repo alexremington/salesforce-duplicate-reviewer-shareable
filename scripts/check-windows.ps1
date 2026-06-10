@@ -77,6 +77,12 @@ if ($LASTEXITCODE -ne 0) {
   throw 'package.json is not valid JSON.'
 }
 
+Write-Host 'Checking closeout Beads regression...'
+& node scripts/check-closeout-beads.js
+if ($LASTEXITCODE -ne 0) {
+  throw 'Closeout Beads regression failed.'
+}
+
 Write-Host 'Checking server contracts...'
 & node scripts/check-server-contracts.js
 if ($LASTEXITCODE -ne 0) {

@@ -63,6 +63,7 @@ Shared UI stack policy:
 - Do not commit a broad sync or cleanup that deletes protected workflow code unless you have manually reviewed the removed sections and confirmed the replacement behavior is intentional.
 - Treat `npm run check` as the minimum pre-commit gate, then run `npm run smoke:ui:local` before pushing any user-visible change.
 - Run `npm run closeout` before handoff so the working tree is clean and every remaining file is accounted for.
+- Local Beads workspace metadata under `.beads/` is not release state; closeout reports it separately and should not be blocked by Beads-only dirt.
 - If the change is user-visible, behavior-changing, or tied to a release, include a short release note in the handoff closeout before marking the work done. Use one of: `Release note: fixed <issue> for <users>, validated by <test or smoke>.` `Release note: updated launcher/runtime behavior for <scenario>, validated by <check> and <smoke>.` `Release note: release handoff for <branch or version>, includes <summary> and <validation>.`
 - If a change touches the launcher or cached runtime path, confirm the live served bundle still reflects the current source before committing.
 
