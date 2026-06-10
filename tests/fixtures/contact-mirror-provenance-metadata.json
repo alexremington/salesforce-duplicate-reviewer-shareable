@@ -1,0 +1,21 @@
+{
+  "reportMetadata": {
+    "detailColumns": ["Id", "First Name", "Last Name", "Company"]
+  },
+  "reportExtendedMetadata": {
+    "detailColumnInfo": {
+      "Id": {
+        "label": "Id"
+      },
+      "First Name": {
+        "label": "First Name"
+      },
+      "Last Name": {
+        "label": "Last Name"
+      },
+      "Company": {
+        "label": "Company"
+      }
+    }
+  }
+}
