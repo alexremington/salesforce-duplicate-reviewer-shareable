@@ -17,7 +17,6 @@ const {
   contactLastNameChangeSmokeCsv,
   contactMirrorRelationshipSmokeCsv,
   contactMissingIdSmokeCsv,
-  contactPairRegressionJson,
   contactSharedCompanyExactPhoneNameConflictSmokeCsv,
   contactSmokeCsv,
   largeContactSmokeCsv
@@ -54,6 +53,7 @@ async function run() {
   const missingContactIdCsvPath = path.join(outDir, "contacts-missing-ids.csv");
   const lastNameChangeCsvPath = path.join(outDir, "contacts-last-name-change.csv");
   const differentCompanyConflictCsvPath = path.join(outDir, "contacts-different-company-conflict.csv");
+  const sharedCompanyExactPhoneNameConflictCsvPath = path.join(outDir, "contacts-shared-company-exact-phone-name-conflict.csv");
   const mirrorRelationshipCsvPath = path.join(outDir, "contacts-mirror-relationship.csv");
   const accountCsvPath = path.join(outDir, "accounts-smoke.csv");
   const accountCompanyNormalizationCsvPath = path.join(outDir, "accounts-company-normalization.csv");
@@ -69,6 +69,7 @@ async function run() {
   await fs.writeFile(missingContactIdCsvPath, contactMissingIdSmokeCsv());
   await fs.writeFile(lastNameChangeCsvPath, contactLastNameChangeSmokeCsv());
   await fs.writeFile(differentCompanyConflictCsvPath, contactDifferentCompanyConflictSmokeCsv());
+  await fs.writeFile(sharedCompanyExactPhoneNameConflictCsvPath, contactSharedCompanyExactPhoneNameConflictSmokeCsv());
   await fs.writeFile(mirrorRelationshipCsvPath, contactMirrorRelationshipSmokeCsv());
   await fs.writeFile(accountCsvPath, accountSmokeCsv());
   await fs.writeFile(accountCompanyNormalizationCsvPath, accountCompanyNormalizationSmokeCsv());
@@ -127,6 +128,7 @@ async function run() {
     const emptyImportButtonState = await assertEmptyImportButtonOpensFileChooser(browser, csvPath);
     const lastNameChangeCandidateState = await assertLastNameChangeCandidateMatch(browser, lastNameChangeCsvPath);
     const differentCompanyConflictState = await assertDifferentCompanyConflictSeparated(browser, differentCompanyConflictCsvPath);
+    const sharedCompanyExactPhoneNameConflictState = await assertSharedCompanyExactPhoneNameConflictSeparated(browser, sharedCompanyExactPhoneNameConflictCsvPath);
     await assertMirrorRelationshipSeparated(browser, mirrorRelationshipCsvPath);
     const largeContactPerformance = await assertLargeContactCsvPerformance(browser, largeContactCsvPath);
 
@@ -442,6 +444,13 @@ async function run() {
     }
     if (differentCompanyConflictState.groupCount !== 0) {
       throw new Error(`Expected different-company Contact pair to stay below the duplicate threshold: ${JSON.stringify(differentCompanyConflictState)}`);
+    }
+    if (
+      sharedCompanyExactPhoneNameConflictState.groupCount !== 0 ||
+      sharedCompanyExactPhoneNameConflictState.runtimeScore >= 86 ||
+      !sharedCompanyExactPhoneNameConflictState.reasons.includes("Shared company and exact phone with conflicting names")
+    ) {
+      throw new Error(`Expected shared-company exact-phone Contact pair to stay below the duplicate threshold with the new name-conflict cap: ${JSON.stringify(sharedCompanyExactPhoneNameConflictState)}`);
     }
     assertPerformanceBudget("large Contact CSV worker import", largeContactPerformance.elapsedMs, PERFORMANCE_BUDGETS.largeContactCsvWorkerMs);
     if (!lightTheme.colorScheme.includes("light") || !darkTheme.colorScheme.includes("dark") || lightTheme.bodyBg === darkTheme.bodyBg) {
@@ -766,8 +775,6 @@ async function run() {
       lastNameChangeCandidateState,
       largeContactPerformance,
       sharedCompanyExactPhoneNameConflictState,
-      pairRegressionState,
-      accountCompanyNormalizationState,
       performanceBudgets: PERFORMANCE_BUDGETS,
       leftPaneSmallListLayout,
       humeRegionLayout,
@@ -919,6 +926,47 @@ async function assertDifferentCompanyConflictSeparated(browser, filePath) {
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
     return {
       ...(await datasetLoadState(page))
+    };
+  } finally {
+    await page.close();
+  }
+}
+
+async function assertSharedCompanyExactPhoneNameConflictSeparated(browser, filePath) {
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const diagnostics = [];
+  page.on("console", (message) => {
+    if (["error", "warning"].includes(message.type())) {
+      diagnostics.push(`${message.type()}: ${message.text()}`);
+    }
+  });
+  page.on("pageerror", (error) => diagnostics.push(`pageerror: ${error.message}`));
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('[data-empty-action="choose-csv"]').waitFor({ state: "visible", timeout: 5000 });
+    const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
+    await page.locator('[data-empty-action="choose-csv"]').click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles(filePath);
+    await waitForLoadingModalHidden(page, "Shared-company exact-phone Contact load", diagnostics);
+    const loadState = await datasetLoadState(page);
+    const runtimeScore = await page.evaluate(() => {
+      const preparedRows = prepareRows(state.rows, state.objectType, state.mapping);
+      const score = scoreContactPair(preparedRows[0], preparedRows[1]);
+      return {
+        score: Math.round(score.value),
+        reasons: score.reasons
+      };
+    });
+
+    if (loadState.groupCount !== 0) {
+      throw new Error(`Expected the divergent-name pair to stay below the duplicate threshold: ${JSON.stringify({ loadState, runtimeScore })}`);
+    }
+
+    return {
+      ...loadState,
+      runtimeScore: runtimeScore.score,
+      reasons: runtimeScore.reasons
     };
   } finally {
     await page.close();

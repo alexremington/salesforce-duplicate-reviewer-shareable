@@ -88,6 +88,34 @@ function contactDifferentCompanyConflictSmokeCsv() {
   ]);
 }
 
+function contactSharedCompanyExactPhoneNameConflictSmokeCsv() {
+  return csvRows([
+    ["Id", "First Name", "Last Name", "Company", "Email", "Lead Source", "Created Date", "Phone", "Mobile"],
+    [
+      "003f200002O50cwAAB",
+      "Karen",
+      "Irish",
+      "Out & Equal Workplace Advocates",
+      "kirish@outandequal.org.invalid",
+      "Web",
+      "2024-04-01",
+      "+1 415 694 6500",
+      "(202) 372-5155"
+    ],
+    [
+      "003f200002drJvyAAE",
+      "Caryn",
+      "Viverito",
+      "Out & Equal Workplace Advocates",
+      "",
+      "Referral",
+      "2025-04-01",
+      "(415) 694-6500",
+      "(202) 567-3306"
+    ]
+  ]);
+}
+
 function contactMirrorRelationshipSmokeCsv() {
   return csvRows([
     ["Id", "First Name", "Last Name", "Company", "Email", "Mirror of"],
@@ -153,6 +181,7 @@ module.exports = {
   accountCompanyNormalizationSmokeCsv,
   contactLastNameChangeSmokeCsv,
   contactDifferentCompanyConflictSmokeCsv,
+  contactSharedCompanyExactPhoneNameConflictSmokeCsv,
   contactMirrorRelationshipSmokeCsv,
   contactMissingIdSmokeCsv,
   contactSmokeCsv,

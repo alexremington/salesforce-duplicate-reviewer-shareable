@@ -63,11 +63,7 @@ Shared UI stack policy:
 - Do not commit a broad sync or cleanup that deletes protected workflow code unless you have manually reviewed the removed sections and confirmed the replacement behavior is intentional.
 - Treat `npm run check` as the minimum pre-commit gate, then run `npm run smoke:ui:local` before pushing any user-visible change.
 - Run `npm run closeout` before handoff so the working tree is clean and every remaining file is accounted for.
-- Local Beads workspace metadata should live in the workspace-owned external Beads home, not under the app tree; if an older `.beads/` tree still exists locally, it should stay ignored and untracked until the migration is complete, and closeout should not treat it as release content.
-- If mirror reconciliation needs temporary worktrees, scratch repos, or helper links, treat them as disposable repair state and remove them before closeout.
 - If the change is user-visible, behavior-changing, or tied to a release, include a short release note in the handoff closeout before marking the work done. Use one of: `Release note: fixed <issue> for <users>, validated by <test or smoke>.` `Release note: updated launcher/runtime behavior for <scenario>, validated by <check> and <smoke>.` `Release note: release handoff for <branch or version>, includes <summary> and <validation>.`
-- Use the workspace shared closeout templates and keep the closeout summary, release note, commit SHA(s), and one residual-risk bullet in every handoff.
-- Any local Beads state should remain ignored and untracked rather than committed as release content. Prefer the workspace shared Beads helper and storage convention.
 - If a change touches the launcher or cached runtime path, confirm the live served bundle still reflects the current source before committing.
 
 ## Recommended Agent Workflow
