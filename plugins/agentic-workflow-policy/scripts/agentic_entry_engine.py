@@ -131,6 +131,10 @@ def is_low_risk_direct_entry(text: str, is_visible_ui: bool, high_risk_patterns,
     return contains_any(text, low_risk_markers)
 
 
+def block(reason: str) -> None:
+    print(json.dumps({"decision": "block", "reason": reason}))
+
+
 def add_context(message: str) -> None:
     print(
         json.dumps(

@@ -4,6 +4,11 @@ A Duplicate Reviewer change is done when the implementation, verification, and s
 
 ## Required
 
+- Development started only after repo guidance was reviewed and any required preflight artifact was created for the change scope.
+- Development started only after the work was labeled `low`, `medium`, or `high`, and that label was stated to the user.
+- `gpt-5.4 mini` was used for `low` and `medium` work when model selection was available, or the inability to switch models was stated before proceeding.
+- `High`-cost work did not proceed until the user explicitly approved it after the cost warning.
+- Visible feature work did not begin until the Hume-first design pass and tracked feature brief were in place.
 - The change is scoped to the requested workflow and avoids unrelated refactors.
 - Evaluation and merge flows remain separate where their user stories differ.
 - Account review remains available in Evaluate mode.
@@ -18,6 +23,7 @@ A Duplicate Reviewer change is done when the implementation, verification, and s
 - Every fixed user-visible bug has a named regression assertion in the check or smoke harness.
 - `npm run check` passes, including live server contract checks for current health and API routes.
 - `npm run smoke:ui:local` passes after UI changes.
+- `npm run closeout` passes before the work is handed off or pushed.
 - Stale runtime checks reject or restart any running server whose health or API contract does not match the current source.
 - CI is green before treating the change as ready to share.
 - Setup, maintenance, or handoff docs are updated when behavior changes.

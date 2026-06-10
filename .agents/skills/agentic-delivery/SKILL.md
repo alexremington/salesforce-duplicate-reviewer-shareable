@@ -1,31 +1,23 @@
 ---
 name: agentic-delivery
-description: Use when the user wants a streamlined Codex workflow with just enough planning, review, and QA for the risk level involved, or asks for a broader agent setup for a repo or workspace.
+description: Use when Duplicate Reviewer work needs an explicit Hume to architect to implementation to review to QA workflow.
 ---
 
 # Agentic Delivery
 
-Use this skill to keep multi-stage work structured without turning routine work into a committee.
+Use this skill for non-trivial Duplicate Reviewer work that benefits from explicit planning and validation.
 
 ## Workflow
 
-1. Keep the main thread as the orchestrator and final decision-maker.
-2. Use `architect` only when the task needs sequencing, risk analysis, or acceptance criteria.
-3. Use `Hume` only for visible UI direction work when the design is still unresolved or the user explicitly wants design review.
-4. Keep write-heavy implementation in one thread unless the user explicitly asks for parallel coders.
-5. Use `reviewer` only after implementation when correctness, regression risk, or test gaps justify a second pass.
-6. Use `qa-ux` only when the real user path needs validation in the launched app.
+1. Keep the main thread as orchestrator.
+2. For visible UI changes, route design through Hume first unless waived.
+3. Use `architect` to define scope, merge-safety risks, interaction risks, validation steps, and acceptance criteria.
+4. Keep code-writing single-threaded unless the user explicitly wants parallel implementation.
+5. Use `reviewer` to check merge safety, portability, regressions, and missing proof.
+6. Use `qa-ux` to require the repo validation path: `npm run check`, `npm run check:windows`, and `npm run smoke:ui:local`.
 
 ## Defaults
 
-- Default to direct implementation for small, well-scoped edits.
-- Prefer subagents for read-heavy work, not simultaneous code edits.
-- Keep plans narrow and testable.
-- Summarize subagent results back into the main thread instead of pasting long logs.
-- If repo-specific AGENTS guidance adds validation gates, treat those gates as mandatory.
-
-## When Not To Use
-
-- Trivial single-step edits that do not need planning or delegated review.
-- Tasks where the user explicitly wants direct implementation with no extra orchestration.
-- Read-only questions, explanation tasks, or other non-implementation work.
+- Prefer subagents for exploration, review, and QA rather than concurrent edits.
+- Treat pointer-hit-testing, stale runtime, and synthetic-proof gaps as first-class risks when relevant.
+- Do not accept screenshot-only proof for UX or interaction fixes.

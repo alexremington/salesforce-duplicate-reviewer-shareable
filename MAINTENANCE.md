@@ -1,19 +1,24 @@
 # Maintenance
 
-This branch is intended to remain public-safe.
+This repo uses a private working branch and a public-safe branch.
 
-## Branches And Mirrors
+## Branches And Remotes
 
-- Keep private/local settings on a private working branch.
-- Keep this branch free of exported data, real report IDs, tenant IDs, personal machine paths, tokens, and team-specific config.
-- If this branch is mirrored to a separate public repository, push it deliberately after checks pass.
+- `main`: private working branch for local paths, real org defaults, and team-specific notes.
+- `shareable`: public-safe branch for code and docs that can be published.
+- `origin`: private GitHub repo.
+- `public`: public mirror repo.
 
-## Local Changes
+GitHub branch protection is available on the public mirror. The private repo currently cannot use branch protection or rulesets without a GitHub plan upgrade, so local checks and deliberate push commands matter. If private protection becomes available, require `Repository checks` and `UI smoke test`.
+
+## Private Changes
 
 ```bash
+git switch main
 npm run check
 git add .
 git commit -m "Describe the change"
+git push
 ```
 
 For UI changes, also run:
@@ -22,18 +27,20 @@ For UI changes, also run:
 npm run smoke:ui
 ```
 
-## Public-Safety Checks
+## Public Mirror Updates
+
+Only update the public mirror intentionally:
 
 ```bash
+git switch shareable
+npm run check
 npm run check:shareable
-scripts/check-shareable.sh HEAD
+git push origin shareable
+git push public shareable:main
+git switch main
 ```
 
-Review the diff before publishing:
-
-```bash
-git diff origin/shareable..shareable
-```
+Review `git diff origin/shareable..shareable` before pushing the public mirror.
 
 ## Never Commit
 

@@ -1,6 +1,175 @@
 {
   "version": 1,
   "app": "salesforce-duplicate-reviewer",
-  "updatedAt": "2026-06-03T00:00:00.000Z",
-  "features": []
+  "updatedAt": "2026-06-09T20:15:00Z",
+  "features": [
+    {
+      "id": "workspace-export-restore",
+      "title": "Workspace Export and Restore",
+      "app": "salesforce-duplicate-reviewer",
+      "status": "complete",
+      "visibleUi": true,
+      "brief": "docs/features/workspace-export-restore.md",
+      "requirements": [
+        "Keep the current CSV dataset loader as the source of truth for the source records.",
+        "Save the active review state as a single workspace record in browser persistence and export that same record as JSON.",
+        "Restore duplicate/not-duplicate decisions, training labels, field-resolution choices, separated records, merge results, and merge master selections from the workspace JSON.",
+        "Keep the existing Decisions and Labels CSV exports available for downstream workflows and backward compatibility.",
+        "Keep the workspace controls inside the existing Import and Export menus. Do not add a new panel or separate workflow surface."
+      ],
+      "acceptanceCriteria": [
+        "The Import menu includes a Workspace action that opens a JSON file picker.",
+        "The Export menu includes a Workspace action that downloads a JSON file.",
+        "The exported workspace JSON includes the current dataset metadata plus the saved review state.",
+        "Importing a matching workspace file restores the saved review state in a fresh browser context after the same dataset is loaded again.",
+        "The current CSV-based dataset import path still works unchanged.",
+        "The workspace export/import path remains reachable with the existing menu and keyboard behavior on desktop and mobile."
+      ],
+      "fixtures": [
+        "At least one Contacts dataset with duplicate groups and saved review state so the round-trip can prove label and decision restoration.",
+        "Demo data should still load normally even if no workspace file has been exported yet.",
+        "No Salesforce write action is required; this is a local JSON handoff for review state."
+      ],
+      "tests": [
+        {
+          "name": "Fast checks",
+          "command": "npm run check",
+          "status": "passed",
+          "evidence": "npm run check passed on 2026-06-09."
+        },
+        {
+          "name": "Targeted Playwright smoke",
+          "command": "npm run smoke:ui:local",
+          "status": "passed",
+          "evidence": "npm run smoke:ui:local passed on 2026-06-09."
+        }
+      ],
+      "crossPlatform": {
+        "mac": "passed",
+        "windows": "passed"
+      },
+      "risks": [],
+      "humeDesign": {
+        "reviewed": true,
+        "notes": "Keep the workspace actions inside the existing Import and Export menus. Do not add a new panel or separate workflow surface, and preserve the current topbar layout and scroll model."
+      },
+      "createdAt": "2026-06-09T20:00:00Z",
+      "updatedAt": "2026-06-09T20:00:00Z"
+    },
+    {
+      "id": "dataset-export-with-scores",
+      "title": "Dataset Export With Scores",
+      "app": "salesforce-duplicate-reviewer",
+      "status": "complete",
+      "visibleUi": true,
+      "brief": "docs/features/dataset-export-with-scores.md",
+      "requirements": [
+        "Keep the export shape aligned with the imported dataset rather than exporting only group summaries.",
+        "Add group and score as appended columns for each original record.",
+        "Preserve the source column order and values exactly as loaded.",
+        "Use the current computed group assignment and group score from the duplicate matching run.",
+        "Keep the export in the existing Export menu so the workflow stays familiar."
+      ],
+      "acceptanceCriteria": [
+        "The Export menu includes a Dataset + Scores action.",
+        "The exported CSV contains one row per original record.",
+        "The exported CSV preserves the original imported columns and appends group and score.",
+        "The group value reflects the current duplicate group identifier for each row, or blank when the record is not in a duplicate group.",
+        "The score value reflects the current duplicate group score for each row, or blank when the record is not in a duplicate group.",
+        "The exported CSV can be re-imported by the existing loader without schema loss."
+      ],
+      "fixtures": [
+        "At least one loaded Contacts and one loaded Accounts dataset with duplicate groups and non-duplicate rows so group assignment and blank-group cases can be checked.",
+        "Demo data should also produce a valid dataset export with appended group and score columns.",
+        "No Salesforce write action is required; this is a local export of the current in-memory dataset state."
+      ],
+      "tests": [
+        {
+          "name": "Fast checks",
+          "command": "npm run check",
+          "status": "passed",
+          "evidence": "npm run check passed on 2026-06-09."
+        },
+        {
+          "name": "Targeted Playwright smoke",
+          "command": "npm run smoke:ui:local",
+          "status": "passed",
+          "evidence": "npm run smoke:ui:local passed on 2026-06-09."
+        },
+        {
+          "name": "Release pipeline",
+          "command": "npm run verify:release",
+          "status": "not-applicable",
+          "evidence": "Repo closeout now owns release-pipeline verification."
+        }
+      ],
+      "crossPlatform": {
+        "mac": "passed",
+        "windows": "passed"
+      },
+      "risks": [],
+      "humeDesign": {
+        "reviewed": true,
+        "notes": "Reviewed in docs/HUME-DESIGN-REVIEW.md under the existing Export workflow. Keep the new Dataset + Scores action inside the current export menu, preserve the minimalist layout, and avoid adding a new panel or workflow branch."
+      },
+      "createdAt": "2026-06-04T18:54:01.327Z",
+      "updatedAt": "2026-06-09T16:00:00Z"
+    },
+    {
+      "id": "merge-preview-confirmation",
+      "title": "Multi-Group Merge Preview Confirmation",
+      "app": "salesforce-duplicate-reviewer",
+      "status": "complete",
+      "visibleUi": true,
+      "brief": "docs/features/merge-preview-confirmation.md",
+      "requirements": [
+        "Replace the editable Contact Merge section with a read-only Review before confirming surface once the queued merge set is ready for confirmation.",
+        "Support reviewing multiple merge groups in sequence, using the same left-rail group navigation model as Evaluate plus inline Previous and Next controls.",
+        "Do not require the operator to individually confirm each group; provide one overall onscreen Confirm or Cancel decision for the queued merge set.",
+        "Keep the current pre-merge freshness check as the gate before any final confirmation UI is shown for the queued set.",
+        "Show a concise onscreen preview of the resulting surviving Contact for the current group in view, including the selected master Contact, duplicate Contacts that will be merged into it, and the effective retained field values for the merge-relevant Contact fields shown in the matrix."
+      ],
+      "acceptanceCriteria": [
+        "After the merge workflow enters confirmation mode and the queued groups are fresh, the merge workspace shows a Review before confirming surface instead of the editable Contact Merge controls.",
+        "The left rail and inline Previous / Next controls move between queued merge-group previews without leaving the merge workflow.",
+        "No Salesforce merge request is sent until the user clicks the overall onscreen confirmation button for the queued set.",
+        "Clicking the overall Cancel action exits confirmation mode without sending any queued merge request.",
+        "Playwright smoke coverage proves the multi-group review surface appears, supports navigation, remains read-only, and blocks merge submission until overall confirmation."
+      ],
+      "humeDesign": {
+        "reviewed": true,
+        "notes": "Reviewed in docs/HUME-DESIGN-REVIEW.md under Multi-Group Merge Preview Confirmation. Preserve the Evaluate-style left-rail navigation, use a read-only Review before confirming surface, and keep one overall confirm/cancel decision for the queued merge set."
+      },
+      "fixtures": [
+        "At least three Contact duplicate groups with differing Lead Source, company, phone, and mobile values so multi-group preview navigation is meaningful."
+      ],
+      "tests": [
+        {
+          "name": "Fast checks",
+          "command": "npm run check",
+          "status": "passed",
+          "evidence": "npm run check passed on 2026-06-09."
+        },
+        {
+          "name": "Targeted Playwright smoke",
+          "command": "npm run smoke:ui:local",
+          "status": "passed",
+          "evidence": "npm run smoke:ui:local passed on 2026-06-09."
+        },
+        {
+          "name": "Release pipeline",
+          "command": "npm run verify:release",
+          "status": "not-applicable",
+          "evidence": "Repo closeout now owns release-pipeline verification."
+        }
+      ],
+      "crossPlatform": {
+        "mac": "passed",
+        "windows": "passed"
+      },
+      "risks": [],
+      "createdAt": "2026-06-03T21:15:03.021Z",
+      "updatedAt": "2026-06-09T16:00:00Z"
+    }
+  ]
 }

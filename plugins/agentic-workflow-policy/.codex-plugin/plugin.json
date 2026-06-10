@@ -9,10 +9,10 @@
   "interface": {
     "displayName": "Agentic Workflow Policy",
     "shortDescription": "Use Agentic Workflow Policy in Codex.",
-    "longDescription": "Agentic Workflow Policy adds a local Codex plugin scaffold.",
+    "longDescription": "Agentic Workflow Policy adds local skills and helpers for launcher triage, brittle UI validation, and visible-change delivery.",
     "developerName": "Local developer",
     "category": "Productivity",
     "capabilities": [],
-    "defaultPrompt": "Help me use Agentic Workflow Policy."
+    "defaultPrompt": "Help me use Agentic Workflow Policy for runtime triage, brittle UI validation, and visible change delivery."
   }
 }

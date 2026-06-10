@@ -37,9 +37,11 @@
               <div class="csv-object-menu topbar-menu" id="csvObjectMenu" role="menu" hidden>
                 <button type="button" role="menuitem" data-csv-object="contact">Contacts</button>
                 <button type="button" role="menuitem" data-csv-object="account">Accounts</button>
+                <button type="button" role="menuitem" id="workspaceImportButton" disabled>Workspace</button>
                 <button type="button" role="menuitem" id="trainingImportButton" disabled>Labels</button>
               </div>
               <input id="csvInput" type="file" accept=".csv,.json,text/csv,application/json" />
+              <input id="workspaceImportInput" type="file" accept=".json,application/json" />
             </div>
             <div class="export-picker menu-picker">
               <button
@@ -53,6 +55,8 @@
                 Export &gt;
               </button>
               <div class="export-menu topbar-menu" id="exportMenu" role="menu" hidden>
+                <button type="button" role="menuitem" id="workspaceExportButton" disabled>Workspace</button>
+                <button type="button" role="menuitem" id="datasetExportButton" disabled>Dataset + Scores</button>
                 <button type="button" role="menuitem" id="exportButton" disabled>Decisions</button>
                 <button type="button" role="menuitem" id="trainingExportButton" disabled>Labels</button>
               </div>

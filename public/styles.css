@@ -220,6 +220,7 @@ p {
 }
 
 #csvInput,
+#workspaceImportInput,
 #trainingImportInput {
   position: absolute;
   width: 1px;
@@ -655,17 +656,19 @@ p {
   left: var(--threshold-min-pct);
   right: calc(100% - var(--threshold-max-pct));
   background: var(--amber);
+  pointer-events: none;
 }
 
 .threshold-slider-input {
   position: absolute;
-  inset: 0;
-  width: 100%;
+  inset: 0 12px;
+  width: auto;
   height: 34px;
   margin: 0;
   appearance: none;
   background: transparent;
   pointer-events: none;
+  touch-action: none;
 }
 
 .threshold-slider-input-min {
@@ -674,6 +677,54 @@ p {
 
 .threshold-slider-input-max {
   z-index: 3;
+}
+
+#thresholdSlider[data-dragging-thumb="min"] .threshold-slider-input-min {
+  z-index: 5;
+  pointer-events: auto;
+}
+
+#thresholdSlider[data-dragging-thumb="min"] .threshold-slider-input-max {
+  z-index: 4;
+  pointer-events: none;
+}
+
+#thresholdSlider[data-dragging-thumb="max"] .threshold-slider-input-max {
+  z-index: 5;
+  pointer-events: auto;
+}
+
+#thresholdSlider[data-dragging-thumb="max"] .threshold-slider-input-min {
+  z-index: 4;
+  pointer-events: none;
+}
+
+#thresholdSlider[data-collapsed-edge="min"] .threshold-slider-input-max {
+  z-index: 4;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+#thresholdSlider[data-collapsed-edge="min"] .threshold-slider-input-max:active {
+  cursor: grabbing;
+}
+
+#thresholdSlider[data-collapsed-edge="min"] .threshold-slider-input-min {
+  opacity: 0;
+}
+
+#thresholdSlider[data-collapsed-edge="max"] .threshold-slider-input-min {
+  z-index: 4;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+#thresholdSlider[data-collapsed-edge="max"] .threshold-slider-input-min:active {
+  cursor: grabbing;
+}
+
+#thresholdSlider[data-collapsed-edge="max"] .threshold-slider-input-max {
+  opacity: 0;
 }
 
 .threshold-slider-input:focus {
@@ -2205,6 +2256,90 @@ select:focus {
   margin: 0;
 }
 
+.merge-queue-summary,
+.merge-review-nav,
+.merge-review-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.merge-queue-summary {
+  border: 1px solid var(--line-subtle);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--surface-panel);
+}
+
+.merge-queue-summary-copy,
+.merge-queue-summary-count,
+.merge-review-nav-status {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.merge-queue-summary-copy strong,
+.merge-review-nav-status strong {
+  font-size: 15px;
+}
+
+.merge-queue-summary-copy span,
+.merge-queue-summary-copy em,
+.merge-review-nav-status span,
+.merge-review-panel .merge-warning {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  overflow-wrap: anywhere;
+}
+
+.merge-queue-summary-count {
+  min-width: 110px;
+  justify-items: flex-end;
+}
+
+.merge-queue-summary-count span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.merge-queue-summary-count strong {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.merge-review-panel {
+  gap: 14px;
+}
+
+.merge-review-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.merge-review-nav-buttons {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.merge-review-nav-status {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.merge-review-footer {
+  padding-top: 2px;
+  border-top: 1px solid var(--line-subtle);
+}
+
 .merge-repair-notice {
   display: flex;
   align-items: center;
@@ -2253,6 +2388,22 @@ select:focus {
   background: var(--green-soft);
 }
 
+.merge-success-panel {
+  border-color: var(--green);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--green-soft) 82%, var(--surface-panel)), var(--surface-panel));
+}
+
+.merge-success-panel .merge-confirmation-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.merge-success-panel .merge-preview {
+  background: var(--surface-panel);
+  border: 1px solid var(--line-subtle);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
 .merge-result.failed {
   border-color: var(--red);
   background: var(--red-soft);
@@ -2262,6 +2413,161 @@ select:focus {
   display: flex;
   justify-content: flex-start;
   margin-top: 6px;
+}
+
+.merge-confirmation-preview {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 14px;
+  padding: 12px;
+  background: linear-gradient(180deg, var(--surface-panel), var(--surface-muted));
+}
+
+.merge-confirmation-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.merge-confirmation-header strong,
+.merge-preview-table th {
+  color: var(--ink);
+}
+
+.merge-confirmation-header span,
+.merge-review-nav-status span {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  overflow-wrap: anywhere;
+}
+
+.merge-confirmation-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.merge-confirmation-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+}
+
+.merge-confirmation-meta div {
+  min-width: 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.merge-confirmation-meta dt {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.merge-confirmation-meta dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.merge-confirmation-meta dd span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.merge-preview-list {
+  gap: 6px;
+}
+
+.merge-id-list-plain {
+  display: grid;
+  gap: 4px;
+}
+
+.merge-preview-list-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.merge-preview-list-item span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.merge-confirmation-fields {
+  overflow: auto;
+  border: 1px solid var(--line-subtle);
+  border-radius: 10px;
+  background: var(--surface-panel);
+}
+
+.merge-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.merge-preview-table th,
+.merge-preview-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line-subtle);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+}
+
+.merge-preview-table thead th {
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.merge-preview-table tbody th {
+  width: 20%;
+  font-weight: 800;
+}
+
+.merge-preview-table tbody td {
+  width: 39%;
+}
+
+.merge-preview-table tbody tr:last-child th,
+.merge-preview-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.merge-preview-row.salesforce-writeback td:last-child {
+  color: var(--blue);
+  font-weight: 800;
+}
+
+.merge-preview-row.review-only td:last-child {
+  color: var(--amber-strong);
+  font-weight: 800;
+}
+
+.merge-preview-row.master-kept td:last-child {
+  color: var(--muted);
+  font-weight: 700;
 }
 
 .merge-matrix-wrap {
@@ -2520,6 +2826,10 @@ select:focus {
   .record-navigation,
   .pair-summary,
   .salesforce-merge-header,
+  .merge-confirmation-header,
+  .merge-queue-summary,
+  .merge-review-nav,
+  .merge-review-footer,
   .merge-repair-notice,
   .merge-actions {
     align-items: stretch;
@@ -2592,6 +2902,56 @@ select:focus {
   .export-picker .button,
   .button {
     flex: 1;
+  }
+
+  .merge-confirmation-summary,
+  .merge-confirmation-meta,
+  .merge-review-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .merge-preview-table,
+  .merge-preview-table thead,
+  .merge-preview-table tbody,
+  .merge-preview-table tr,
+  .merge-preview-table th,
+  .merge-preview-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .merge-preview-table thead {
+    display: none;
+  }
+
+  .merge-preview-table tbody tr {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line-subtle);
+  }
+
+  .merge-preview-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .merge-preview-table tbody th,
+  .merge-preview-table tbody td {
+    padding: 0;
+    border: 0;
+  }
+
+  .merge-preview-table tbody th {
+    margin-bottom: 6px;
+  }
+
+  .merge-preview-table tbody td + td {
+    margin-top: 4px;
+  }
+
+  .merge-queue-summary-count,
+  .merge-review-nav-status {
+    min-width: 0;
+    justify-items: flex-start;
+    text-align: left;
   }
 
   .csv-object-menu,

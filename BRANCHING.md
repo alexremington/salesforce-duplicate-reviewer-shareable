@@ -1,11 +1,11 @@
 # Branching Workflow
 
-This repo has two branches with different purposes.
+This repo has two local/pushed branches with different purposes.
 
 ## Branches
 
-- `main`: private working branch for local configuration, team-specific defaults, and internal notes.
-- `shareable`: public-safe branch. It must not contain exported data, real report IDs, tenant IDs, personal machine paths, tokens, or private team-specific config.
+- `main`: private working branch. It may contain local paths, real report IDs, org defaults, and team-specific operating notes.
+- `shareable`: public-safe branch. It must not contain exported Salesforce data, real report IDs, tenant IDs, personal machine paths, tokens, or private team-specific config.
 
 The public GitHub mirror is separate from the private repo:
 

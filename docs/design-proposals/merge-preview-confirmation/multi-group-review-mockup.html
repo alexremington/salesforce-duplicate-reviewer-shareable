@@ -1,0 +1,659 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Multi-Group Merge Review Mockup</title>
+    <style>
+      :root {
+        --bg: #eef6ff;
+        --surface: #ffffff;
+        --surface-soft: #f3f8ff;
+        --surface-muted: #e8f4ef;
+        --ink: #13233f;
+        --muted: #5e708e;
+        --line: #b8cce3;
+        --line-strong: #8fb1d8;
+        --blue: #0b5fff;
+        --blue-soft: #dfeaff;
+        --green: #0e8f54;
+        --green-soft: #def6e8;
+        --amber: #c36b11;
+        --amber-soft: #fff0df;
+        --shadow: 0 12px 30px rgba(16, 42, 84, 0.08);
+        --radius-lg: 22px;
+        --radius-md: 16px;
+        --radius-sm: 12px;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Avenir Next", "Segoe UI", sans-serif;
+        background: linear-gradient(180deg, #f8fbff 0%, var(--bg) 14%, #edf7f2 100%);
+        color: var(--ink);
+      }
+
+      .frame {
+        width: 1440px;
+        min-height: 980px;
+        margin: 0 auto;
+        padding: 28px;
+      }
+
+      .topbar {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 22px;
+        padding: 18px 22px;
+        background: rgba(255, 255, 255, 0.88);
+        border: 1px solid rgba(143, 177, 216, 0.5);
+        border-radius: 24px;
+        box-shadow: var(--shadow);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .logo {
+        padding: 12px 16px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: #fff;
+        font-size: 28px;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+        color: #ce1f25;
+      }
+
+      .brand h1 {
+        margin: 0;
+        font-size: 28px;
+        line-height: 1.05;
+      }
+
+      .brand p {
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .header-actions {
+        display: flex;
+        gap: 12px;
+        justify-self: center;
+      }
+
+      .button {
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        padding: 12px 18px;
+        font-size: 14px;
+        font-weight: 800;
+        background: #fff;
+        color: var(--ink);
+      }
+
+      .button.primary {
+        background: var(--blue);
+        border-color: var(--blue);
+        color: #fff;
+      }
+
+      .support {
+        text-align: right;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .support span {
+        display: block;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 320px minmax(0, 1fr);
+        gap: 26px;
+        margin-top: 24px;
+      }
+
+      .rail, .main {
+        display: grid;
+        gap: 22px;
+      }
+
+      .panel {
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid rgba(143, 177, 216, 0.56);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow);
+      }
+
+      .source-card {
+        padding: 20px;
+      }
+
+      .panel-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 15px;
+        font-weight: 900;
+        margin: 0 0 14px;
+      }
+
+      .loaded-file {
+        padding: 14px 16px;
+        border: 1px dashed var(--line-strong);
+        border-radius: 16px;
+        background: var(--surface-soft);
+      }
+
+      .loaded-file strong {
+        display: block;
+        font-size: 16px;
+        margin-bottom: 6px;
+      }
+
+      .loaded-file span {
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .group-list {
+        display: grid;
+        gap: 12px;
+        margin-top: 18px;
+      }
+
+      .group-card {
+        padding: 14px 16px;
+        border-radius: 16px;
+        border: 1px solid var(--line);
+        background: #f7fbff;
+      }
+
+      .group-card.active {
+        border-color: var(--blue);
+        background: linear-gradient(180deg, #ffffff 0%, #edf4ff 100%);
+        box-shadow: inset 4px 0 0 var(--blue);
+      }
+
+      .group-card .eyebrow {
+        color: var(--blue);
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      .group-card strong {
+        display: block;
+        margin-top: 4px;
+        font-size: 18px;
+      }
+
+      .group-card p {
+        margin: 6px 0;
+        color: var(--green);
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .group-card span {
+        display: block;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.35;
+      }
+
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .stat {
+        padding: 18px 22px;
+        border-right: 1px solid var(--line);
+      }
+
+      .stat:last-child { border-right: 0; }
+      .stat span {
+        display: block;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+      .stat strong {
+        display: block;
+        margin-top: 4px;
+        font-size: 44px;
+        letter-spacing: -0.04em;
+      }
+
+      .review-shell {
+        padding: 24px;
+        background: linear-gradient(180deg, #f2fbf6 0%, #e8f7ff 100%);
+      }
+
+      .review-top {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 20px;
+        align-items: start;
+      }
+
+      .review-top .eyebrow {
+        color: var(--blue);
+        font-size: 12px;
+        font-weight: 900;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .review-top h2 {
+        margin: 8px 0 8px;
+        font-size: 32px;
+        line-height: 1.05;
+      }
+
+      .review-top p {
+        margin: 0;
+        max-width: 760px;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.5;
+      }
+
+      .status-stack {
+        display: grid;
+        gap: 10px;
+        justify-items: end;
+      }
+
+      .pill {
+        border-radius: 999px;
+        padding: 10px 14px;
+        font-size: 12px;
+        font-weight: 900;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .pill.ready {
+        color: var(--green);
+        background: var(--green-soft);
+      }
+
+      .pill.progress {
+        color: var(--ink);
+        background: #fff;
+        border: 1px solid var(--line);
+      }
+
+      .review-nav {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 18px;
+        margin-top: 18px;
+      }
+
+      .nav-buttons {
+        display: flex;
+        gap: 12px;
+      }
+
+      .nav-buttons .button {
+        min-width: 128px;
+      }
+
+      .review-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 18px;
+      }
+
+      .mini-card {
+        padding: 16px 18px;
+        border-radius: 18px;
+        border: 1px solid rgba(143, 177, 216, 0.72);
+        background: rgba(255, 255, 255, 0.74);
+      }
+
+      .mini-card span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 900;
+        text-transform: uppercase;
+      }
+
+      .mini-card strong {
+        display: block;
+        margin-top: 6px;
+        font-size: 28px;
+      }
+
+      .mini-card em {
+        display: block;
+        margin-top: 6px;
+        color: var(--muted);
+        font-style: normal;
+        font-size: 13px;
+      }
+
+      .chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      .chip {
+        border-radius: 16px;
+        border: 1px solid var(--line-strong);
+        background: #fff;
+        padding: 10px 14px;
+      }
+
+      .chip strong {
+        display: block;
+        font-size: 15px;
+      }
+
+      .chip span {
+        display: block;
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .field-list {
+        display: grid;
+        gap: 10px;
+        margin-top: 20px;
+      }
+
+      .field-card {
+        display: grid;
+        grid-template-columns: 180px 1fr;
+        gap: 18px;
+        padding: 16px 18px;
+        border-radius: 18px;
+        border: 1px solid rgba(143, 177, 216, 0.72);
+        background: rgba(255, 255, 255, 0.84);
+      }
+
+      .field-card.review-only {
+        background: var(--amber-soft);
+        border-color: #e39e55;
+      }
+
+      .field-card.writeback {
+        background: var(--blue-soft);
+        border-color: #76a2ff;
+      }
+
+      .field-name strong {
+        display: block;
+        font-size: 15px;
+      }
+
+      .field-name span {
+        display: block;
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .field-value strong {
+        display: block;
+        font-size: 30px;
+        letter-spacing: -0.03em;
+      }
+
+      .field-value p {
+        margin: 8px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.4;
+      }
+
+      .field-value .note {
+        color: #8a5200;
+      }
+
+      .footer-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 20px;
+        margin-top: 20px;
+        padding-top: 18px;
+        border-top: 1px solid rgba(143, 177, 216, 0.64);
+      }
+
+      .footer-actions p {
+        margin: 0;
+        max-width: 760px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      .footer-buttons {
+        display: flex;
+        gap: 12px;
+        flex: 0 0 auto;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <header class="topbar">
+        <div class="brand">
+          <div class="logo">POLITICO</div>
+          <div>
+            <h1>Duplicate Review</h1>
+            <p>Salesforce Account and Contact Matching</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button class="button primary">Import</button>
+          <button class="button">Export</button>
+        </div>
+        <div class="support">
+          Questions? Contact Alex Remington
+          <span>aremington@politico.com</span>
+        </div>
+      </header>
+
+      <div class="layout">
+        <aside class="rail">
+          <section class="panel source-card">
+            <div class="panel-title">
+              <span>Queued Merge Review</span>
+              <span style="color:#0e8f54;">3 Ready</span>
+            </div>
+            <div class="loaded-file">
+              <strong>salesforce-report-latest.json</strong>
+              <span>48 contacts loaded • 3 duplicate groups queued for merge confirmation</span>
+            </div>
+            <div class="group-list">
+              <article class="group-card active">
+                <div class="eyebrow">Current preview</div>
+                <strong>Contact group 7</strong>
+                <p>Master: Maya Rodriguez</p>
+                <span>1 duplicate removed • 1 Salesforce write-back • review-only company preference</span>
+              </article>
+              <article class="group-card">
+                <div class="eyebrow">Queued next</div>
+                <strong>Contact group 11</strong>
+                <p>Master: Devin Harper</p>
+                <span>2 duplicates removed • 0 write-backs • all surviving values stay on master</span>
+              </article>
+              <article class="group-card">
+                <div class="eyebrow">Queued next</div>
+                <strong>Contact group 19</strong>
+                <p>Master: Naomi Chen</p>
+                <span>1 duplicate removed • 1 Salesforce write-back • mobile survives from master</span>
+              </article>
+            </div>
+          </section>
+        </aside>
+
+        <main class="main">
+          <section class="panel summary">
+            <div class="stat">
+              <span>Total Records</span>
+              <strong>48</strong>
+            </div>
+            <div class="stat">
+              <span>Queued Merge Groups</span>
+              <strong>3</strong>
+            </div>
+            <div class="stat">
+              <span>Current Preview</span>
+              <strong>1/3</strong>
+            </div>
+          </section>
+
+          <section class="panel review-shell">
+            <div class="review-top">
+              <div>
+                <div class="eyebrow">Review Before Confirming</div>
+                <h2>Read-only merged Contact previews for the queued merge set</h2>
+                <p>
+                  Use the same group navigation model as Evaluate to inspect each resulting merged Contact.
+                  This review mode is read-only: no master or field-retention edits happen here.
+                  When you are satisfied with the queued previews, confirm the full merge set once.
+                </p>
+              </div>
+              <div class="status-stack">
+                <div class="pill ready">All freshness checks passed</div>
+                <div class="pill progress">Overall confirm affects 3 groups</div>
+              </div>
+            </div>
+
+            <div class="review-nav">
+              <div class="nav-buttons">
+                <button class="button">Previous</button>
+                <button class="button primary">Next</button>
+              </div>
+              <div style="text-align:right;">
+                <div style="font-size:12px;font-weight:900;color:#0b5fff;text-transform:uppercase;">Currently reviewing</div>
+                <div style="font-size:22px;font-weight:900;">Contact group 7</div>
+              </div>
+            </div>
+
+            <div class="review-grid">
+              <article class="mini-card">
+                <span>Surviving master</span>
+                <strong>Maya Rodriguez</strong>
+                <em>003T00000000002</em>
+              </article>
+              <article class="mini-card">
+                <span>Duplicate contacts removed</span>
+                <strong>1</strong>
+                <em>003T00000000001 will be deleted</em>
+              </article>
+              <article class="mini-card">
+                <span>Salesforce field write-backs</span>
+                <strong>1</strong>
+                <em>Lead Source will be updated on the master</em>
+              </article>
+            </div>
+
+            <div class="chip-row">
+              <div class="chip">
+                <strong>Maya Rodriguez</strong>
+                <span>003T00000000001 • duplicate removed</span>
+              </div>
+            </div>
+
+            <div class="field-list">
+              <article class="field-card">
+                <div class="field-name">
+                  <strong>Full Name</strong>
+                  <span>Master kept</span>
+                </div>
+                <div class="field-value">
+                  <strong>Maya Rodriguez</strong>
+                  <p>The selected master Contact value survives the merge.</p>
+                </div>
+              </article>
+
+              <article class="field-card review-only">
+                <div class="field-name">
+                  <strong>Company</strong>
+                  <span>Master survives</span>
+                </div>
+                <div class="field-value">
+                  <strong>Northstar Analytics 1 Inc.</strong>
+                  <p>Salesforce merge keeps the selected master value for this field.</p>
+                  <p class="note">Review/export preference: Northstar Analytics 1 (not written by Salesforce merge)</p>
+                </div>
+              </article>
+
+              <article class="field-card">
+                <div class="field-name">
+                  <strong>Email</strong>
+                  <span>Master kept</span>
+                </div>
+                <div class="field-value">
+                  <strong>contact1@example.com</strong>
+                  <p>The selected master Contact value survives the merge.</p>
+                </div>
+              </article>
+
+              <article class="field-card writeback">
+                <div class="field-name">
+                  <strong>Lead Source</strong>
+                  <span>Written to Salesforce</span>
+                </div>
+                <div class="field-value">
+                  <strong>Web</strong>
+                  <p>This field will be updated on the surviving master Contact during merge.</p>
+                </div>
+              </article>
+
+              <article class="field-card">
+                <div class="field-name">
+                  <strong>Mobile</strong>
+                  <span>Master kept</span>
+                </div>
+                <div class="field-value">
+                  <strong>(555) 020-0001</strong>
+                  <p>The selected master Contact value survives the merge.</p>
+                </div>
+              </article>
+            </div>
+
+            <div class="footer-actions">
+              <p>
+                These previews are read-only. To change a master choice or a retained field value, exit review mode and return to merge setup.
+                Confirming will send the queued Salesforce merges for all 3 ready groups.
+              </p>
+              <div class="footer-buttons">
+                <button class="button">Cancel</button>
+                <button class="button primary">Confirm all merges</button>
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>

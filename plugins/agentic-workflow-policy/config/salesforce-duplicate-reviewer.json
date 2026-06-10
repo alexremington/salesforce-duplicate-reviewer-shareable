@@ -2,9 +2,9 @@
   "scope_label": "salesforce-duplicate-reviewer",
   "policy_name": "lean-agentic-delivery",
   "low_risk_context": "Lean workflow: keep the main thread as the orchestrator, stay narrow, and implement directly unless the scope expands.",
-  "medium_risk_context": "Lean workflow: use architect only if you need sequencing or acceptance criteria, keep implementation single-writer, and use reviewer or qa-ux only when the risk surface justifies it.",
-  "visible_ui_context": "Visible UI work: use Hume only if design direction is still unresolved or the user explicitly wants design review; for interaction bugs, verify the real user path in the launched app before claiming success.",
-  "high_risk_context": "Higher-risk work: confirm runtime and source alignment first, keep implementation single-writer, and use reviewer or qa-ux before closeout when the risk surface justifies it.",
+  "medium_risk_context": "Lean workflow: use architect only if you need sequencing or acceptance criteria, keep implementation single-writer, and use reviewer or qa-ux only when the risk surface justifies it. If testing is involved, add a named regression and prove the exact user gesture path or live-runtime behavior before claiming success. Finish by running `npm run closeout` so uncommitted work is not left behind.",
+  "visible_ui_context": "Visible UI work: use Hume only if design direction is still unresolved or the user explicitly wants design review; for interaction bugs, verify the real user path in the launched app, probe hit-testing with elementFromPoint or bounding boxes, and do not treat screenshots or synthetic events as proof. Before handoff, run `npm run closeout` and do not stop with a dirty tree.",
+  "high_risk_context": "Higher-risk work: confirm runtime and source alignment first, keep implementation single-writer, use the live-runtime check helper when a copied runtime may be stale, and use reviewer or qa-ux before closeout when the risk surface justifies it. Treat `npm run closeout` as the final handoff gate before commit and push.",
   "high_risk_patterns": [
     "\\bui\\b",
     "\\bux\\b",

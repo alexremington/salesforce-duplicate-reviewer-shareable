@@ -1,0 +1,11 @@
+SELECT
+  Id,
+  Name,
+  Account.Name,
+  Email,
+  Phone,
+  ziPersonDirectPhone__c,
+  LinkedIn__c,
+  ZI_Person_LinkedIn_URL__c,
+  LID__LinkedIn_Company_Id__c
+FROM Contact
