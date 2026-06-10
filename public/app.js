@@ -434,9 +434,12 @@ const CONTACT_COMPANY_ALIGNMENT_THRESHOLD = 0.85;
 const CONTACT_EMAIL_ORG_CORROBORATION_FLOOR = 88;
 const CONTACT_CORROBORATED_EXACT_NAME_FLOOR = 86;
 const CONTACT_SPARSE_EXACT_NAME_FLOOR = 86;
+const CONTACT_EXACT_PHONE_LINKEDIN_DIVERGENT_NAME_CAP = 85;
 const CONTACT_EXACT_NAME_NEAR_COMPANY_CAP = 79;
 const CONTACT_FIRST_NAME_COMPANY_DOMAIN_FLOOR = 86;
 const CONTACT_SHORT_GIVEN_NAME_CONFLICT_CAP = 85;
+const CONTACT_SHARED_COMPANY_EXACT_PHONE_NAME_CONFLICT_CAP = 78;
+const CONTACT_SHARED_COMPANY_EXACT_PHONE_NAME_CONFLICT_REASON = "Shared company and exact phone with conflicting names";
 const CONTACT_EMAIL_CONTEXT_CORROBORATION_MIN = 0.5;
 const CONTACT_MIRROR_RELATIONSHIP_REASON = "Entitled Contact mirror";
 const TRAINING_LABELS = {
@@ -4023,6 +4026,16 @@ function scoreContactPair(left, right, cache = null) {
     emailSimilarity,
     linkedInSimilarity
   );
+  const sharedCompanyExactPhoneNameConflict = hasContactSharedCompanyExactPhoneNameConflict(
+    left,
+    right,
+    firstSimilarity,
+    lastSimilarity,
+    companySimilarity,
+    exactAnyPhone,
+    exactEmail,
+    exactLinkedIn
+  );
   const companyGeographyConflict =
     companySimilarity != null &&
     companySimilarity < 1 &&
@@ -4042,6 +4055,12 @@ function scoreContactPair(left, right, cache = null) {
     companyConflict &&
     (exactLinkedIn || exactAnyPhone) &&
     !strongCompanyCorroboration;
+  const exactPhoneLinkedInDivergentName = hasExactPhoneLinkedInDivergentName(
+    exactLinkedIn,
+    exactAnyPhone,
+    exactEmail,
+    fullNameSimilarity
+  );
   const exactNameCompany =
     Boolean(left.fullName && right.fullName && left.company && right.company) &&
     exactFullName &&
@@ -4074,6 +4093,9 @@ function scoreContactPair(left, right, cache = null) {
     if (exactIdentityCompanyConflict) {
       value = Math.min(value, CONTACT_STRONG_IDENTITY_CONFLICT_CAP);
     }
+    if (exactPhoneLinkedInDivergentName) {
+      value = Math.min(value, CONTACT_EXACT_PHONE_LINKEDIN_DIVERGENT_NAME_CAP);
+    }
     if ((fullNameSimilarity || 0) >= 0.98 && emailOrgCorroboration) {
       value = Math.max(value, CONTACT_EMAIL_ORG_CORROBORATION_FLOOR);
     }
@@ -4094,12 +4116,15 @@ function scoreContactPair(left, right, cache = null) {
     ) {
       value = Math.min(value, CONTACT_EXACT_NAME_NEAR_COMPANY_CAP);
     }
-    if (hasContactFirstNameCompanyDomainCorroboration(left, right, companySimilarity, sameEmailDomain)) {
+    if (hasContactFirstNameCompanyDomainCorroboration(left, right, companySimilarity, sameEmailDomain, exactLinkedIn)) {
       value = Math.max(value, CONTACT_FIRST_NAME_COMPANY_DOMAIN_FLOOR);
     }
   }
   if (exactFullName && exactAnyPhone && companyConflict && !strongIdentityCorroboration) {
     value = Math.min(value, CONTACT_COMPANY_DIVERGENCE_CAP);
+  }
+  if (sharedCompanyExactPhoneNameConflict) {
+    value = Math.min(value, CONTACT_SHARED_COMPANY_EXACT_PHONE_NAME_CONFLICT_CAP);
   }
   if (givenNameConflict) {
     value = Math.min(value, CONTACT_SHORT_GIVEN_NAME_CONFLICT_CAP);
@@ -4109,6 +4134,7 @@ function scoreContactPair(left, right, cache = null) {
   if (exactEmail) reasons.push("Exact email");
   if (exactLinkedIn) reasons.push("Exact LinkedIn URL");
   if (exactAnyPhone) reasons.push("Exact phone");
+  if (exactPhoneLinkedInDivergentName) reasons.push("Exact phone and LinkedIn with divergent name");
   if (exactNameCompany) reasons.push("Exact name + company");
   if (sameEmailDomain) {
     reasons.push("Same email domain");
@@ -4121,6 +4147,7 @@ function scoreContactPair(left, right, cache = null) {
   if (companyGeographyConflict) reasons.push("Conflicting geographic company names");
   if (companyDivergenceWithoutCorroboration) reasons.push("Different company without corroborating contact data");
   if (exactIdentityCompanyConflict) reasons.push("Exact contact data with conflicting company");
+  if (sharedCompanyExactPhoneNameConflict) reasons.push(CONTACT_SHARED_COMPANY_EXACT_PHONE_NAME_CONFLICT_REASON);
   if (givenNameConflict) reasons.push("Conflicting first names");
 
   return {
@@ -4163,6 +4190,12 @@ function hasStrongContactIdentityCorroboration(exactEmail, exactLinkedIn, emailS
   return (emailSimilarity || 0) >= CONTACT_EMAIL_CONTEXT_CORROBORATION_MIN;
 }
 
+function hasExactPhoneLinkedInDivergentName(exactLinkedIn, exactAnyPhone, exactEmail, fullNameSimilarity) {
+  if (!exactLinkedIn || !exactAnyPhone || exactEmail) return false;
+  const nameSimilarity = fullNameSimilarity || 0;
+  return nameSimilarity >= 0.5 && nameSimilarity < 0.6;
+}
+
 function hasCorroboratedExactContactName(exactFullName, left, right, companySimilarity, emailSimilarity, sameEmailDomain, emailOrgCorroboration) {
   if (!exactFullName) return false;
   if ((companySimilarity || 0) >= 1) return true;
@@ -4177,8 +4210,8 @@ function hasCorroboratedExactContactName(exactFullName, left, right, companySimi
   return missingCompanyContext && (emailSimilarity || 0) >= 0.15;
 }
 
-function hasContactFirstNameCompanyDomainCorroboration(left, right, companySimilarity, sameEmailDomain) {
-  if ((companySimilarity || 0) < 1 || !sameEmailDomain || isGenericEmailDomain(left.domain)) return false;
+function hasContactFirstNameCompanyDomainCorroboration(left, right, companySimilarity, sameEmailDomain, exactLinkedIn) {
+  if (exactLinkedIn || (companySimilarity || 0) < 1 || !sameEmailDomain || isGenericEmailDomain(left.domain)) return false;
   const leftGivenName = contactPrimaryGivenName(left);
   const rightGivenName = contactPrimaryGivenName(right);
   return Boolean(leftGivenName && leftGivenName === rightGivenName && left.lastName && right.lastName);
@@ -4191,6 +4224,13 @@ function hasContactGivenNameConflict(left, right, exactEmail, exactLinkedIn, exa
   if (!leftGivenName || !rightGivenName || !left.lastName || left.lastName !== right.lastName) return false;
   if (contactGivenNameSimilarity(leftGivenName, rightGivenName) >= 0.6) return false;
   return true;
+}
+
+function hasContactSharedCompanyExactPhoneNameConflict(left, right, firstSimilarity, lastSimilarity, companySimilarity, exactAnyPhone, exactEmail, exactLinkedIn) {
+  if (!left.company || !right.company) return false;
+  if (exactEmail || exactLinkedIn || !exactAnyPhone) return false;
+  if ((companySimilarity || 0) < CONTACT_COMPANY_ALIGNMENT_THRESHOLD) return false;
+  return (firstSimilarity || 0) < 0.7 && (lastSimilarity || 0) < 0.7;
 }
 
 function contactFullNameSimilarity(left, right) {

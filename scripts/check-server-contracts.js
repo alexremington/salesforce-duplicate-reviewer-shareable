@@ -98,6 +98,7 @@ async function main() {
     assertEqual(health.latestStagingFiles, true, "health latestStagingFiles");
     assertEqual(health.jsonDatasets, true, "health jsonDatasets");
 
+    await assertContactMirrorProvenanceGap();
     await assertRetiredMergeGateAbsent();
     await assertStaticApp(baseUrl);
     await assertLatestEndpointCaching(baseUrl);
@@ -105,6 +106,9 @@ async function main() {
     await assertAccountScopeDivergenceRegression();
     await assertAccountExactWebsiteCorroborationRegression();
     await assertContactSparseExactNameFloorRegression();
+    await assertContactCompanyDifferenceVetoRegression();
+    await assertContactExactPhoneLinkedInDivergenceRegression();
+    await assertContactSharedCompanyExactPhoneNameConflictRegression();
     await assertContactMirrorRelationshipRegression();
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/premerge-check");
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/merge");
@@ -429,6 +433,110 @@ async function assertContactSparseExactNameFloorRegression() {
   if (Math.round(score.value) !== 86 || !score.reasons.includes("Different company without corroborating contact data")) {
     throw new Error(
       `Contact sparse exact-name regression failed: expected the new 86-point floor, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
+    );
+  }
+}
+
+async function assertContactMirrorProvenanceGap() {
+  const metadataPath = path.join(PROJECT_DIR, "incoming", "staging-report-00OVZ000003DjaH2AS-metadata.json");
+  const csvPath = path.join(PROJECT_DIR, "Output", "staging-contacts", "salesforce-report-latest.csv");
+  const queryPath = path.join(PROJECT_DIR, "queries", "report-00OVZ000003DjaH2AS.soql");
+  const metadata = JSON.parse(await fs.readFile(metadataPath, "utf8"));
+  const csvHeaders = (await fs.readFile(csvPath, "utf8"))
+    .split(/\r?\n/, 1)[0]
+    .split(",")
+    .map((header) => header.replace(/^"|"$/g, ""));
+  const queryText = await fs.readFile(queryPath, "utf8");
+
+  const metadataColumns = [
+    ...(metadata?.reportMetadata?.detailColumns || []),
+    ...Object.values(metadata?.reportExtendedMetadata?.detailColumnInfo || {}).map((column) => column?.label || "")
+  ];
+
+  for (const sourceText of [metadataColumns.join("\n"), csvHeaders.join("\n"), queryText]) {
+    if (/mirror\s+of/i.test(sourceText)) {
+      throw new Error(
+        "The staging Contacts report contract still exposes Mirror Of in the source report or generated output. " +
+        "Mirror values must come from a companion source or post-export normalization step, not from the Contact report itself."
+      );
+    }
+  }
+}
+
+async function assertContactCompanyDifferenceVetoRegression() {
+  const api = loadAppApi();
+  const csv = [
+    "Id,First Name,Last Name,Company,Email,Phone,Mobile,LinkedIn__c,ZI_Person_LinkedIn_URL__c",
+    "003A00000000011,Taylor,Mason,Northstar Analytics,taylor.mason@northstar.example,(555) 010-4321,,https://www.linkedin.com/in/taylor-mason-1010,https://www.linkedin.com/in/taylor-mason-1010/",
+    "003A00000000012,Taylor,Mason,Civic Harbor,taylor.mason@northstar.example,(555) 010-4321,,https://www.linkedin.com/in/taylor-mason-1010,https://www.linkedin.com/in/taylor-mason-1010/"
+  ].join("\n");
+  const parsed = api.parseCsv(csv);
+  const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
+  const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
+  const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.contact.fields);
+  const preparedRows = api.prepareRows(rows, "contact", mapping);
+
+  api.state.objectType = "contact";
+  api.state.rows = rows;
+  api.state.headers = headers;
+  api.state.mapping = mapping;
+
+  const score = api.scoreContactPair(preparedRows[0], preparedRows[1]);
+  if (Math.round(score.value) !== 0 || !score.reasons.includes("Different company")) {
+    throw new Error(
+      `Contact company-veto regression failed: expected company mismatch to force a zero score, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
+    );
+  }
+}
+
+async function assertContactExactPhoneLinkedInDivergenceRegression() {
+  const api = loadAppApi();
+  const csv = [
+    "Id,First Name,Last Name,Company,Email,Phone,Mobile,LinkedIn__c,ZI_Person_LinkedIn_URL__c",
+    "003A00000000021,Michael,Zehr,Capcventures,mzehr@capcventures.com.invalid,2022106647,,https://www.linkedin.com/in/michael-zehr-2670b57,https://www.linkedin.com/in/michael-zehr-2670b57/",
+    "003A00000000022,Michael,Whatley,Capcventures,mwhatley@capcventures.com.invalid,2022106647,,https://www.linkedin.com/in/michael-zehr-2670b57,https://www.linkedin.com/in/michael-zehr-2670b57/"
+  ].join("\n");
+  const parsed = api.parseCsv(csv);
+  const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
+  const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
+  const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.contact.fields);
+  const preparedRows = api.prepareRows(rows, "contact", mapping);
+
+  api.state.objectType = "contact";
+  api.state.rows = rows;
+  api.state.headers = headers;
+  api.state.mapping = mapping;
+
+  const score = api.scoreContactPair(preparedRows[0], preparedRows[1]);
+  if (Math.round(score.value) !== 76 || !score.reasons.includes("Exact phone and LinkedIn with divergent name")) {
+    throw new Error(
+      `Contact phone+LinkedIn divergence regression failed: expected the new stabilized score, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
+    );
+  }
+}
+
+async function assertContactSharedCompanyExactPhoneNameConflictRegression() {
+  const api = loadAppApi();
+  const csv = [
+    "Id,First Name,Last Name,Company,Email,Phone,Mobile",
+    "003f200002O50cwAAB,Karen,Irish,Out & Equal Workplace Advocates,kirish@outandequal.org.invalid,+1 415 694 6500,(202) 372-5155",
+    "003f200002drJvyAAE,Caryn,Viverito,Out & Equal Workplace Advocates,,(415) 694-6500,(202) 567-3306"
+  ].join("\n");
+  const parsed = api.parseCsv(csv);
+  const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
+  const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
+  const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.contact.fields);
+  const preparedRows = api.prepareRows(rows, "contact", mapping);
+
+  api.state.objectType = "contact";
+  api.state.rows = rows;
+  api.state.headers = headers;
+  api.state.mapping = mapping;
+
+  const score = api.scoreContactPair(preparedRows[0], preparedRows[1]);
+  if (Math.round(score.value) >= 86 || !score.reasons.includes("Shared company and exact phone with conflicting names")) {
+    throw new Error(
+      `Contact shared-company exact-phone regression failed: expected the divergent-name pair to stay below the duplicate threshold, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
     );
   }
 }
