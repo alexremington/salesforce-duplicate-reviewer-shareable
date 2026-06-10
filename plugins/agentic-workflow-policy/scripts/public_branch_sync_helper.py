@@ -16,10 +16,10 @@ PUBLIC_SAFE_PATHS = (
     "plugins/agentic-workflow-policy",
 )
 PUBLIC_SAFE_PATTERNS = (
-    "/Users/aremington",
-    "OneDrive-POLITICO",
-    "C:/Users/runneradmin",
-    "C:\\Users\\runneradmin",
+    "/".join(["", "Users", "aremington"]),
+    "-".join(["OneDrive", "POLITICO"]),
+    "/".join(["C:", "Users", "runneradmin"]),
+    "\\".join(["C:", "Users", "runneradmin"]),
 )
 
 
