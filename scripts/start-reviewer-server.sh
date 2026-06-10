@@ -10,7 +10,7 @@ LOG_DIR="${HOME}/Library/Logs/salesforce-duplicate-reviewer"
 OUT_LOG="${LOG_DIR}/duplicate-reviewer-server.out.log"
 ERR_LOG="${LOG_DIR}/duplicate-reviewer-server.err.log"
 STATIC_DIR="${DUPLICATE_REVIEWER_STATIC_DIR:-${HOME}/Library/Application Support/salesforce-duplicate-reviewer/static}"
-STAGING_ROOT="${DUPLICATE_REVIEWER_STAGING_ROOT:-${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging}"
+STAGING_ROOT="${DUPLICATE_REVIEWER_STAGING_ROOT:-${HOME}/Library/Application Support/Salesforce Pulls/Duplicate Reviewer/staging}"
 STAGING_CONTACTS_CSV="${STAGING_CONTACTS_CSV:-${STAGING_ROOT}/Output/staging-contacts/salesforce-report-latest.csv}"
 STAGING_ACCOUNTS_CSV="${STAGING_ACCOUNTS_CSV:-${STAGING_ROOT}/Output/staging-accounts/salesforce-report-latest.csv}"
 LABEL="com.salesforce-duplicate-reviewer.server"
@@ -82,9 +82,9 @@ write_server_plist() {
     <key>SF_USE_GENERIC_UNIX_KEYCHAIN</key>
     <string>true</string>
     <key>SF_ORG_ALIAS</key>
-    <string>${SF_ORG_ALIAS:-politico-staging}</string>
+    <string>${SF_ORG_ALIAS:-your-org-alias}</string>
     <key>SF_INSTANCE_URL</key>
-    <string>${SF_INSTANCE_URL:-https://politico--staging.sandbox.my.salesforce.com}</string>
+    <string>${SF_INSTANCE_URL:-https://your-domain.my.salesforce.com}</string>
     <key>SF_API_VERSION</key>
     <string>${SF_API_VERSION:-v67.0}</string>
   </dict>

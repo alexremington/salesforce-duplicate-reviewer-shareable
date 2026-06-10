@@ -219,13 +219,13 @@ There is no test framework. Minimum checks before committing changes:
 node --check public/app.js
 node --check scripts/check-account-calibration.js
 node scripts/check-account-calibration.js \
-  --labels "/Users/aremington/Downloads/account-training-labels (1).csv" \
-  --source "/Users/aremington/Downloads/Account.csv" \
+  --labels "/path/to/account-training-labels.csv" \
+  --source "/path/to/Account.csv" \
   --object account \
   --assert-threshold 86
 node scripts/check-account-calibration.js \
-  --labels "/Users/aremington/Downloads/contact-training-labels.csv" \
-  --source "/Users/aremington/Desktop/contact.csv" \
+  --labels "/path/to/contact-training-labels.csv" \
+  --source "/path/to/contact.csv" \
   --object contact \
   --assert-threshold 86
 ```

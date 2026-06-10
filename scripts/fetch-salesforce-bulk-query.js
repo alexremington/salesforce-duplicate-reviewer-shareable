@@ -3,7 +3,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
-const DEFAULT_INSTANCE_URL = "https://politico.my.salesforce.com";
+const DEFAULT_INSTANCE_URL = "https://your-domain.my.salesforce.com";
 const DEFAULT_API_VERSION = "v64.0";
 const DEFAULT_POLL_MS = 5000;
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;

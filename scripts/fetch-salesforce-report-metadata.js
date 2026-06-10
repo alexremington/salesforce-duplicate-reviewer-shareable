@@ -3,8 +3,8 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
-const DEFAULT_INSTANCE_URL = "https://politico.my.salesforce.com";
-const DEFAULT_REPORT_ID = "00OVq00000CxYd3MAF";
+const DEFAULT_INSTANCE_URL = "https://your-domain.my.salesforce.com";
+const DEFAULT_REPORT_ID = "contacts";
 const DEFAULT_API_VERSION = "v64.0";
 
 const USAGE = `Usage:

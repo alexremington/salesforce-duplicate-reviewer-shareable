@@ -1,6 +1,6 @@
 -- Bulk API cannot execute a Salesforce report ID directly.
--- Replace this example with the SOQL equivalent of report 00OVq00000CxYd3MAF,
--- then save it as queries/report-00OVq00000CxYd3MAF.soql.
+-- Replace this example with the SOQL equivalent of your target report,
+-- then save it as queries/report-sample.soql.
 --
 -- Use the report metadata JSON to identify the base object, selected fields,
 -- date filter, and report filters. The scheduled wrapper reads the .soql file.

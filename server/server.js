@@ -24,8 +24,8 @@ const STAGING_CONTACTS_CSV =
 const STAGING_ACCOUNTS_CSV =
   process.env.STAGING_ACCOUNTS_CSV ||
   path.join(OUTPUT_DIR, "staging-accounts", "salesforce-report-latest.csv");
-const SF_ORG_ALIAS = process.env.SF_ORG_ALIAS || "politico-staging";
-const SF_INSTANCE_URL = process.env.SF_INSTANCE_URL || "https://politico--staging.sandbox.my.salesforce.com";
+const SF_ORG_ALIAS = process.env.SF_ORG_ALIAS || "your-org-alias";
+const SF_INSTANCE_URL = process.env.SF_INSTANCE_URL || "https://your-domain.my.salesforce.com";
 const SF_API_VERSION = process.env.SF_API_VERSION || "v67.0";
 const SF_CLI_BIN = String(process.env.SF_CLI_BIN || "").trim();
 const FEATURE_VERSION = "duplicate-reviewer-cli-warning-safe-v3";

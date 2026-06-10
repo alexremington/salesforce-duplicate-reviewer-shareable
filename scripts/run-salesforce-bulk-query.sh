@@ -10,10 +10,10 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 source "${SCRIPT_DIR}/load-env.sh"
 load_project_env "${PROJECT_DIR}/.env"
 
-ORG_ALIAS="${SF_ORG_ALIAS:-politico}"
-INSTANCE_URL="${SF_INSTANCE_URL:-https://politico.my.salesforce.com}"
+ORG_ALIAS="${SF_ORG_ALIAS:-your-org-alias}"
+INSTANCE_URL="${SF_INSTANCE_URL:-https://your-domain.my.salesforce.com}"
 API_VERSION="${SF_API_VERSION:-v64.0}"
-REPORT_ID="${SF_REPORT_ID:-00OVq00000CxYd3MAF}"
+REPORT_ID="${SF_REPORT_ID:-contacts}"
 SOQL_FILE="${SF_SOQL_FILE:-${PROJECT_DIR}/queries/report-${REPORT_ID}.soql}"
 OUT_DIR="${OUT_DIR:-${PROJECT_DIR}/Output/report-${REPORT_ID}}"
 LATEST_CSV_NAME="${LATEST_CSV_NAME:-salesforce-report-latest.csv}"
@@ -51,8 +51,8 @@ latest_file="${OUT_DIR}/${LATEST_CSV_NAME}"
 latest_json_file="${OUT_DIR}/${LATEST_JSON_NAME}"
 
 access_token="$(
-  sf org auth show-access-token --target-org "${ORG_ALIAS}" --json \
-    | node -e 'let s=""; process.stdin.on("data", d => s += d); process.stdin.on("end", () => { const result = JSON.parse(s).result || {}; const token = String(result.accessToken || result.token || "").trim(); if (!token) process.exit(2); process.stdout.write(token); });'
+  env -u SF_API_VERSION sf org display --target-org "${ORG_ALIAS}" --json \
+    | node -e 'let s=""; process.stdin.on("data", d => s += d); process.stdin.on("end", () => { const result = JSON.parse(s).result || {}; if (!result.accessToken) process.exit(2); process.stdout.write(result.accessToken); });'
 )"
 
 SF_ACCESS_TOKEN="${access_token}" \

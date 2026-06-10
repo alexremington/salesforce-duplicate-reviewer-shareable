@@ -86,9 +86,9 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host 'Checking duplicate labels export defaults...'
 $labelsDryRun = (& node scripts/run-salesforce-duplicate-label-export.js --object contact --dry-run) -join "`n"
 $expectedLabelsSource = if ($IsWindows) {
-  'Source CSV: C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.csv'
+  'Source CSV: $env:APPDATA\Salesforce Pulls\Duplicate Reviewer\staging\Output\staging-contacts\salesforce-report-latest.csv'
 } else {
-  "Source CSV: $HOME/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.csv"
+  "Source CSV: $HOME/Library/Application Support/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.csv"
 }
 if ($labelsDryRun -notmatch [regex]::Escape($expectedLabelsSource)) {
   Write-Host $labelsDryRun
@@ -96,8 +96,8 @@ if ($labelsDryRun -notmatch [regex]::Escape($expectedLabelsSource)) {
 }
 
 Write-Host 'Checking staging routing defaults...'
-$contactsOutDir = 'C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts'
-$accountsOutDir = 'C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-accounts'
+$contactsOutDir = Join-Path $env:APPDATA 'Salesforce Pulls\Duplicate Reviewer\staging\Output\staging-contacts'
+$accountsOutDir = Join-Path $env:APPDATA 'Salesforce Pulls\Duplicate Reviewer\staging\Output\staging-accounts'
 $env:OUT_DIR = $contactsOutDir
 $contactsDryRun = (& scripts/run-staging-contacts-bulk-query.sh --dry-run) -join "`n"
 if ($contactsDryRun -notmatch '/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts') {
@@ -108,17 +108,17 @@ if ($contactsDryRun -notmatch 'Bulk poll interval ms: 5000') {
   Write-Host $contactsDryRun
   throw 'Staging Contacts bulk polling was not pinned to the faster handoff interval.'
 }
-if ($contactsDryRun -notmatch 'Latest JSON: C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.json') {
+if ($contactsDryRun -notmatch 'Latest JSON: .*[\\/]Salesforce Pulls[\\/]Duplicate Reviewer[\\/]staging[\\/]Output[\\/]staging-contacts[\\/]salesforce-report-latest.json') {
   Write-Host $contactsDryRun
   throw 'Staging Contacts did not preserve the canonical latest JSON output flow.'
 }
-if ($contactsDryRun -notmatch 'Compatibility CSV: C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.csv') {
+if ($contactsDryRun -notmatch 'Compatibility CSV: .*[\\/]Salesforce Pulls[\\/]Duplicate Reviewer[\\/]staging[\\/]Output[\\/]staging-contacts[\\/]salesforce-report-latest.csv') {
   Write-Host $contactsDryRun
   throw 'Staging Contacts did not preserve the canonical compatibility CSV output flow.'
 }
 $bulkQueryWrapper = Get-Content scripts/run-salesforce-bulk-query.sh -Raw
-if ($bulkQueryWrapper -notmatch 'sf org auth show-access-token') {
-  throw 'Bulk query wrapper did not use sf org auth show-access-token.'
+if ($bulkQueryWrapper -notmatch 'sf org display') {
+  throw 'Bulk query wrapper did not use sf org display.'
 }
 $env:OUT_DIR = $accountsOutDir
 $accountsDryRun = (& scripts/run-staging-accounts-bulk-query.sh --dry-run) -join "`n"
@@ -130,11 +130,11 @@ if ($accountsDryRun -notmatch 'Bulk poll interval ms: 5000') {
   Write-Host $accountsDryRun
   throw 'Staging Accounts bulk polling was not pinned to the faster handoff interval.'
 }
-if ($accountsDryRun -notmatch 'Latest JSON: C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-accounts/salesforce-report-latest.json') {
+if ($accountsDryRun -notmatch 'Latest JSON: .*[\\/]Salesforce Pulls[\\/]Duplicate Reviewer[\\/]staging[\\/]Output[\\/]staging-accounts[\\/]salesforce-report-latest.json') {
   Write-Host $accountsDryRun
   throw 'Staging Accounts did not preserve the canonical latest JSON output flow.'
 }
-if ($accountsDryRun -notmatch 'Compatibility CSV: C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-accounts/salesforce-report-latest.csv') {
+if ($accountsDryRun -notmatch 'Compatibility CSV: .*[\\/]Salesforce Pulls[\\/]Duplicate Reviewer[\\/]staging[\\/]Output[\\/]staging-accounts[\\/]salesforce-report-latest.csv') {
   Write-Host $accountsDryRun
   throw 'Staging Accounts did not preserve the canonical compatibility CSV output flow.'
 }
