@@ -106,6 +106,8 @@ Name remains the highest-weighted contact signal in aggregate, but it is scored 
 
 Entitled Contact mirrors are a Contact-only hard exclusion. If a loaded Contact's mapped `Mirror of` lookup resolves to another loaded Contact by Salesforce ID or mirrored display name, the pair scores as a non-duplicate, is excluded from duplicate-group formation, and carries the `Entitled Contact mirror` reason.
 
+The staging source report for `00OVZ000003DjaH2AS` is Contact-only and does not expose `Mirror Of` in the report metadata or CSV headers. Any Contact-level mirror field must therefore be supplied by a companion source or post-export normalization step before Duplicate Reviewer matching starts.
+
 The group score is the average of every pair score in the active cluster. `minPairScore` is tracked separately and displayed as a cohesion warning. `matchedFieldPercent` is the average share of comparable fields whose pair score is at least `MATCHED_FIELD_THRESHOLD`.
 
 Groups are sorted by:

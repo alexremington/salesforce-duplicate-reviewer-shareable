@@ -152,7 +152,7 @@ module.exports = {
   accountCommentaryNormalizationSmokeCsv,
   accountCompanyNormalizationSmokeCsv,
   contactLastNameChangeSmokeCsv,
-  contactExactIdentityConflictSmokeCsv,
+  contactDifferentCompanyConflictSmokeCsv,
   contactMirrorRelationshipSmokeCsv,
   contactMissingIdSmokeCsv,
   contactSmokeCsv,

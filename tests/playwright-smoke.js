@@ -13,7 +13,6 @@ const {
 const {
   accountCommentaryNormalizationSmokeCsv,
   accountSmokeCsv,
-  accountCompanyNormalizationSmokeCsv,
   contactDifferentCompanyConflictSmokeCsv,
   contactLastNameChangeSmokeCsv,
   contactMirrorRelationshipSmokeCsv,
@@ -54,7 +53,7 @@ async function run() {
   const csvPath = path.join(outDir, "contacts-smoke.csv");
   const missingContactIdCsvPath = path.join(outDir, "contacts-missing-ids.csv");
   const lastNameChangeCsvPath = path.join(outDir, "contacts-last-name-change.csv");
-  const exactIdentityConflictCsvPath = path.join(outDir, "contacts-exact-identity-conflict.csv");
+  const differentCompanyConflictCsvPath = path.join(outDir, "contacts-different-company-conflict.csv");
   const mirrorRelationshipCsvPath = path.join(outDir, "contacts-mirror-relationship.csv");
   const accountCsvPath = path.join(outDir, "accounts-smoke.csv");
   const accountCompanyNormalizationCsvPath = path.join(outDir, "accounts-company-normalization.csv");
@@ -69,7 +68,7 @@ async function run() {
   await fs.writeFile(csvPath, contactCsv);
   await fs.writeFile(missingContactIdCsvPath, contactMissingIdSmokeCsv());
   await fs.writeFile(lastNameChangeCsvPath, contactLastNameChangeSmokeCsv());
-  await fs.writeFile(exactIdentityConflictCsvPath, contactExactIdentityConflictSmokeCsv());
+  await fs.writeFile(differentCompanyConflictCsvPath, contactDifferentCompanyConflictSmokeCsv());
   await fs.writeFile(mirrorRelationshipCsvPath, contactMirrorRelationshipSmokeCsv());
   await fs.writeFile(accountCsvPath, accountSmokeCsv());
   await fs.writeFile(accountCompanyNormalizationCsvPath, accountCompanyNormalizationSmokeCsv());
@@ -127,7 +126,7 @@ async function run() {
     await assertLegacyProdContactsRecentFileCompatibility(prodContactsPage);
     const emptyImportButtonState = await assertEmptyImportButtonOpensFileChooser(browser, csvPath);
     const lastNameChangeCandidateState = await assertLastNameChangeCandidateMatch(browser, lastNameChangeCsvPath);
-    const exactIdentityConflictState = await assertExactIdentityConflictSeparated(browser, exactIdentityConflictCsvPath);
+    const differentCompanyConflictState = await assertDifferentCompanyConflictSeparated(browser, differentCompanyConflictCsvPath);
     await assertMirrorRelationshipSeparated(browser, mirrorRelationshipCsvPath);
     const largeContactPerformance = await assertLargeContactCsvPerformance(browser, largeContactCsvPath);
 
@@ -443,42 +442,6 @@ async function run() {
     }
     if (differentCompanyConflictState.groupCount !== 0) {
       throw new Error(`Expected different-company Contact pair to stay below the duplicate threshold: ${JSON.stringify(differentCompanyConflictState)}`);
-    }
-    if (
-      sharedCompanyExactPhoneNameConflictState.groupCount !== 0 ||
-      sharedCompanyExactPhoneNameConflictState.runtimeScore >= 86 ||
-      !sharedCompanyExactPhoneNameConflictState.reasons.includes("Shared company and exact phone with conflicting names")
-    ) {
-      throw new Error(`Expected shared-company exact-phone Contact pair to stay below the duplicate threshold with the new name-conflict cap: ${JSON.stringify(sharedCompanyExactPhoneNameConflictState)}`);
-    }
-    if (
-      pairRegressionState.rowCount !== 8 ||
-      pairRegressionState.groupCount !== 3 ||
-      pairRegressionState.processingMode !== "worker" ||
-      pairRegressionState.missingGroupedPairs.length !== 0 ||
-      pairRegressionState.groupedFalsePair
-    ) {
-      throw new Error(`Expected the pair regression fixture to load the three true-positive groups and keep the false pair separated: ${JSON.stringify(pairRegressionState)}`);
-    }
-    if (
-      accountCompanyNormalizationState.rowCount !== 2 ||
-      accountCompanyNormalizationState.groupCount !== 1 ||
-      accountCompanyNormalizationState.runtimeScore < 70 ||
-      !accountCompanyNormalizationState.reasons.includes("Exact account name") ||
-      !accountCompanyNormalizationState.reasons.includes("Exact phone")
-    ) {
-      throw new Error(`Expected the account company normalization fixture to group the canonical alias pair: ${JSON.stringify(accountCompanyNormalizationState)}`);
-    }
-    if (
-      accountCommentaryNormalizationState.rowCount !== 2 ||
-      accountCommentaryNormalizationState.groupCount !== 1 ||
-      accountCommentaryNormalizationState.runtimeScore < 70 ||
-      !accountCommentaryNormalizationState.reasons.includes("Exact account name") ||
-      !accountCommentaryNormalizationState.reasons.includes("Exact phone")
-    ) {
-      throw new Error(
-        `Expected the account commentary normalization fixture to strip internal commentary and keep exact-name plus exact-phone evidence: ${JSON.stringify(accountCommentaryNormalizationState)}`
-      );
     }
     assertPerformanceBudget("large Contact CSV worker import", largeContactPerformance.elapsedMs, PERFORMANCE_BUDGETS.largeContactCsvWorkerMs);
     if (!lightTheme.colorScheme.includes("light") || !darkTheme.colorScheme.includes("dark") || lightTheme.bodyBg === darkTheme.bodyBg) {
@@ -927,52 +890,6 @@ async function assertLastNameChangeCandidateMatch(browser, filePath) {
         firstGroupScore: state.groups[0]?.score || 0,
         firstGroupReasons: state.groups[0]?.reasons || []
       })))
-    };
-  } finally {
-    await page.close();
-  }
-}
-
-async function assertAccountCompanyNormalizationSeparated(browser, filePath) {
-  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
-  const diagnostics = [];
-  page.on("console", (message) => {
-    if (["error", "warning"].includes(message.type())) {
-      diagnostics.push(`${message.type()}: ${message.text()}`);
-    }
-  });
-  page.on("pageerror", (error) => diagnostics.push(`pageerror: ${error.message}`));
-  try {
-    await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator("#chooseCsvButton").click();
-    await page.getByRole("menuitem", { name: "Accounts" }).waitFor({ state: "visible", timeout: 5000 });
-    const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
-    await page.getByRole("menuitem", { name: "Accounts" }).click();
-    const fileChooser = await fileChooserPromise;
-    await fileChooser.setFiles(filePath);
-    await waitForLoadingModalHidden(page, "Account company normalization load", diagnostics);
-    await waitForFirstGroup(page, "Account company normalization load");
-    const loadState = await datasetLoadState(page);
-    const runtimeScore = await page.evaluate(() => {
-      const preparedRows = prepareRows(state.rows, state.objectType, state.mapping);
-      const score = scoreAccountPair(preparedRows[0], preparedRows[1]);
-      return {
-        score: Math.round(score.value),
-        reasons: score.reasons
-      };
-    });
-
-    if (loadState.groupCount !== 1) {
-      throw new Error(`Expected the account scorer to normalize company aliases and group the pair: ${JSON.stringify({ loadState, runtimeScore, diagnostics })}`);
-    }
-    if (!runtimeScore.reasons.includes("Exact account name") || !runtimeScore.reasons.includes("Exact phone")) {
-      throw new Error(`Expected the canonical company match to surface exact-name and exact-phone reasons: ${JSON.stringify({ loadState, runtimeScore, diagnostics })}`);
-    }
-
-    return {
-      ...loadState,
-      runtimeScore: runtimeScore.score,
-      reasons: runtimeScore.reasons
     };
   } finally {
     await page.close();

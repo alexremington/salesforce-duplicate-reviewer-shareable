@@ -472,12 +472,7 @@ const CONTACT_FIELD_WEIGHTS = {
   ziPersonLinkedInUrl: 8,
   phone: 18,
   email: 24,
-  company: 32,
-  mailingStreet: 6,
-  mailingCity: 4,
-  mailingState: 3,
-  mailingPostalCode: 5,
-  mailingCountry: 2
+  company: 32
 };
 const CONTACT_COMPANY_DIVERGENCE_THRESHOLD = 1;
 const CONTACT_COMPANY_DIVERGENCE_CAP = 80;
@@ -4759,7 +4754,7 @@ function scoreContactPair(left, right, cache = null) {
   const exactAnyPhone = bestPhoneSimilarity === 1;
   const exactFullName = fullNameSimilarity === 1;
   const companyConflict = hasContactCompanyConflict(left, right, companySimilarity);
-  if (model === "legacy" && companyConflict) {
+  if (companyConflict) {
     return {
       left: left.row,
       right: right.row,
@@ -4775,12 +4770,7 @@ function scoreContactPair(left, right, cache = null) {
         ziPersonLinkedInUrl: linkedInSimilarity,
         phone: phoneSimilarity,
         ziPhone: ziPhoneSimilarity,
-        mobile: mobileSimilarity,
-        mailingStreet: mailingStreetSimilarity,
-        mailingCity: mailingCitySimilarity,
-        mailingState: mailingStateSimilarity,
-        mailingPostalCode: mailingPostalCodeSimilarity,
-        mailingCountry: mailingCountrySimilarity
+        mobile: mobileSimilarity
       }
     };
   }

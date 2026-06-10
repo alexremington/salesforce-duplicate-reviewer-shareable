@@ -112,6 +112,7 @@ async function main() {
     await assertAccountExactWebsiteCorroborationRegression();
     await assertAccountCommentaryNormalizationRegression();
     await assertContactSparseExactNameFloorRegression();
+    await assertContactCompanyDifferenceVetoRegression();
     await assertContactMirrorRelationshipRegression();
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/premerge-check");
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/merge");
@@ -769,6 +770,58 @@ async function assertContactSparseExactNameFloorRegression() {
   if (Math.round(score.value) !== 86 || !score.reasons.includes("Different company without corroborating contact data")) {
     throw new Error(
       `Contact sparse exact-name regression failed: expected the new 86-point floor, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
+    );
+  }
+}
+
+async function assertContactMirrorProvenanceGap() {
+  const metadataPath = path.join(PROJECT_DIR, "incoming", "staging-report-00OVZ000003DjaH2AS-metadata.json");
+  const csvPath = path.join(PROJECT_DIR, "Output", "staging-contacts", "salesforce-report-latest.csv");
+  const queryPath = path.join(PROJECT_DIR, "queries", "report-00OVZ000003DjaH2AS.soql");
+  const metadata = JSON.parse(await fs.readFile(metadataPath, "utf8"));
+  const csvHeaders = (await fs.readFile(csvPath, "utf8"))
+    .split(/\r?\n/, 1)[0]
+    .split(",")
+    .map((header) => header.replace(/^"|"$/g, ""));
+  const queryText = await fs.readFile(queryPath, "utf8");
+
+  const metadataColumns = [
+    ...(metadata?.reportMetadata?.detailColumns || []),
+    ...Object.values(metadata?.reportExtendedMetadata?.detailColumnInfo || {}).map((column) => column?.label || "")
+  ];
+
+  for (const sourceText of [metadataColumns.join("\n"), csvHeaders.join("\n"), queryText]) {
+    if (/mirror\s+of/i.test(sourceText)) {
+      throw new Error(
+        "The staging Contacts report contract still exposes Mirror Of in the source report or generated output. " +
+        "Mirror values must come from a companion source or post-export normalization step, not from the Contact report itself."
+      );
+    }
+  }
+}
+
+async function assertContactCompanyDifferenceVetoRegression() {
+  const api = loadAppApi();
+  const csv = [
+    "Id,First Name,Last Name,Company,Email,Phone,Mobile,LinkedIn__c,ZI_Person_LinkedIn_URL__c",
+    "003A00000000011,Taylor,Mason,Northstar Analytics,taylor.mason@northstar.example,(555) 010-4321,,https://www.linkedin.com/in/taylor-mason-1010,https://www.linkedin.com/in/taylor-mason-1010/",
+    "003A00000000012,Taylor,Mason,Civic Harbor,taylor.mason@northstar.example,(555) 010-4321,,https://www.linkedin.com/in/taylor-mason-1010,https://www.linkedin.com/in/taylor-mason-1010/"
+  ].join("\n");
+  const parsed = api.parseCsv(csv);
+  const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
+  const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
+  const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.contact.fields);
+  const preparedRows = api.prepareRows(rows, "contact", mapping);
+
+  api.state.objectType = "contact";
+  api.state.rows = rows;
+  api.state.headers = headers;
+  api.state.mapping = mapping;
+
+  const score = api.scoreContactPair(preparedRows[0], preparedRows[1]);
+  if (Math.round(score.value) !== 0 || !score.reasons.includes("Different company")) {
+    throw new Error(
+      `Contact company-veto regression failed: expected company mismatch to force a zero score, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
     );
   }
 }
