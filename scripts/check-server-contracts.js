@@ -18,11 +18,35 @@ const RETIRED_MERGE_GATE_PATTERNS = [
   'confirmation: "MERGE"',
   "mergeConfirmationValue"
 ];
+const REQUIRED_MERGE_REVIEW_PATTERNS = [
+  "mergeReviewSession",
+  "renderMergeReviewPanel",
+  "renderMergeConfirmationPreview",
+  "startMergeReviewSession",
+  "handleConfirmedMerge",
+  "renderMergeSuccessPanel",
+  "merge-success-panel"
+];
+const REQUIRED_MERGE_REVIEW_FILE_PATTERNS = new Map([
+  [path.join(PROJECT_DIR, "public", "app.js"), REQUIRED_MERGE_REVIEW_PATTERNS],
+  [path.join(PROJECT_DIR, "tests", "playwright-smoke.js"), [
+    "reviewVisible",
+    "confirmVisible",
+    "cancelVisible",
+    "mergeSentBeforeConfirm",
+    "previewClearedAfterCancel",
+    "mergeSentAfterCancel",
+    "successPanelVisible",
+    "mergeSubmitCountAfterSuccess",
+    "payloadsAligned"
+  ]]
+]);
 const CACHED_STATIC_APP_PATH = process.platform === "darwin"
   ? path.join(os.homedir(), "Library", "Application Support", "salesforce-duplicate-reviewer", "static", "app.js")
   : "";
 const APP_ID = "salesforce-duplicate-reviewer";
 const API_CONTRACT_VERSION = "duplicate-reviewer-api-contract-v2";
+const REQUEST_TIMEOUT_MS = Number(process.env.DUPLICATE_REVIEWER_CONTRACT_TIMEOUT_MS || 5000);
 
 let serverProcess = null;
 let fakeSalesforceServer = null;
@@ -79,6 +103,9 @@ async function main() {
     await assertLatestEndpointCaching(baseUrl);
     await assertCodexTrainingLaunchCommand(baseUrl);
     await assertAccountScopeDivergenceRegression();
+    await assertAccountExactWebsiteCorroborationRegression();
+    await assertContactSparseExactNameFloorRegression();
+    await assertContactMirrorRelationshipRegression();
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/premerge-check");
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/merge");
     await assertSalesforcePreMergeWithWarningCli(baseUrl);
@@ -105,6 +132,7 @@ async function assertRetiredMergeGateAbsent() {
     const contents = await fs.readFile(filePath, "utf8");
     checkedLocations.push(filePath);
     assertNoRetiredMergeGate(contents, filePath);
+    assertRequiredMergeReviewFlow(contents, filePath);
   }
 
   if (CACHED_STATIC_APP_PATH) {
@@ -112,6 +140,7 @@ async function assertRetiredMergeGateAbsent() {
       const cachedContents = await fs.readFile(CACHED_STATIC_APP_PATH, "utf8");
       checkedLocations.push(CACHED_STATIC_APP_PATH);
       assertNoRetiredMergeGate(cachedContents, CACHED_STATIC_APP_PATH);
+      assertRequiredMergeReviewFlow(cachedContents, CACHED_STATIC_APP_PATH);
     } catch (error) {
       if (error?.code !== "ENOENT") {
         throw error;
@@ -130,6 +159,19 @@ function assertNoRetiredMergeGate(contents, filePath) {
         "The merge report should not require the old typed MERGE confirmation or related UI state."
       );
     }
+  }
+}
+
+function assertRequiredMergeReviewFlow(contents, filePath) {
+  const requiredPatterns = REQUIRED_MERGE_REVIEW_FILE_PATTERNS.get(filePath)
+    || (filePath === CACHED_STATIC_APP_PATH ? REQUIRED_MERGE_REVIEW_FILE_PATTERNS.get(path.join(PROJECT_DIR, "public", "app.js")) : null);
+  if (!requiredPatterns) return;
+  const missingPatterns = requiredPatterns.filter((pattern) => !contents.includes(pattern));
+  if (missingPatterns.length) {
+    throw new Error(
+      `Merge review flow markers missing from ${filePath}: ${missingPatterns.map((pattern) => JSON.stringify(pattern)).join(", ")}. ` +
+      "This usually means the queued review workflow was rolled back or renamed without updating the guardrail and smoke coverage."
+    );
   }
 }
 
@@ -338,6 +380,99 @@ async function assertAccountScopeDivergenceRegression() {
   }
 }
 
+async function assertAccountExactWebsiteCorroborationRegression() {
+  const api = loadAppApi();
+  const csv = [
+    "Id,Name,BillingStreet,BillingCity,CurrencyIsoCode",
+    "001C,European Service Network S.A.,1 Rue Example,Brussels,USD",
+    "001D,European Service Network S.A.,1 Rue Example,Brussels,EUR"
+  ].join("\n");
+  const parsed = api.parseCsv(csv);
+  const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
+  const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
+  const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.account.fields);
+  const preparedRows = api.prepareRows(rows, "account", mapping);
+
+  api.state.objectType = "account";
+  api.state.rows = rows;
+  api.state.headers = headers;
+  api.state.mapping = mapping;
+
+  const fieldStats = api.buildFieldStats(preparedRows, "account");
+  const score = api.scoreAccountPair(preparedRows[0], preparedRows[1], fieldStats);
+  if (Math.round(score.value) !== 92 || !score.reasons.includes("Exact duplicate corroboration")) {
+    throw new Error(
+      `Account exact-billing corroboration regression failed: expected the Salesforce-calibrated floor at 92, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
+    );
+  }
+}
+
+async function assertContactSparseExactNameFloorRegression() {
+  const api = loadAppApi();
+  const csv = [
+    "Id,Name,Company,Email,Phone,Mobile,LinkedIn__c,ZI_Person_LinkedIn_URL__c",
+    "003A00000000001,Taylor Mason,,taylor.mason@alpha.example,,,,",
+    "003A00000000002,Taylor Mason,,taylor.mason@sample.net,,,,"
+  ].join("\n");
+  const parsed = api.parseCsv(csv);
+  const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
+  const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
+  const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.contact.fields);
+  const preparedRows = api.prepareRows(rows, "contact", mapping);
+
+  api.state.objectType = "contact";
+  api.state.rows = rows;
+  api.state.headers = headers;
+  api.state.mapping = mapping;
+
+  const score = api.scoreContactPair(preparedRows[0], preparedRows[1]);
+  if (Math.round(score.value) !== 86 || !score.reasons.includes("Different company without corroborating contact data")) {
+    throw new Error(
+      `Contact sparse exact-name regression failed: expected the new 86-point floor, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
+    );
+  }
+}
+
+async function assertContactMirrorRelationshipRegression() {
+  const api = loadAppApi();
+  const csv = [
+    "Id,First Name,Last Name,Company,Email,Mirror of",
+    "003M00000000001,Taylor,Mason,Northstar Analytics,taylor.mason@northstar.example,003M00000000002",
+    "003M00000000002,Taylor,Mason,Northstar Analytics,taylor.mason@northstar.example,",
+    "003M00000000003,Taylor,Mason,Northstar Analytics,taylor.mason@northstar.example,"
+  ].join("\n");
+  const parsed = api.parseCsv(csv);
+  const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
+  const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
+  const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.contact.fields);
+  const preparedRows = api.prepareRows(rows, "contact", mapping);
+
+  api.state.objectType = "contact";
+  api.state.rows = rows;
+  api.state.headers = headers;
+  api.state.mapping = mapping;
+
+  const mirrorScore = api.scoreContactPair(preparedRows[0], preparedRows[1]);
+  if (mirrorScore.value !== 0 || !mirrorScore.reasons.includes("Entitled Contact mirror")) {
+    throw new Error(
+      `Contact mirror regression failed: expected a hard mirror veto, got ${Math.round(mirrorScore.value)} (${mirrorScore.reasons.join("; ")})`
+    );
+  }
+
+  const scoreAtoC = api.scoreContactPair(preparedRows[0], preparedRows[2]);
+  const scoreBtoC = api.scoreContactPair(preparedRows[1], preparedRows[2]);
+  const pairScores = [scoreAtoC, scoreBtoC]
+    .filter((score) => score.value >= 86)
+    .sort((left, right) => right.value - left.value || right.fieldMatchRatio - left.fieldMatchRatio);
+  const conflictMap = api.buildContactMirrorConflictMap(preparedRows);
+  const groupsByRoot = api.collectPairGroups(pairScores, preparedRows.length, conflictMap);
+  const groupMemberships = [...groupsByRoot.values()].map((group) => [...group.records.values()].map((record) => record.Id));
+
+  if (groupMemberships.some((ids) => ids.includes("003M00000000001") && ids.includes("003M00000000002"))) {
+    throw new Error(`Contact mirror clustering regression failed: mirrored contacts ended up in the same group: ${JSON.stringify(groupMemberships)}`);
+  }
+}
+
 function loadAppApi() {
   const context = {
     console,
@@ -362,7 +497,10 @@ globalThis.__api = {
   autoMapHeaders,
   prepareRows,
   buildFieldStats,
+  buildContactMirrorConflictMap,
+  collectPairGroups,
   scoreAccountPair,
+  scoreContactPair,
   getValue
 };`,
     context
@@ -776,7 +914,7 @@ function requestText(url, options = {}) {
     const body = options.body == null ? "" : JSON.stringify(options.body);
     const request = http.request(url, {
       method: options.method || "GET",
-      timeout: 1500,
+      timeout: REQUEST_TIMEOUT_MS,
       headers: {
         ...(options.headers || {}),
         ...(body ? {

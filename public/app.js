@@ -55,7 +55,16 @@ const OBJECT_CONFIG = {
         "zi person direct phone",
         "zipersondirectphonec"
       ],
-      mobile: ["mobile", "mobile phone", "mobile number", "cell", "cell phone"]
+      mobile: ["mobile", "mobile phone", "mobile number", "cell", "cell phone"],
+      mirrorOf: [
+        "mirror of",
+        "mirrorof",
+        "mirror of contact",
+        "mirror of contact id",
+        "mirror of record",
+        "mirror_of__c",
+        "entitled contact mirror of"
+      ]
     }
   },
   account: {
@@ -125,6 +134,7 @@ const FIELD_LABELS = {
   phone: "Phone",
   ziPhone: "ZI Phone",
   mobile: "Mobile",
+  mirrorOf: "Mirror of",
   name: "Name",
   website: "Website",
   billingStreet: "Billing Street",
@@ -362,6 +372,7 @@ const MAX_HIGH_RECALL_CANDIDATE_PAIRS = 250000;
 const CANDIDATE_ATTEMPT_LIMIT_FACTOR = 5;
 const MATCHING_YIELD_INTERVAL_MS = 32;
 const SCORING_CHUNK_SIZE = 1200;
+const MATCHING_CACHE_MIN_THRESHOLD = 70;
 const GROUP_ITEM_ESTIMATED_HEIGHT = 108;
 const GROUP_LIST_OVERSCAN = 8;
 const GROUP_LIST_VIRTUALIZATION_THRESHOLD = 60;
@@ -417,13 +428,17 @@ const CONTACT_FIELD_WEIGHTS = {
 };
 const CONTACT_COMPANY_DIVERGENCE_THRESHOLD = 0.5;
 const CONTACT_COMPANY_DIVERGENCE_CAP = 80;
+const CONTACT_STRONG_IDENTITY_CONFLICT_CAP = 79;
 const CONTACT_COMPANY_GEOGRAPHY_CONFLICT_CAP = 72;
 const CONTACT_COMPANY_ALIGNMENT_THRESHOLD = 0.85;
 const CONTACT_EMAIL_ORG_CORROBORATION_FLOOR = 88;
 const CONTACT_CORROBORATED_EXACT_NAME_FLOOR = 86;
+const CONTACT_SPARSE_EXACT_NAME_FLOOR = 86;
+const CONTACT_EXACT_NAME_NEAR_COMPANY_CAP = 79;
 const CONTACT_FIRST_NAME_COMPANY_DOMAIN_FLOOR = 86;
 const CONTACT_SHORT_GIVEN_NAME_CONFLICT_CAP = 85;
 const CONTACT_EMAIL_CONTEXT_CORROBORATION_MIN = 0.5;
+const CONTACT_MIRROR_RELATIONSHIP_REASON = "Entitled Contact mirror";
 const TRAINING_LABELS = {
   match: "Match",
   not_match: "Not Match",
@@ -733,8 +748,10 @@ const state = {
     fileName: "",
     displayName: "",
     objectType: "contact",
-    format: ""
+    format: "",
+    contractVersion: ""
   },
+  datasetMetadata: {},
   datasetKey: "",
   reviewStateStatus: "",
   loadError: "",
@@ -775,6 +792,8 @@ const state = {
 
 let pendingCsvObjectType = "";
 let scoringContextCache = null;
+let matchingArtifactsCache = null;
+let matchingArtifactsWarmCacheJob = null;
 let reviewStateSaveTimer = 0;
 let pendingReviewStateRecord = null;
 let nextGroupFilterId = 1;
@@ -835,9 +854,13 @@ const els = {
   exportButton: document.getElementById("exportButton"),
   exportMenuButton: document.getElementById("exportMenuButton"),
   exportMenu: document.getElementById("exportMenu"),
+  datasetExportButton: document.getElementById("datasetExportButton"),
+  workspaceExportButton: document.getElementById("workspaceExportButton"),
   trainingExportButton: document.getElementById("trainingExportButton"),
   codexTrainingButton: document.getElementById("codexTrainingButton"),
+  workspaceImportButton: document.getElementById("workspaceImportButton"),
   trainingImportButton: document.getElementById("trainingImportButton"),
+  workspaceImportInput: document.getElementById("workspaceImportInput"),
   trainingImportInput: document.getElementById("trainingImportInput"),
   shortcutsButton: document.getElementById("shortcutsButton"),
   shortcutsModal: document.getElementById("shortcutsModal"),
@@ -941,19 +964,36 @@ els.rerunButton.addEventListener("click", () => {
 
 els.duplicateButton.addEventListener("click", () => markDecision("duplicate"));
 els.notDuplicateButton.addEventListener("click", () => markDecision("not-duplicate"));
+els.datasetExportButton.addEventListener("click", () => {
+  setExportMenuOpen(false);
+  exportScoredDataset();
+});
 els.exportButton.addEventListener("click", () => {
   setExportMenuOpen(false);
   exportDecisions();
+});
+els.workspaceExportButton.addEventListener("click", () => {
+  setExportMenuOpen(false);
+  exportWorkspace();
 });
 els.trainingExportButton.addEventListener("click", () => {
   setExportMenuOpen(false);
   exportTrainingLabels();
 });
 els.codexTrainingButton.addEventListener("click", sendTrainingLabelsToCodex);
+els.workspaceImportButton.addEventListener("click", () => {
+  setCsvObjectMenuOpen(false);
+  els.workspaceImportInput.value = "";
+  els.workspaceImportInput.click();
+});
 els.trainingImportButton.addEventListener("click", () => {
   setCsvObjectMenuOpen(false);
   els.trainingImportInput.value = "";
   els.trainingImportInput.click();
+});
+els.workspaceImportInput.addEventListener("change", (event) => {
+  const [file] = event.target.files;
+  if (file) importWorkspace(file);
 });
 els.trainingImportInput.addEventListener("change", (event) => {
   const [file] = event.target.files;
@@ -1194,7 +1234,9 @@ async function loadDatasetText(datasetText, {
     fileName: result.fileName || fileName || datasetFileNameForFormat(format),
     displayName,
     objectType: normalizeObjectType(result.objectType || state.objectType),
-    format: result.format || format
+    format: result.format || format,
+    contractVersion: result.contractVersion || result.datasetMetadata?.contractVersion || "",
+    metadata: extractDatasetMetadata(result)
   });
   if (saveRecent) {
     saveRecentFileInBackground({
@@ -1203,6 +1245,7 @@ async function loadDatasetText(datasetText, {
       size: size || datasetText.length,
       objectType: normalizeObjectType(result.objectType || state.objectType),
       format: result.format || format,
+      contractVersion: result.contractVersion || result.datasetMetadata?.contractVersion || "",
       content: endpoint ? "" : datasetText,
       endpoint
     });
@@ -1319,8 +1362,10 @@ function clearLoadedDatasetForPendingLoad() {
     fileName: "",
     displayName: "",
     objectType: state.objectType,
-    format: ""
+    format: "",
+    contractVersion: ""
   };
+  state.datasetMetadata = {};
   state.lastProcessingMode = "";
   state.lastMatchingStats = null;
   state.headers = [];
@@ -1346,6 +1391,8 @@ function clearLoadedDatasetForPendingLoad() {
   mergeInFlightGroupKeys.clear();
   resetMergeReviewSession();
   scoringContextCache = null;
+  matchingArtifactsCache = null;
+  matchingArtifactsWarmCacheJob = null;
   groupLookupCache = null;
   visibleGroupsCache = null;
 }
@@ -1450,6 +1497,7 @@ async function loadRecentFile(fileId) {
       size: record.size || datasetText.length,
       objectType: normalizeObjectType(state.objectType),
       format: record.format || datasetFormatFromFileName(record.name || record.endpoint),
+      contractVersion: record.contractVersion || "",
       content: record.content || "",
       endpoint: record.endpoint || ""
     });
@@ -1471,14 +1519,20 @@ async function recentFileDatasetText(record) {
   return record.content || "";
 }
 
-function setLoadedDatasetSource({ endpoint = "", fileName = "", displayName = "", objectType = state.objectType, format = "" } = {}) {
+function setLoadedDatasetSource({ endpoint = "", fileName = "", displayName = "", objectType = state.objectType, format = "", contractVersion = "", metadata = {} } = {}) {
   state.datasetSource = {
     endpoint: String(endpoint || ""),
     fileName: String(fileName || state.fileName || ""),
     displayName: String(displayName || fileName || state.fileName || ""),
     objectType: normalizeObjectType(objectType, state.objectType),
-    format: String(format || datasetFormatFromFileName(fileName || endpoint || state.fileName))
+    format: String(format || datasetFormatFromFileName(fileName || endpoint || state.fileName)),
+    contractVersion: String(contractVersion || metadata.contractVersion || state.datasetMetadata?.contractVersion || "")
   };
+  state.datasetMetadata = sanitizeDatasetMetadata({
+    ...(state.datasetMetadata || {}),
+    ...metadata,
+    contractVersion: state.datasetSource.contractVersion
+  });
 }
 
 async function saveRecentFile(fileRecord) {
@@ -1498,6 +1552,7 @@ async function saveRecentFile(fileRecord) {
     size: fileRecord.size || content.length,
     objectType,
     format,
+    contractVersion: String(fileRecord.contractVersion || ""),
     content: canStoreContent ? content : "",
     endpoint,
     updatedAt: Number(fileRecord.updatedAt) || Date.now()
@@ -1560,10 +1615,15 @@ async function compactOversizedRecentFiles(db, records) {
 
 function recentEndpointForName(name, objectType = "") {
   const normalizedName = String(name || "");
-  if (normalizedName === "salesforce-report-latest.csv" || normalizedName === "salesforce-report-latest.json") {
+  if (normalizedName === "salesforce-report-latest.json") {
     return String(objectType || "").toLowerCase() === "account"
       ? "/api/staging-accounts/latest.json"
       : "/api/staging-contacts/latest.json";
+  }
+  if (normalizedName === "salesforce-report-latest.csv") {
+    return String(objectType || "").toLowerCase() === "account"
+      ? "/api/staging-accounts/latest.csv"
+      : "/api/staging-contacts/latest.csv";
   }
 
   return {
@@ -1724,6 +1784,7 @@ function buildDatasetKey() {
   let hash = 2166136261;
   hash = updateHash(hash, state.objectType);
   hash = updateHash(hash, normalizeText(state.fileName));
+  hash = updateHash(hash, normalizeText(state.datasetSource?.contractVersion || state.datasetMetadata?.contractVersion || ""));
   hash = updateHash(hash, state.rows.length);
   state.headers.forEach((header) => {
     hash = updateHash(hash, normalizeHeader(header));
@@ -1832,10 +1893,13 @@ function serializeCurrentReviewState() {
   return {
     id: state.datasetKey,
     version: 1,
+    kind: "workspace",
+    workspaceVersion: 1,
     objectType: state.objectType,
     fileName: state.fileName,
     rowCount: state.rows.length,
     headers: [...state.headers],
+    sourceDataset: { ...state.datasetSource },
     trainingLabels: [...state.trainingLabels.entries()],
     decisions: [...state.decisions.entries()],
     mergeResults: [...state.mergeResults.entries()],
@@ -1845,6 +1909,7 @@ function serializeCurrentReviewState() {
       groupKey,
       [...recordKeys]
     ]),
+    savedAt: new Date().toISOString(),
     updatedAt: Date.now()
   };
 }
@@ -2161,19 +2226,23 @@ async function applyProcessedDataset(result, { fromObjects = false } = {}) {
     fromObjects,
     headers: result.headers,
     mapping: result.mapping,
-    objectType: result.objectType
+    objectType: result.objectType,
+    metadata: extractDatasetMetadata(result)
   });
   await updateLoadingProgress("Rendering duplicate groups.", 98);
   applyComputedGroups(result.groups || [], result.matchingStats || null);
+  scheduleMatchingArtifactsWarmCache();
+  if (result.matchingArtifacts) cacheMatchingArtifacts(result.matchingArtifacts);
   await updateLoadingProgress("Ready.", 100);
   return fromObjects ? Promise.resolve() : restoreReviewStateForCurrentDataset();
 }
 
-function stageRowsForReview({ rows, fileName, fromObjects, headers, mapping, objectType }) {
+function stageRowsForReview({ rows, fileName, fromObjects, headers, mapping, objectType, metadata = {} }) {
   flushPendingReviewStateSave();
   endFileLoad();
   state.objectType = normalizeObjectType(objectType, state.objectType);
   state.fileName = fileName;
+  state.datasetMetadata = sanitizeDatasetMetadata(metadata);
   state.rows = Array.isArray(rows) ? rows : [];
   state.rows.forEach((row, index) => {
     row.__rowIndex = index;
@@ -2187,6 +2256,8 @@ function stageRowsForReview({ rows, fileName, fromObjects, headers, mapping, obj
   state.trainingLabels.clear();
   state.trainingPairIndexes.clear();
   state.lastMatchingStats = null;
+  matchingArtifactsCache = null;
+  matchingArtifactsWarmCacheJob = null;
   mergeMasterSelections.clear();
   mergePreviewStates.clear();
   mergeInFlightGroupKeys.clear();
@@ -2220,6 +2291,8 @@ async function recompute({ title = "Matching Records", message = "Preparing reco
     state.lastMatchingStats = result.matchingStats || null;
     await updateLoadingProgress("Rendering duplicate groups.", 98);
     applyComputedGroups(result.groups || [], result.matchingStats || null);
+    scheduleMatchingArtifactsWarmCache();
+    if (result.matchingArtifacts) cacheMatchingArtifacts(result.matchingArtifacts);
     await updateLoadingProgress("Ready.", 100);
   } catch (error) {
     if (!isAbortError(error)) throw error;
@@ -2242,6 +2315,99 @@ function applyComputedGroups(groups, matchingStats = null) {
   visibleGroupsCache = null;
   ensureSelectedGroupVisible();
   render();
+}
+
+function cacheMatchingArtifacts(artifacts, groups = []) {
+  if (!artifacts || !Array.isArray(artifacts.preparedRows) || !Array.isArray(artifacts.pairScores)) {
+    matchingArtifactsCache = null;
+    return;
+  }
+
+  matchingArtifactsCache = {
+    rows: state.rows,
+    objectType: normalizeObjectType(artifacts.objectType || state.objectType, state.objectType),
+    mappingSignature: mappingSignature(artifacts.mapping || state.mapping),
+    highRecallMode: Boolean(artifacts.highRecallMode),
+    thresholdFloor: Number(artifacts.thresholdFloor) || MATCHING_CACHE_MIN_THRESHOLD,
+    preparedRows: artifacts.preparedRows,
+    fieldStats: artifacts.fieldStats || null,
+    pairScores: artifacts.pairScores,
+    matchingStats: artifacts.matchingStats || null,
+    groups: Array.isArray(groups) ? groups : []
+  };
+  scheduleMatchingArtifactsWarmCache();
+}
+
+function scheduleMatchingArtifactsWarmCache() {
+  if (!canUseMatchingWorker()) return;
+  if (matchingArtifactsCache && matchingArtifactsCache.thresholdFloor <= MATCHING_CACHE_MIN_THRESHOLD) return;
+  if (state.threshold <= MATCHING_CACHE_MIN_THRESHOLD) return;
+  if (matchingArtifactsWarmCacheJob) return;
+
+  const rows = state.rows;
+  const objectType = state.objectType;
+  const mapping = state.mapping;
+  const headers = state.headers;
+  const highRecallMode = state.highRecallMode;
+  const mappingKey = mappingSignature(mapping);
+
+  const warmCacheJob = processMatchingJob({
+    mode: "recompute",
+    rows,
+    objectType,
+    headers,
+    mapping,
+    threshold: state.threshold,
+    highRecallMode,
+    artifactThreshold: MATCHING_CACHE_MIN_THRESHOLD,
+    includeMatchingArtifacts: true
+  }, async () => {})
+    .then((result) => {
+      if (
+        state.rows === rows &&
+        state.objectType === objectType &&
+        state.highRecallMode === highRecallMode &&
+        mappingSignature(state.mapping) === mappingKey
+      ) {
+        if (result.matchingArtifacts) cacheMatchingArtifacts(result.matchingArtifacts, result.groups || []);
+      }
+    })
+    .catch((error) => {
+      if (!isAbortError(error)) {
+        console.warn("Background matching cache warmup failed", error);
+      }
+    })
+    .finally(() => {
+      if (matchingArtifactsWarmCacheJob === warmCacheJob) {
+        matchingArtifactsWarmCacheJob = null;
+      }
+    });
+  matchingArtifactsWarmCacheJob = warmCacheJob;
+}
+
+async function rebuildMatchesFromCachedArtifacts({ title = "Matching Records", message = "Rebuilding cached matches." } = {}) {
+  if (!matchingArtifactsCache) {
+    return recompute({ title, message });
+  }
+
+  const shouldOwnModal = !state.loadingModal.active;
+  if (shouldOwnModal) {
+    showLoadingModal(title, message, 0);
+    await nextPaint();
+  }
+
+  try {
+    const result = await rebuildGroupsFromMatchingArtifacts(matchingArtifactsCache, state.threshold, updateLoadingProgress);
+    state.lastProcessingMode = result.processingMode || "";
+    state.lastMatchingStats = result.matchingStats || null;
+    await updateLoadingProgress("Rendering duplicate groups.", 98);
+    applyComputedGroups(result.groups || [], result.matchingStats || null);
+    await updateLoadingProgress("Ready.", 100);
+  } catch (error) {
+    if (!isAbortError(error)) throw error;
+  } finally {
+    if (shouldOwnModal) hideLoadingModal();
+  }
 }
 
 function processMatchingJob(payload, progress = async () => {}) {
@@ -2293,7 +2459,16 @@ async function processMatchingJobOnMain(payload, progress = async () => {}) {
     const mapping = dataset.mapping || autoMapHeaders(headers, OBJECT_CONFIG[dataset.objectType].fields);
     stageMatchingContext(rows, dataset.objectType, headers, mapping);
     await progress("Matching records.", 7);
-    const { groups, matchingStats } = await buildGroupsAsync(rows, dataset.objectType, mapping, payload.threshold, payload.highRecallMode, progress);
+    const { groups, matchingStats, matchingArtifacts } = await buildGroupsAsync(
+      rows,
+      dataset.objectType,
+      mapping,
+      payload.threshold,
+      payload.highRecallMode,
+      progress,
+      Number.isFinite(Number(payload.artifactThreshold)) ? Number(payload.artifactThreshold) : payload.threshold,
+      Boolean(payload.includeMatchingArtifacts)
+    );
     return {
       ...dataset,
       rows,
@@ -2301,6 +2476,7 @@ async function processMatchingJobOnMain(payload, progress = async () => {}) {
       mapping,
       groups,
       matchingStats,
+      matchingArtifacts,
       processingMode: "main"
     };
   }
@@ -2313,15 +2489,17 @@ async function processMatchingJobOnMain(payload, progress = async () => {}) {
     const objectType = normalizeObjectType(payload.objectType, state.objectType);
     const mapping = payload.mapping || {};
     stageMatchingContext(rows, objectType, payload.headers || inferHeaders(rows), mapping);
-    const { groups, matchingStats } = await buildGroupsAsync(
+    const { groups, matchingStats, matchingArtifacts } = await buildGroupsAsync(
       rows,
       objectType,
       mapping,
       payload.threshold,
       payload.highRecallMode,
-      progress
+      progress,
+      Number.isFinite(Number(payload.artifactThreshold)) ? Number(payload.artifactThreshold) : payload.threshold,
+      Boolean(payload.includeMatchingArtifacts)
     );
-    return { groups, matchingStats, processingMode: "main" };
+    return { groups, matchingStats, matchingArtifacts, processingMode: "main" };
   }
 
   throw new Error(`Unsupported matching job: ${payload.mode || "unknown"}`);
@@ -2354,12 +2532,24 @@ async function applyMatchControls() {
   const nextThreshold = Number(els.threshold.value);
   const nextMaxThreshold = Number(els.maxThreshold.value);
   const nextHighRecallMode = !els.highRecallMode.checked;
-  const shouldRecompute = nextThreshold !== state.threshold || nextHighRecallMode !== state.highRecallMode;
+  const thresholdChanged = nextThreshold !== state.threshold;
+  const highRecallChanged = nextHighRecallMode !== state.highRecallMode;
+  const canReuseMatchingArtifacts =
+    Boolean(matchingArtifactsCache) &&
+    matchingArtifactsCache.rows === state.rows &&
+    matchingArtifactsCache.objectType === state.objectType &&
+    matchingArtifactsCache.mappingSignature === mappingSignature(state.mapping) &&
+    matchingArtifactsCache.highRecallMode === nextHighRecallMode &&
+    nextThreshold >= matchingArtifactsCache.thresholdFloor;
 
   state.threshold = nextThreshold;
   state.maxThreshold = nextMaxThreshold;
   state.highRecallMode = nextHighRecallMode;
-  if (shouldRecompute) {
+  if (thresholdChanged || highRecallChanged) {
+    if (thresholdChanged && !highRecallChanged && canReuseMatchingArtifacts) {
+      await rebuildMatchesFromCachedArtifacts({ title: "Updating Matches", message: "Reusing prepared records and cached pair scores." });
+      return;
+    }
     await recompute({ title: "Updating Matches", message: "Rebuilding candidate matches." });
   } else {
     visibleGroupsCache = null;
@@ -2482,6 +2672,26 @@ function normalizeReviewDatasetPayload(payload, { fileName = "", objectType = st
   );
   const normalizedFileName = String(payload.fileName || payload.source?.name || fileName || "JSON import");
 
+  if (Array.isArray(payload.records)) {
+    const rows = payload.records.map(normalizeJsonRecord);
+    const metadata = sanitizeDatasetMetadata({
+      schema: String(payload.schema || ""),
+      schemaVersion: Number(payload.schemaVersion) || 0,
+      contractVersion: String(payload.contractVersion || payload.source?.contractVersion || ""),
+      rollbackInventory: Array.isArray(payload.rollbackInventory) ? payload.rollbackInventory : [],
+      source: payload.source && typeof payload.source === "object" && !Array.isArray(payload.source) ? { ...payload.source } : {},
+      fields: Array.isArray(payload.fields) ? payload.fields.map((field) => ({ ...field })) : []
+    });
+    return {
+      format: "json",
+      fileName: normalizedFileName,
+      objectType: normalizedObjectType,
+      headers: datasetHeadersFromJsonPayload(payload, rows),
+      rows,
+      ...metadata
+    };
+  }
+
   if (Array.isArray(payload.columns) && Array.isArray(payload.rows)) {
     const headers = payload.columns.map((header) => String(header || ""));
     return {
@@ -2489,15 +2699,21 @@ function normalizeReviewDatasetPayload(payload, { fileName = "", objectType = st
       fileName: normalizedFileName,
       objectType: normalizedObjectType,
       headers,
-      rows: payload.rows.map((row) => rowArrayToObject(headers, row))
+      rows: payload.rows.map((row) => rowArrayToObject(headers, row)),
+      ...sanitizeDatasetMetadata({
+        schema: String(payload.schema || ""),
+        schemaVersion: Number(payload.schemaVersion) || 0,
+        contractVersion: String(payload.contractVersion || payload.source?.contractVersion || ""),
+        rollbackInventory: Array.isArray(payload.rollbackInventory) ? payload.rollbackInventory : [],
+        source: payload.source && typeof payload.source === "object" && !Array.isArray(payload.source) ? { ...payload.source } : {},
+        fields: Array.isArray(payload.fields) ? payload.fields.map((field) => ({ ...field })) : []
+      })
     };
   }
 
-  const records = Array.isArray(payload.records)
-    ? payload.records
-    : Array.isArray(payload.result?.records)
-      ? payload.result.records
-      : null;
+  const records = Array.isArray(payload.result?.records)
+    ? payload.result.records
+    : null;
   if (records) {
     const rows = records.map(normalizeJsonRecord);
     return {
@@ -2505,7 +2721,15 @@ function normalizeReviewDatasetPayload(payload, { fileName = "", objectType = st
       fileName: normalizedFileName,
       objectType: normalizedObjectType,
       headers: datasetHeadersFromJsonPayload(payload, rows),
-      rows
+      rows,
+      ...sanitizeDatasetMetadata({
+        schema: String(payload.schema || ""),
+        schemaVersion: Number(payload.schemaVersion) || 0,
+        contractVersion: String(payload.contractVersion || payload.source?.contractVersion || ""),
+        rollbackInventory: Array.isArray(payload.rollbackInventory) ? payload.rollbackInventory : [],
+        source: payload.source && typeof payload.source === "object" && !Array.isArray(payload.source) ? { ...payload.source } : {},
+        fields: Array.isArray(payload.fields) ? payload.fields.map((field) => ({ ...field })) : []
+      })
     };
   }
 
@@ -2541,6 +2765,40 @@ function datasetHeadersFromJsonPayload(payload, rows) {
     : [];
   const inferredHeaders = inferHeaders(rows);
   return [...new Set([...fieldHeaders, ...inferredHeaders])];
+}
+
+function extractDatasetMetadata(result = {}) {
+  return sanitizeDatasetMetadata({
+    schema: String(result.schema || ""),
+    schemaVersion: Number(result.schemaVersion) || 0,
+    contractVersion: String(result.contractVersion || result.source?.contractVersion || ""),
+    rollbackInventory: Array.isArray(result.rollbackInventory) ? result.rollbackInventory : [],
+    source: result.source && typeof result.source === "object" && !Array.isArray(result.source) ? { ...result.source } : {},
+    fields: Array.isArray(result.fields) ? result.fields.map((field) => ({ ...field })) : []
+  });
+}
+
+function sanitizeDatasetMetadata(metadata = {}) {
+  const source = metadata.source && typeof metadata.source === "object" && !Array.isArray(metadata.source)
+    ? {
+        system: String(metadata.source.system || ""),
+        name: String(metadata.source.name || ""),
+        format: String(metadata.source.format || ""),
+        query: String(metadata.source.query || ""),
+        operation: String(metadata.source.operation || ""),
+        totalSize: Number(metadata.source.totalSize) || 0,
+        contractVersion: String(metadata.source.contractVersion || "")
+      }
+    : {};
+
+  return {
+    schema: String(metadata.schema || ""),
+    schemaVersion: Number(metadata.schemaVersion) || 0,
+    contractVersion: String(metadata.contractVersion || ""),
+    rollbackInventory: Array.isArray(metadata.rollbackInventory) ? metadata.rollbackInventory : [],
+    source,
+    fields: Array.isArray(metadata.fields) ? metadata.fields.map((field) => ({ ...field })) : []
+  };
 }
 
 function parseCsv(csvText) {
@@ -2665,7 +2923,16 @@ function readMappingFromControls() {
  * buckets then decide which row pairs are worth scoring, which keeps large CSVs
  * away from all-pairs comparison in normal cases.
  */
-async function buildGroupsAsync(rows, objectType, mapping, threshold, highRecallMode = false, progress = async () => {}) {
+async function buildGroupsAsync(
+  rows,
+  objectType,
+  mapping,
+  threshold,
+  highRecallMode = false,
+  progress = async () => {},
+  artifactThreshold = threshold,
+  includeMatchingArtifacts = false
+) {
   const startedAt = performance.now();
   if (!rows.length) {
     await progress("No records to match.", 100);
@@ -2687,18 +2954,20 @@ async function buildGroupsAsync(rows, objectType, mapping, threshold, highRecall
   }
 
   await progress("Preparing records.", 8);
-  const { preparedRows, scorer } = await getScoringContextAsync(rows, objectType, mapping, progress);
+  const { preparedRows, fieldStats, scorer } = await getScoringContextAsync(rows, objectType, mapping, progress);
 
   await progress("Finding candidate pairs.", 22);
   const pairKeys = objectType === "contact"
-    ? await getContactCandidatePairsAsync(preparedRows, highRecallMode, candidatePairLimit(highRecallMode), threshold, progress)
-    : await getAccountCandidatePairsAsync(preparedRows, highRecallMode, candidatePairLimit(highRecallMode), threshold, progress);
+    ? await getContactCandidatePairsAsync(preparedRows, highRecallMode, candidatePairLimit(highRecallMode), artifactThreshold, progress)
+    : await getAccountCandidatePairsAsync(preparedRows, highRecallMode, candidatePairLimit(highRecallMode), artifactThreshold, progress);
 
   await progress(`Scoring ${formatNumber(pairKeys.size)} candidate pairs.`, 44);
-  const pairs = await scoreCandidatePairsAsync(pairKeys, preparedRows, scorer, threshold, progress);
+  const pairs = await scoreCandidatePairsAsync(pairKeys, preparedRows, scorer, artifactThreshold, progress);
+  const currentPairs = pairs.filter((pair) => pair.value >= threshold);
 
   await progress("Building match groups.", 82);
-  const groupsByRoot = collectPairGroups(pairs, rows.length);
+  const mirrorConflicts = objectType === "contact" ? buildContactMirrorConflictMap(preparedRows) : null;
+  const groupsByRoot = collectPairGroups(currentPairs, rows.length, mirrorConflicts);
   await yieldToBrowser();
 
   const groups = [...groupsByRoot.values()]
@@ -2714,6 +2983,7 @@ async function buildGroupsAsync(rows, objectType, mapping, threshold, highRecall
       objectType,
       rowCount: rows.length,
       threshold,
+      cacheThreshold: artifactThreshold,
       highRecallMode,
       elapsedMs: Math.round(performance.now() - startedAt),
       candidatePairs: pairKeys.size,
@@ -2723,9 +2993,39 @@ async function buildGroupsAsync(rows, objectType, mapping, threshold, highRecall
       maxBucketSize: pairKeys.bucketStats?.maxBucketSize || 0,
       oversizedBucketCount: pairKeys.bucketStats?.oversizedBucketCount || 0,
       scoredPairs: pairs.scoreStats?.scoredPairs || pairKeys.size,
-      retainedPairs: pairs.scoreStats?.retainedPairs || pairs.length,
+      retainedPairs: currentPairs.length,
       resultGroups: groups.length
-    }
+    },
+    ...(includeMatchingArtifacts
+      ? {
+          matchingArtifacts: {
+            objectType,
+            mapping,
+            highRecallMode,
+            thresholdFloor: artifactThreshold,
+            preparedRows,
+            fieldStats,
+            pairScores: pairs.map(serializePairScore),
+            matchingStats: {
+              objectType,
+              rowCount: rows.length,
+              threshold,
+              cacheThreshold: artifactThreshold,
+              highRecallMode,
+              elapsedMs: Math.round(performance.now() - startedAt),
+              candidatePairs: pairKeys.size,
+              candidateAttempts: pairKeys.searchStats?.attempts || 0,
+              candidateAttemptCapHit: Boolean(pairKeys.searchStats?.attemptCapHit),
+              bucketCount: pairKeys.bucketStats?.bucketCount || 0,
+              maxBucketSize: pairKeys.bucketStats?.maxBucketSize || 0,
+              oversizedBucketCount: pairKeys.bucketStats?.oversizedBucketCount || 0,
+              scoredPairs: pairs.scoreStats?.scoredPairs || pairKeys.size,
+              retainedPairs: currentPairs.length,
+              resultGroups: groups.length
+            }
+          }
+        }
+      : {})
   };
 }
 
@@ -2741,6 +3041,7 @@ function getScoringContext(rows, objectType, mapping) {
 
   const preparedRows = prepareRows(rows, objectType, mapping);
   const fieldStats = buildFieldStats(preparedRows, objectType);
+  const mirrorConflicts = objectType === "contact" ? buildContactMirrorConflictMap(preparedRows) : null;
   const scorer = createPairScorer(objectType, fieldStats);
   scoringContextCache = {
     rows,
@@ -2748,6 +3049,7 @@ function getScoringContext(rows, objectType, mapping) {
     mapping,
     preparedRows,
     fieldStats,
+    mirrorConflicts,
     scorer
   };
   return scoringContextCache;
@@ -2765,6 +3067,7 @@ async function getScoringContextAsync(rows, objectType, mapping, progress = asyn
 
   const preparedRows = await prepareRowsAsync(rows, objectType, mapping, progress);
   const fieldStats = await buildFieldStatsAsync(preparedRows, objectType, progress);
+  const mirrorConflicts = objectType === "contact" ? buildContactMirrorConflictMap(preparedRows) : null;
   const scorer = createPairScorer(objectType, fieldStats);
   scoringContextCache = {
     rows,
@@ -2772,6 +3075,7 @@ async function getScoringContextAsync(rows, objectType, mapping, progress = asyn
     mapping,
     preparedRows,
     fieldStats,
+    mirrorConflicts,
     scorer
   };
   return scoringContextCache;
@@ -2791,6 +3095,35 @@ function createContactScoreCache() {
     companies: new Map(),
     companyGeographyConflicts: new Map(),
     emailOrgCorroborations: new Map()
+  };
+}
+
+function serializePairScore(pair) {
+  return {
+    key: pair.key || symmetricPairKey(recordKey(pair.left), recordKey(pair.right)),
+    leftIndex: pair.left.__rowIndex,
+    rightIndex: pair.right.__rowIndex,
+    value: pair.value,
+    fieldMatchRatio: pair.fieldMatchRatio || 0,
+    type: pair.type || "",
+    reasons: Array.isArray(pair.reasons) ? [...pair.reasons] : [],
+    fieldScores: pair.fieldScores ? { ...pair.fieldScores } : {}
+  };
+}
+
+function inflatePairScore(pairScore, preparedRows) {
+  const left = preparedRows[pairScore.leftIndex];
+  const right = preparedRows[pairScore.rightIndex];
+  if (!left || !right) return null;
+  return {
+    key: pairScore.key,
+    left,
+    right,
+    value: pairScore.value,
+    fieldMatchRatio: pairScore.fieldMatchRatio || 0,
+    type: pairScore.type || "",
+    reasons: Array.isArray(pairScore.reasons) ? [...pairScore.reasons] : [],
+    fieldScores: pairScore.fieldScores ? { ...pairScore.fieldScores } : {}
   };
 }
 
@@ -2822,9 +3155,89 @@ async function scoreCandidatePairsAsync(pairKeys, preparedRows, scorer, threshol
   return pairs;
 }
 
-function collectPairGroups(pairs, rowCount) {
+function isMatchingArtifactsCacheValid(cache, rows, objectType, mapping, highRecallMode) {
+  return Boolean(cache)
+    && cache.rows === rows
+    && cache.objectType === objectType
+    && cache.mappingSignature === mappingSignature(mapping)
+    && cache.highRecallMode === highRecallMode;
+}
+
+function mappingSignature(mapping) {
+  return JSON.stringify(
+    Object.entries(mapping || {})
+      .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+  );
+}
+
+async function rebuildGroupsFromMatchingArtifacts(cache, threshold, progress = async () => {}) {
+  if (!isMatchingArtifactsCacheValid(cache, state.rows, state.objectType, state.mapping, state.highRecallMode)) {
+    return buildGroupsAsync(state.rows, state.objectType, state.mapping, threshold, state.highRecallMode, progress);
+  }
+
+  const startedAt = performance.now();
+  await progress("Reusing prepared records.", 8);
+
+  const preparedRows = cache.preparedRows;
+  const scorer = createPairScorer(cache.objectType || state.objectType, cache.fieldStats);
+
+  await progress("Reusing cached pair scores.", 44);
+  const pairs = cache.pairScores
+    .map((pairScore) => inflatePairScore(pairScore, preparedRows))
+    .filter(Boolean);
+  const currentPairs = pairs.filter((pair) => pair.value >= threshold);
+
+  await progress("Building match groups.", 82);
+  const mirrorConflicts = cache.objectType === "contact" ? buildContactMirrorConflictMap(preparedRows) : null;
+  const groupsByRoot = collectPairGroups(currentPairs, state.rows.length, mirrorConflicts);
+  await yieldToBrowser();
+
+  const groups = [...groupsByRoot.values()]
+    .map((group) => summarizeGroup(group, preparedRows, scorer))
+    .filter((group) => group.score >= threshold)
+    .sort(compareGroups)
+    .map((group, index) => ({ ...group, id: index + 1 }));
+
+  const visibleGroups = groups.length || !Array.isArray(cache.groups) || !cache.groups.length
+    ? groups
+    : cache.groups
+        .filter((group) => group.score >= threshold && group.score <= state.maxThreshold)
+        .map((group, index) => ({ ...group, id: index + 1 }));
+
+  await progress("Rendering duplicate groups.", 96);
+  return {
+    groups: visibleGroups,
+    matchingStats: {
+      ...(cache.matchingStats || {}),
+      objectType: state.objectType,
+      rowCount: state.rows.length,
+      threshold,
+      cacheThreshold: cache.thresholdFloor || MATCHING_CACHE_MIN_THRESHOLD,
+      highRecallMode: state.highRecallMode,
+      elapsedMs: Math.round(performance.now() - startedAt),
+      retainedPairs: currentPairs.length,
+      resultGroups: visibleGroups.length
+    },
+    processingMode: "cache"
+  };
+}
+
+function collectPairGroups(pairs, rowCount, conflictMap = null) {
   const uf = new UnionFind(rowCount);
-  pairs.forEach((pair) => uf.union(pair.left.__rowIndex, pair.right.__rowIndex));
+  const membersByRoot = new Map(Array.from({ length: rowCount }, (_, index) => [index, new Set([index])]));
+
+  pairs.forEach((pair) => {
+    const leftIndex = pair.left.__rowIndex;
+    const rightIndex = pair.right.__rowIndex;
+    const leftRoot = uf.find(leftIndex);
+    const rightRoot = uf.find(rightIndex);
+    if (leftRoot === rightRoot) return;
+    if (conflictMap && rootsHaveConflict(leftRoot, rightRoot, membersByRoot, conflictMap)) return;
+    uf.union(leftRoot, rightRoot);
+    const mergedRoot = uf.find(leftRoot);
+    const retainedRoot = mergedRoot === leftRoot ? rightRoot : leftRoot;
+    mergeRootMembers(membersByRoot, mergedRoot, retainedRoot);
+  });
 
   const groupsByRoot = new Map();
   pairs.forEach((pair) => {
@@ -2842,6 +3255,66 @@ function collectPairGroups(pairs, rowCount) {
   });
 
   return groupsByRoot;
+}
+
+function buildContactMirrorConflictMap(preparedRows) {
+  const rowsByReferenceKey = new Map();
+  const conflictsByIndex = new Map();
+
+  preparedRows.forEach((row, index) => {
+    addIndexToKeyMap(rowsByReferenceKey, row.recordIdKey, index);
+    addIndexToKeyMap(rowsByReferenceKey, row.recordNameKey, index);
+  });
+
+  preparedRows.forEach((row, index) => {
+    const referenceKey = row.mirrorOfKey;
+    if (!referenceKey) return;
+    const targetIndexes = rowsByReferenceKey.get(referenceKey);
+    if (!targetIndexes?.size) return;
+    targetIndexes.forEach((targetIndex) => {
+      if (targetIndex === index) return;
+      addConflictIndex(conflictsByIndex, index, targetIndex);
+      addConflictIndex(conflictsByIndex, targetIndex, index);
+    });
+  });
+
+  return conflictsByIndex;
+}
+
+function addIndexToKeyMap(map, key, index) {
+  if (!key) return;
+  if (!map.has(key)) map.set(key, new Set());
+  map.get(key).add(index);
+}
+
+function addConflictIndex(map, index, conflictIndex) {
+  if (!map.has(index)) map.set(index, new Set());
+  map.get(index).add(conflictIndex);
+}
+
+function rootsHaveConflict(leftRoot, rightRoot, membersByRoot, conflictMap) {
+  const leftMembers = membersByRoot.get(leftRoot) || new Set();
+  const rightMembers = membersByRoot.get(rightRoot) || new Set();
+  const smallerMembers = leftMembers.size <= rightMembers.size ? leftMembers : rightMembers;
+  const largerMembers = smallerMembers === leftMembers ? rightMembers : leftMembers;
+
+  for (const memberIndex of smallerMembers) {
+    const conflicts = conflictMap.get(memberIndex);
+    if (!conflicts?.size) continue;
+    for (const conflictIndex of conflicts) {
+      if (largerMembers.has(conflictIndex)) return true;
+    }
+  }
+
+  return false;
+}
+
+function mergeRootMembers(membersByRoot, mergedRoot, retainedRoot) {
+  const mergedMembers = membersByRoot.get(mergedRoot) || new Set([mergedRoot]);
+  const retainedMembers = membersByRoot.get(retainedRoot) || new Set([retainedRoot]);
+  retainedMembers.forEach((member) => mergedMembers.add(member));
+  membersByRoot.set(mergedRoot, mergedMembers);
+  membersByRoot.set(retainedRoot, mergedMembers);
 }
 
 function summarizeGroup(group, preparedRows, scorer) {
@@ -2993,6 +3466,9 @@ function prepareContactRow(row, mapping, index, cache) {
   const phone = cachedTransform(cache.phones, getValue(row, mapping.phone), normalizePhone);
   const ziPhone = cachedTransform(cache.phones, getValue(row, mapping.ziPhone), normalizePhone);
   const mobile = cachedTransform(cache.phones, getValue(row, mapping.mobile), normalizePhone);
+  const recordIdKey = normalizeContactReferenceKey(getValue(row, mapping.recordId));
+  const recordNameKey = normalizeContactReferenceKey(name.fullName || [name.firstName, name.lastName].filter(Boolean).join(" "));
+  const mirrorOfKey = normalizeContactReferenceKey(getValue(row, mapping.mirrorOf));
   const phones = [phone, ziPhone, mobile].filter((value, phoneIndex, values) => {
     return value && values.indexOf(value) === phoneIndex;
   });
@@ -3006,6 +3482,9 @@ function prepareContactRow(row, mapping, index, cache) {
     explicitLastName: name.explicitLastName,
     fullName: name.fullName,
     nameElements: name.nameElements,
+    recordIdKey,
+    recordNameKey,
+    mirrorOfKey,
     company: cachedTransform(cache.companies, getValue(row, mapping.company), normalizeCompany),
     email,
     domain: emailDomain(email),
@@ -3015,6 +3494,13 @@ function prepareContactRow(row, mapping, index, cache) {
     mobile,
     phones
   };
+}
+
+function normalizeContactReferenceKey(value) {
+  const id = normalizeSalesforceIdForMerge(value);
+  if (id) return `id:${id.toLowerCase()}`;
+  const text = normalizeResolutionValue(value);
+  return text ? `name:${text}` : "";
 }
 
 function prepareAccountRow(row, mapping, index, cache) {
@@ -3489,6 +3975,27 @@ function pairKey(left, right) {
 }
 
 function scoreContactPair(left, right, cache = null) {
+  if (hasMirrorContactRelationship(left, right)) {
+    return {
+      left: left.row,
+      right: right.row,
+      value: 0,
+      type: "near",
+      reasons: [CONTACT_MIRROR_RELATIONSHIP_REASON],
+      fieldScores: {
+        fullName: null,
+        firstName: null,
+        lastName: null,
+        company: null,
+        email: null,
+        ziPersonLinkedInUrl: null,
+        phone: null,
+        ziPhone: null,
+        mobile: null
+      }
+    };
+  }
+
   const firstSimilarity = comparableScore(left.explicitFirstName, right.explicitFirstName, nameSimilarity);
   const lastSimilarity = comparableScore(left.explicitLastName, right.explicitLastName, nameSimilarity);
   const fullNameSimilarity = cachedContactFullNameScore(left, right, cache?.nameSequences);
@@ -3525,6 +4032,16 @@ function scoreContactPair(left, right, cache = null) {
     (fullNameSimilarity || 0) >= 0.98 &&
     (companySimilarity || 0) < CONTACT_COMPANY_DIVERGENCE_THRESHOLD &&
     !strongIdentityCorroboration;
+  const strongCompanyCorroboration =
+    exactEmail ||
+    sameEmailDomain ||
+    emailOrgCorroboration ||
+    (companySimilarity || 0) >= CONTACT_COMPANY_ALIGNMENT_THRESHOLD;
+  const exactIdentityCompanyConflict =
+    exactFullName &&
+    companyConflict &&
+    (exactLinkedIn || exactAnyPhone) &&
+    !strongCompanyCorroboration;
   const exactNameCompany =
     Boolean(left.fullName && right.fullName && left.company && right.company) &&
     exactFullName &&
@@ -3554,11 +4071,28 @@ function scoreContactPair(left, right, cache = null) {
     if (companyDivergenceWithoutCorroboration) {
       value = Math.min(value, CONTACT_COMPANY_DIVERGENCE_CAP);
     }
+    if (exactIdentityCompanyConflict) {
+      value = Math.min(value, CONTACT_STRONG_IDENTITY_CONFLICT_CAP);
+    }
     if ((fullNameSimilarity || 0) >= 0.98 && emailOrgCorroboration) {
       value = Math.max(value, CONTACT_EMAIL_ORG_CORROBORATION_FLOOR);
     }
     if (hasCorroboratedExactContactName(exactFullName, left, right, companySimilarity, emailSimilarity, sameEmailDomain, emailOrgCorroboration)) {
       value = Math.max(value, CONTACT_CORROBORATED_EXACT_NAME_FLOOR);
+    }
+    if (exactFullName && (companySimilarity || 0) === 0 && !strongIdentityCorroboration) {
+      value = Math.max(value, CONTACT_SPARSE_EXACT_NAME_FLOOR);
+    }
+    if (
+      exactFullName &&
+      (companySimilarity || 0) >= 0.86 &&
+      (companySimilarity || 0) < 0.9 &&
+      (emailSimilarity || 0) < 0.2 &&
+      !strongIdentityCorroboration &&
+      !sameEmailDomain &&
+      !emailOrgCorroboration
+    ) {
+      value = Math.min(value, CONTACT_EXACT_NAME_NEAR_COMPANY_CAP);
     }
     if (hasContactFirstNameCompanyDomainCorroboration(left, right, companySimilarity, sameEmailDomain)) {
       value = Math.max(value, CONTACT_FIRST_NAME_COMPANY_DOMAIN_FLOOR);
@@ -3586,6 +4120,7 @@ function scoreContactPair(left, right, cache = null) {
   if ((companySimilarity || 0) >= 0.86 && companySimilarity < 1) reasons.push("Near-exact company");
   if (companyGeographyConflict) reasons.push("Conflicting geographic company names");
   if (companyDivergenceWithoutCorroboration) reasons.push("Different company without corroborating contact data");
+  if (exactIdentityCompanyConflict) reasons.push("Exact contact data with conflicting company");
   if (givenNameConflict) reasons.push("Conflicting first names");
 
   return {
@@ -3606,6 +4141,16 @@ function scoreContactPair(left, right, cache = null) {
       mobile: mobileSimilarity
     }
   };
+}
+
+function hasMirrorContactRelationship(left, right) {
+  return referenceMatchesRecord(left.mirrorOfKey, right.recordIdKey, right.recordNameKey) ||
+    referenceMatchesRecord(right.mirrorOfKey, left.recordIdKey, left.recordNameKey);
+}
+
+function referenceMatchesRecord(referenceKey, recordIdKey, recordNameKey) {
+  if (!referenceKey) return false;
+  return referenceKey === recordIdKey || referenceKey === recordNameKey;
 }
 
 function hasContactCompanyConflict(left, right, companySimilarity) {
@@ -4055,9 +4600,10 @@ function applyAccountExactDuplicateFloor(value, fieldScores, left, right) {
 
 function hasStrongExactAccountDuplicateCorroboration(fieldScores, left, right) {
   if (fieldScores.name !== 1) return false;
-  if (!hasStrongExactBillingAddress(fieldScores)) return false;
-
-  return fieldScores.website === 1 || fieldScores.ultimateParentAccount === 1 || left.hasStatusMarker || right.hasStatusMarker;
+  if (fieldScores.website === 1) return true;
+  if (fieldScores.ultimateParentAccount === 1) return true;
+  if (hasStrongExactBillingAddress(fieldScores)) return true;
+  return left.hasStatusMarker || right.hasStatusMarker;
 }
 
 function hasStrongExactBillingAddress(fieldScores) {
@@ -4876,6 +5422,7 @@ function render() {
   renderSource();
   renderMapping();
   renderMetrics();
+  renderDatasetExportButton();
   renderTrainingExportButton();
   renderGroups();
   renderDetail();
@@ -5017,6 +5564,9 @@ function renderSource() {
   els.fileName.textContent = state.loadingFileName || state.fileName || "Dataset import";
   els.fileMeta.textContent = sourceMetaText(config);
   els.sourcePill.textContent = state.isLoadingFile ? "Loading" : state.rows.length ? "Loaded" : "No file";
+  els.sourcePill.dataset.lastProcessingMode = state.lastProcessingMode || "";
+  els.sourcePill.dataset.groupCount = String(state.groups.length || 0);
+  els.sourcePill.dataset.resultGroups = String(state.lastMatchingStats?.resultGroups || 0);
   if (state.loadError && !state.isLoadingFile) els.sourcePill.textContent = "Error";
   els.sourcePill.classList.toggle("is-loaded", Boolean(state.rows.length) && !state.isLoadingFile);
   els.sourcePill.classList.toggle("is-loading", state.isLoadingFile);
@@ -5095,6 +5645,14 @@ function renderTrainingExportButton() {
   const labelCount = trainingLabelCount();
   const separatedCount = separatedRecordTrainingCount();
   const hasTrainingSignal = labelCount > 0 || separatedCount > 0;
+  const hasWorkspace = Boolean(state.datasetKey);
+  els.workspaceExportButton.disabled = !hasWorkspace;
+  els.workspaceExportButton.textContent = "Workspace";
+  els.workspaceExportButton.setAttribute(
+    "aria-label",
+    hasWorkspace ? "Export workspace" : "Export workspace"
+  );
+  els.workspaceExportButton.classList.toggle("is-active", hasWorkspace);
   els.trainingExportButton.disabled = !labelCount;
   els.trainingExportButton.textContent = "Labels";
   els.trainingExportButton.setAttribute(
@@ -5117,12 +5675,29 @@ function renderTrainingExportButton() {
     codexTrainingSummary ? `Send ${codexTrainingSummary} to Codex` : "Send to Codex"
   );
   els.codexTrainingButton.classList.toggle("is-active", hasTrainingSignal);
+  els.workspaceImportButton.disabled = !hasWorkspace;
   els.trainingImportButton.disabled = !state.rows.length;
   updateExportMenuButtonState();
 }
 
+function renderDatasetExportButton() {
+  const loadedCount = state.rows.length;
+  els.datasetExportButton.disabled = !loadedCount;
+  els.datasetExportButton.textContent = "Dataset + Scores";
+  els.datasetExportButton.setAttribute(
+    "aria-label",
+    loadedCount ? `Export dataset with scores (${formatNumber(loadedCount)} records)` : "Export dataset with scores"
+  );
+  els.datasetExportButton.classList.toggle("is-active", loadedCount > 0);
+  updateExportMenuButtonState();
+}
+
 function updateExportMenuButtonState() {
-  const hasExports = !els.exportButton.disabled || !els.trainingExportButton.disabled;
+  const hasExports =
+    !els.datasetExportButton.disabled ||
+    !els.workspaceExportButton.disabled ||
+    !els.exportButton.disabled ||
+    !els.trainingExportButton.disabled;
   els.exportMenuButton.classList.toggle("is-active", hasExports);
 }
 
@@ -5332,18 +5907,18 @@ function selectGroup(groupKey) {
   if (mergeReviewSession.active && !mergeReviewSession.queueGroupKeys.includes(groupKey)) return;
   state.selectedGroupKey = groupKey;
   if (els.groupList.querySelector(`[data-group-key="${cssEscape(groupKey)}"]`)) {
-    renderGroupSelection();
+    renderGroupSelection({ scrollSelectedIntoView: true });
   } else {
     renderGroups();
   }
   renderDetail();
 }
 
-function renderGroupSelection() {
+function renderGroupSelection({ scrollSelectedIntoView = false } = {}) {
   els.groupList.querySelectorAll(".group-item").forEach((item) => {
     const selected = item.dataset.groupKey === state.selectedGroupKey;
     item.classList.toggle("is-selected", selected);
-    if (selected) item.scrollIntoView({ block: "nearest" });
+    if (selected && scrollSelectedIntoView) item.scrollIntoView({ block: "nearest" });
   });
 }
 
@@ -5867,7 +6442,11 @@ function activeGroupFilterEntries() {
       filter: normalizeGroupFilter(filter),
       number: index + 1
     }))
-    .filter(({ filter }) => groupFilterIsComplete(filter));
+    .filter(({ filter }) => groupFilterIsComplete(filter))
+    .map((entry) => ({
+      ...entry,
+      meta: groupFilterMeta(entry.filter.field)
+    }));
 }
 
 function groupFilterIsComplete(filter) {
@@ -5993,20 +6572,18 @@ function evaluateGroupFilterAst(node, lookup) {
 function groupMatchesFilters(group, activeEntries, logic) {
   if (!activeEntries.length) return true;
   return group.records.some((record) => {
-    const results = new Map(
-      state.filters.map((filter, index) => {
-        const active = activeEntries.find((entry) => entry.number === index + 1);
-        return [index + 1, active ? groupFilterMatchesRecord(group, record, active.filter) : false];
-      })
-    );
-    return logic.evaluate((number) => results.get(number));
+    const results = new Array(state.filters.length + 1);
+    for (const entry of activeEntries) {
+      results[entry.number] = groupFilterMatchesRecord(group, record, entry.filter, entry.meta);
+    }
+    return logic.evaluate((number) => Boolean(results[number]));
   });
 }
 
-function groupFilterMatchesRecord(group, record, filter) {
-  const meta = groupFilterMeta(filter.field);
-  const rawValue = groupFilterRawValue(group, record, filter.field, meta);
-  return filterValueMatches(rawValue, filter, meta);
+function groupFilterMatchesRecord(group, record, filter, meta = null) {
+  const resolvedMeta = meta || groupFilterMeta(filter.field);
+  const rawValue = groupFilterRawValue(group, record, filter.field, resolvedMeta);
+  return filterValueMatches(rawValue, filter, resolvedMeta);
 }
 
 function groupFilterRawValue(group, record, field, meta) {
@@ -6493,9 +7070,14 @@ function renderEvaluateWorkspace(group, bestPair, activeRecords, separatedRecord
 }
 
 function renderMergeWorkspace(group, activeRecords, separatedRecords, currentDecision) {
+  const result = state.mergeResults.get(group.key) || null;
   return `
-    ${mergeReviewSession.active ? renderMergeReviewPanel(group) : renderSalesforceMergePanel(group, activeRecords, currentDecision)}
-    ${separatedRecords.length ? renderSeparatedRecords(group, separatedRecords) : ""}
+    ${result?.status === "success"
+      ? renderMergeSuccessPanel(group, result)
+      : mergeReviewSession.active
+        ? renderMergeReviewPanel(group)
+        : renderSalesforceMergePanel(group, activeRecords, currentDecision)}
+    ${result?.status === "success" ? "" : separatedRecords.length ? renderSeparatedRecords(group, separatedRecords) : ""}
   `;
 }
 
@@ -7147,6 +7729,57 @@ function renderMergeResult(result) {
         </div>
       ` : ""}
     </div>
+  `;
+}
+
+function renderMergeSuccessPanel(group, result) {
+  const mergedIds = Array.isArray(result.mergedRecordIds) ? result.mergedRecordIds : [];
+  const relatedCount = Array.isArray(result.updatedRelatedIds) ? result.updatedRelatedIds.length : 0;
+  const when = result.mergedAt ? new Date(result.mergedAt).toLocaleString() : "";
+  const report = result.mergeReport;
+  const message = `Merged ${formatNumber(mergedIds.length)} ${mergedIds.length === 1 ? "record" : "records"}${relatedCount ? ` and updated ${formatNumber(relatedCount)} related ${relatedCount === 1 ? "record" : "records"}` : ""}.`;
+  return `
+    <section class="salesforce-merge-panel success merge-success-panel" aria-label="Merge success">
+      <div class="salesforce-merge-header">
+        <div>
+          <span>Merge complete</span>
+          <strong>Last merge succeeded</strong>
+          <em>${escapeHtml(message)}</em>
+        </div>
+        <span class="merge-status-pill success">Success</span>
+      </div>
+      <div class="merge-confirmation-summary">
+        <div class="merge-readiness-card">
+          <span>Merged records</span>
+          <strong>${formatNumber(mergedIds.length)}</strong>
+          <em>${mergedIds.length === 1 ? "record merged into the master" : "records merged into the master"}</em>
+        </div>
+        <div class="merge-readiness-card">
+          <span>Related records</span>
+          <strong>${formatNumber(relatedCount)}</strong>
+          <em>${relatedCount === 1 ? "related record updated" : "related records updated"}</em>
+        </div>
+        <div class="merge-readiness-card">
+          <span>Completed</span>
+          <strong>${when ? "Yes" : "Recorded"}</strong>
+          <em>${escapeHtml(when || "Merge completion was recorded.")}</em>
+        </div>
+      </div>
+      ${report && Array.isArray(report.rows) && report.rows.length ? `
+        <div class="merge-result ${escapeHtml(result.status || "")}" data-group-key="${escapeHtml(result.groupKey || "")}">
+          <span>${escapeHtml(message)}</span>
+          ${when ? `<em>${escapeHtml(when)}</em>` : ""}
+          <div class="merge-result-actions">
+            <button
+              class="button button-secondary merge-report-download-button"
+              type="button"
+              data-merge-action="download-merge-report"
+              data-group-key="${escapeHtml(result.groupKey || "")}"
+            >Download CSV report</button>
+          </div>
+        </div>
+      ` : ""}
+    </section>
   `;
 }
 
@@ -7983,11 +8616,18 @@ function resolveContactsRefreshSource({ allowLatestContactsFallback = false } = 
 }
 
 function latestContactsSourceFromRecentFiles() {
-  const recent = (state.recentFiles || []).find((record) => {
-    if (!record?.endpoint || normalizeObjectType(record.objectType) !== "contact") return false;
-    const text = `${record.endpoint} ${record.displayName || ""} ${record.name || ""}`.toLowerCase();
-    return text.includes("staging-contacts") || text.includes("latest contacts");
-  });
+  const recent = (state.recentFiles || [])
+    .filter((record) => {
+      if (!record?.endpoint || normalizeObjectType(record.objectType) !== "contact") return false;
+      const text = `${record.endpoint} ${record.displayName || ""} ${record.name || ""}`.toLowerCase();
+      return text.includes("staging-contacts") || text.includes("latest contacts");
+    })
+    .sort((left, right) => {
+      const leftJson = String(left.format || left.name || left.endpoint || "").toLowerCase().endsWith(".json") || String(left.format || "").toLowerCase() === "json";
+      const rightJson = String(right.format || right.name || right.endpoint || "").toLowerCase().endsWith(".json") || String(right.format || "").toLowerCase() === "json";
+      if (leftJson !== rightJson) return leftJson ? -1 : 1;
+      return (Number(right.updatedAt) || 0) - (Number(left.updatedAt) || 0);
+    })[0];
   if (!recent) return null;
 
   return {
@@ -7995,17 +8635,19 @@ function latestContactsSourceFromRecentFiles() {
     fileName: String(recent.name || "salesforce-report-latest.json"),
     displayName: String(recent.displayName || recent.name || "Latest Contacts"),
     objectType: "contact",
-    format: String(recent.format || datasetFormatFromFileName(recent.name || recent.endpoint || "salesforce-report-latest.json"))
+    format: String(recent.format || datasetFormatFromFileName(recent.name || recent.endpoint || "salesforce-report-latest.json")),
+    contractVersion: String(recent.contractVersion || "")
   };
 }
 
 function defaultLatestContactsSource() {
   return {
-    endpoint: "/api/staging-contacts/latest.csv",
-    fileName: "salesforce-report-latest.csv",
+    endpoint: "/api/staging-contacts/latest.json",
+    fileName: "salesforce-report-latest.json",
     displayName: "Latest Contacts",
     objectType: "contact",
-    format: "csv"
+    format: "json",
+    contractVersion: ""
   };
 }
 
@@ -8456,9 +9098,51 @@ function exportDecisions() {
   downloadCsv(`${state.objectType}-duplicate-decisions.csv`, rows);
 }
 
+function exportScoredDataset() {
+  if (!state.rows.length) return;
+  downloadCsv(`${state.objectType}-dataset-with-scores.csv`, buildScoredDatasetRows());
+}
+
 function exportTrainingLabels() {
   if (!state.trainingLabels.size) return;
   downloadCsv(`${state.objectType}-training-labels.csv`, buildTrainingLabelRows());
+}
+
+function buildScoredDatasetRows() {
+  const headers = Array.isArray(state.headers) && state.headers.length ? [...state.headers] : inferHeaders(state.rows);
+  const exportHeaders = [...headers];
+  if (!exportHeaders.includes("group")) exportHeaders.push("group");
+  if (!exportHeaders.includes("score")) exportHeaders.push("score");
+
+  const groupByRowIndex = new Map();
+  state.groups.forEach((group) => {
+    group.records.forEach((record) => {
+      groupByRowIndex.set(record.__rowIndex, group);
+    });
+  });
+
+  const rows = [exportHeaders];
+  state.rows.forEach((record) => {
+    const group = groupByRowIndex.get(record.__rowIndex) || null;
+    rows.push(
+      exportHeaders.map((header) => {
+        if (header === "group") return group ? group.id : "";
+        if (header === "score") return group ? group.score : "";
+        return record[header] ?? "";
+      })
+    );
+  });
+
+  return rows;
+}
+
+function exportWorkspace() {
+  if (!state.datasetKey) return;
+  downloadJson(`${state.objectType}-workspace.json`, serializeWorkspaceRecord());
+}
+
+function serializeWorkspaceRecord() {
+  return serializeCurrentReviewState();
 }
 
 function buildTrainingLabelRows() {
@@ -8651,6 +9335,69 @@ function importTrainingLabels(file) {
   reader.readAsText(file);
 }
 
+function importWorkspace(file) {
+  if (!state.datasetKey) {
+    state.reviewStateStatus = "Load a file-based dataset before importing a workspace";
+    renderSource();
+    return;
+  }
+
+  showLoadingModal("Importing Workspace", `Reading ${file.name}.`);
+  const reader = new FileReader();
+  reader.onload = async () => {
+    await nextPaint();
+    try {
+      showLoadingModal("Importing Workspace", "Matching workspace data to the loaded dataset.");
+      await nextPaint();
+      const parsed = JSON.parse(String(reader.result || ""));
+      const workspaceRecord = normalizeWorkspaceImportRecord(parsed);
+      if (!workspaceRecord || (!isCompatibleReviewState(workspaceRecord) && workspaceRecord.id !== state.datasetKey)) {
+        throw new Error("Workspace could not be matched to the loaded dataset.");
+      }
+      const result = workspaceRecord ? applySavedReviewState(workspaceRecord) : null;
+      if (!result) throw new Error("Workspace could not be matched to the loaded dataset.");
+      state.reviewStateStatus = workspaceImportStatus(result);
+      visibleGroupsCache = null;
+      ensureSelectedGroupVisible();
+      renderSource();
+      renderTrainingExportButton();
+      renderGroups();
+      renderDetail();
+      if (Object.values(result).some((value) => Number(value) > 0)) scheduleReviewStateSave();
+    } catch {
+      state.reviewStateStatus = "Workspace could not be imported";
+      renderSource();
+    } finally {
+      hideLoadingModal();
+    }
+  };
+  reader.onerror = () => {
+    state.reviewStateStatus = "Workspace could not be imported";
+    hideLoadingModal();
+    renderSource();
+  };
+  reader.readAsText(file);
+}
+
+function normalizeWorkspaceImportRecord(data) {
+  if (!data || typeof data !== "object") return null;
+  if (data.reviewState && typeof data.reviewState === "object") return data.reviewState;
+  if (data.workspace && typeof data.workspace === "object") return data.workspace;
+  if (Array.isArray(data.trainingLabels) || Array.isArray(data.decisions)) return data;
+  return null;
+}
+
+function workspaceImportStatus(counts = {}) {
+  const parts = [];
+  if (counts.labels) parts.push(`${formatNumber(counts.labels)} ${counts.labels === 1 ? "label" : "labels"}`);
+  if (counts.decisions) parts.push(`${formatNumber(counts.decisions)} ${counts.decisions === 1 ? "decision" : "decisions"}`);
+  if (counts.mergeResults) parts.push(`${formatNumber(counts.mergeResults)} merge ${counts.mergeResults === 1 ? "result" : "results"}`);
+  if (counts.mergeMasterSelections) parts.push(`${formatNumber(counts.mergeMasterSelections)} merge ${counts.mergeMasterSelections === 1 ? "master" : "masters"}`);
+  if (counts.fieldResolutions) parts.push(`${formatNumber(counts.fieldResolutions)} field ${counts.fieldResolutions === 1 ? "choice" : "choices"}`);
+  if (counts.separatedRecords) parts.push(`${formatNumber(counts.separatedRecords)} separated ${counts.separatedRecords === 1 ? "record" : "records"}`);
+  return parts.length ? `Imported workspace with ${parts.join(", ")}` : "Imported workspace";
+}
+
 function importTrainingLabelRows(rows) {
   const index = buildSourceRecordKeyIndex();
   let imported = 0;
@@ -8753,6 +9500,17 @@ function compareTrainingLabels(left, right) {
 function downloadCsv(filename, rows) {
   const csv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadJson(filename, data) {
+  const json = `${JSON.stringify(data, null, 2)}\n`;
+  const blob = new Blob([json], { type: "application/json;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;

@@ -8,8 +8,13 @@ const {
   visibleInteractiveReachability: sharedVisibleInteractiveReachability
 } = require("../vendor/managed-app/scripts/smoke-test-harness");
 const {
+  probeHitTarget
+} = require("../plugins/agentic-workflow-policy/scripts/playwright_hit_test_helpers");
+const {
   accountSmokeCsv,
+  contactExactIdentityConflictSmokeCsv,
   contactLastNameChangeSmokeCsv,
+  contactMirrorRelationshipSmokeCsv,
   contactMissingIdSmokeCsv,
   contactSmokeCsv,
   largeContactSmokeCsv
@@ -26,25 +31,31 @@ try {
 const baseUrl = process.env.DUPLICATE_REVIEWER_URL || "http://127.0.0.1:5180";
 const outDir = process.env.PLAYWRIGHT_SMOKE_OUT_DIR || path.join(os.tmpdir(), "duplicate-reviewer-playwright");
 const REACHABILITY_OPTIONS = {
-  intentionallyHiddenIds: ["csvInput", "trainingImportInput"],
-  pointerEventsAllowedClassNames: ["threshold-slider-input"],
+  intentionallyHiddenIds: ["csvInput", "workspaceImportInput", "trainingImportInput"],
+  pointerEventsAllowedClassNames: ["threshold-slider", "threshold-slider-input"],
   sharedHitAncestorSelectors: [".threshold-slider"]
 };
 const PERFORMANCE_BUDGETS = {
   emptyImportContactsMs: 15000,
-  latestContactsJsonMs: 10000,
+  latestContactsJsonMs: 30000,
   topbarImportContactsMs: 15000,
   largeContactCsvWorkerMs: 30000,
+  largeContactCsvFilterApplyMs: 3000,
   largeContactCandidateAttempts: 500000
 };
+const GROUP_ITEM_VISIBLE_TIMEOUT_MS = 30000;
 
 async function run() {
   await fs.mkdir(outDir, { recursive: true });
   const csvPath = path.join(outDir, "contacts-smoke.csv");
   const missingContactIdCsvPath = path.join(outDir, "contacts-missing-ids.csv");
   const lastNameChangeCsvPath = path.join(outDir, "contacts-last-name-change.csv");
+  const exactIdentityConflictCsvPath = path.join(outDir, "contacts-exact-identity-conflict.csv");
+  const mirrorRelationshipCsvPath = path.join(outDir, "contacts-mirror-relationship.csv");
   const accountCsvPath = path.join(outDir, "accounts-smoke.csv");
   const largeContactCsvPath = path.join(outDir, "contacts-large-smoke.csv");
+  const datasetExportPath = path.join(outDir, "dataset-export.csv");
+  const workspaceExportPath = path.join(outDir, "workspace-export.json");
   const contactCsv = contactSmokeCsv();
   const largeContactCsv = largeContactSmokeCsv();
   const contactSmokeRowCount = csvDataRowCount(contactCsv);
@@ -52,6 +63,8 @@ async function run() {
   await fs.writeFile(csvPath, contactCsv);
   await fs.writeFile(missingContactIdCsvPath, contactMissingIdSmokeCsv());
   await fs.writeFile(lastNameChangeCsvPath, contactLastNameChangeSmokeCsv());
+  await fs.writeFile(exactIdentityConflictCsvPath, contactExactIdentityConflictSmokeCsv());
+  await fs.writeFile(mirrorRelationshipCsvPath, contactMirrorRelationshipSmokeCsv());
   await fs.writeFile(accountCsvPath, accountSmokeCsv());
   await fs.writeFile(largeContactCsvPath, largeContactCsv);
 
@@ -62,6 +75,8 @@ async function run() {
     const fileModeRedirect = await assertFileModeRedirect(browser);
     const emptyImportButtonState = await assertEmptyImportButtonOpensFileChooser(browser, csvPath);
     const lastNameChangeCandidateState = await assertLastNameChangeCandidateMatch(browser, lastNameChangeCsvPath);
+    const exactIdentityConflictState = await assertExactIdentityConflictSeparated(browser, exactIdentityConflictCsvPath);
+    await assertMirrorRelationshipSeparated(browser, mirrorRelationshipCsvPath);
     const largeContactPerformance = await assertLargeContactCsvPerformance(browser, largeContactCsvPath);
 
     const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
@@ -81,6 +96,7 @@ async function run() {
     const brandLogo = await brandLogoState(page);
     await page.screenshot({ path: path.join(outDir, "desktop-empty.png"), fullPage: false });
     const emptyInteractiveReachability = await visibleInteractiveReachability(page);
+    const workspaceImportBox = await page.locator("#workspaceImportInput").boundingBox();
     await page.emulateMedia({ colorScheme: "dark" });
     await page.waitForTimeout(100);
     const darkTheme = await themeColorState(page);
@@ -101,7 +117,7 @@ async function run() {
     const latestJsonLoadStartedAt = Date.now();
     await page.locator(".recent-file").filter({ hasText: "Latest Contacts" }).first().click();
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
-    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
     const latestJsonLoadElapsedMs = Date.now() - latestJsonLoadStartedAt;
     const latestJsonLoad = await datasetLoadState(page);
     const latestReportSummary = await reportSummaryState(page);
@@ -113,16 +129,41 @@ async function run() {
     await page.keyboard.press("Escape");
     const csvMenuClosed = await page.locator("#csvObjectMenu").isHidden();
     await page.locator("#exportMenuButton").click();
+    await page.getByRole("menuitem", { name: "Workspace" }).waitFor({ state: "visible", timeout: 5000 });
     await page.getByRole("menuitem", { name: "Decisions" }).waitFor({ state: "visible", timeout: 5000 });
     const exportMenuState = await exportMenuStateForSmoke(page);
+    const datasetExportIndex = exportMenuState.options.indexOf("Dataset + Scores");
+    const workspaceExportIndex = exportMenuState.options.indexOf("Workspace");
+    if (datasetExportIndex < 0) {
+      throw new Error(`Expected export menu to include Dataset + Scores export: ${JSON.stringify(exportMenuState)}`);
+    }
+    if (workspaceExportIndex < 0) {
+      throw new Error(`Expected export menu to include Workspace export: ${JSON.stringify(exportMenuState)}`);
+    }
+    if (exportMenuState.disabled[datasetExportIndex]) {
+      throw new Error(`Expected Dataset + Scores export to be enabled after loading a dataset: ${JSON.stringify(exportMenuState)}`);
+    }
+    if (exportMenuState.disabled[workspaceExportIndex]) {
+      throw new Error(`Expected Workspace export to be enabled after loading a dataset: ${JSON.stringify(exportMenuState)}`);
+    }
+    const datasetExportState = await captureDatasetExport(page, datasetExportPath);
+    if (
+      !datasetExportState.buttonVisible ||
+      !datasetExportState.downloaded ||
+      datasetExportState.headerRow[datasetExportState.headerRow.length - 2] !== "group" ||
+      datasetExportState.headerRow[datasetExportState.headerRow.length - 1] !== "score" ||
+      datasetExportState.csvRowCount !== latestJsonLoad.rowCount + 1
+    ) {
+      throw new Error(`Expected dataset export with group and score columns: ${JSON.stringify(datasetExportState)}`);
+    }
     await page.keyboard.press("Escape");
     const exportMenuClosed = await page.locator("#exportMenu").isHidden();
     await page.locator("#demoButton").click();
-    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
 
     const topbarImportState = await importContactsThroughMenu(page, csvPath);
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
-    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
     await page.locator(".group-item-main").first().click();
     const matchControlsButton = page.getByRole("button", { name: /Match Controls/ });
     if (await matchControlsButton.getAttribute("aria-expanded") !== "true") {
@@ -130,9 +171,13 @@ async function run() {
     }
     const matchControlsExpanded = await matchControlsButton.getAttribute("aria-expanded");
     await setRangeValue(page, "#threshold", "80");
-    await setRangeValue(page, "#maxThreshold", "99");
+    await setRangeValue(page, "#maxThreshold", "100");
     const thresholdReadout = await page.locator("#thresholdValue").textContent();
     const thresholdControl = await thresholdControlState(page);
+    const thresholdSliderRightHit = await probeHitTarget(page, "#thresholdSlider", "right");
+    if (thresholdSliderRightHit.id === "thresholdMaxNumber") {
+      throw new Error(`Expected threshold slider right edge to stay on the slider surface, not the numeric input: ${JSON.stringify(thresholdSliderRightHit)}`);
+    }
     await setNumberValue(page, "#thresholdMinNumber", "105");
     const thresholdClampState = await thresholdControlState(page);
     await setNumberValue(page, "#thresholdMinNumber", "80");
@@ -141,12 +186,15 @@ async function run() {
     const labelStatusEnabledAfterLoad = await page.locator('[data-label-status-filter][value="unlabeled"]').isEnabled();
     await page.locator("#applyControlsButton").click();
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
-    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
     const thresholdFilteredScores = await visibleGroupScores(page);
     await setRangeValue(page, "#maxThreshold", "100");
     await page.locator("#applyControlsButton").click();
-    await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
-    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
+    const cachedThresholdRebuildState = await page.locator("#sourcePill").getAttribute("data-last-processing-mode");
+    if (cachedThresholdRebuildState !== "cache") {
+      throw new Error(`Expected cached threshold rebuild to reuse prepared records and cached pair scores: ${cachedThresholdRebuildState}`);
+    }
     const customFilterState = await exerciseCustomFilters(page);
     await page.locator("#groupList").evaluate((element) => {
       element.scrollTop = element.scrollHeight;
@@ -190,6 +238,20 @@ async function run() {
     await page.locator(".record-decision-badge.duplicate").first().waitFor({ state: "visible", timeout: 5000 });
 
     const duplicateBadges = await page.locator(".record-decision-badge.duplicate").count();
+    const workspaceExportState = await captureWorkspaceExport(page, workspaceExportPath);
+    if (workspaceExportState.kind !== "workspace" || workspaceExportState.workspaceVersion !== 1) {
+      throw new Error(`Expected workspace export metadata to mark the file as a workspace record: ${JSON.stringify(workspaceExportState)}`);
+    }
+    if (!Array.isArray(workspaceExportState.trainingLabels) || !workspaceExportState.trainingLabels.length) {
+      throw new Error(`Expected workspace export to include saved training labels: ${JSON.stringify(workspaceExportState)}`);
+    }
+    if (!Array.isArray(workspaceExportState.decisions) || !workspaceExportState.decisions.length) {
+      throw new Error(`Expected workspace export to include saved decisions: ${JSON.stringify(workspaceExportState)}`);
+    }
+    const workspaceRoundTripState = await assertWorkspaceExportRoundTrip(browser, workspaceExportPath, csvPath);
+    if (workspaceRoundTripState.decisionCount < 1 || workspaceRoundTripState.trainingLabelCount < 1) {
+      throw new Error(`Expected workspace import to restore decisions and labels in a fresh context: ${JSON.stringify(workspaceRoundTripState)}`);
+    }
     await page.screenshot({ path: path.join(outDir, "desktop-duplicate.png"), fullPage: false });
 
     await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Not Duplicate", exact: true }).click();
@@ -227,10 +289,30 @@ async function run() {
           .some((radio) => radio.name === name && radio.value === value && radio.checked);
       }, mergeFieldSelection);
     }
-    const staleRefreshState = await captureStaleRefreshFlow(page, contactSmokeCsv());
-    const staleFailureCardRefreshState = await captureStaleFailureCardRefreshFlow(page, contactSmokeCsv());
+    const staleRefreshState = await captureStaleRefreshFlow(page);
+    const staleFailureCardRefreshState = await captureStaleFailureCardRefreshFlow(page);
     const missingContactIdRefreshState = await captureMissingContactIdRefreshFlow(page, missingContactIdCsvPath, contactSmokeCsv());
     const missingContactIdFallbackRefreshState = await captureMissingContactIdFallbackRefreshFlow(page, missingContactIdCsvPath, contactSmokeCsv());
+    if (
+      !staleRefreshState.refreshCalled ||
+      !staleRefreshState.datasetContractVersion ||
+      staleRefreshState.datasetContractVersion !== "salesforce-contact-rollback-v1" ||
+      staleRefreshState.datasetRollbackInventoryCount < 1 ||
+      staleRefreshState.sourceFormat !== "json" ||
+      staleRefreshState.refreshEndpoint !== "/api/smoke/stale-refresh/latest.json"
+    ) {
+      throw new Error(`Expected stale Contacts refresh to preserve the rollback-capable JSON contract: ${JSON.stringify(staleRefreshState)}`);
+    }
+    if (
+      !staleFailureCardRefreshState.refreshCalled ||
+      !staleFailureCardRefreshState.datasetContractVersion ||
+      staleFailureCardRefreshState.datasetContractVersion !== "salesforce-contact-rollback-v1" ||
+      staleFailureCardRefreshState.datasetRollbackInventoryCount < 1 ||
+      staleFailureCardRefreshState.sourceFormat !== "json" ||
+      staleFailureCardRefreshState.refreshEndpoint !== "/api/smoke/stale-failure-card-refresh/latest.json"
+    ) {
+      throw new Error(`Expected stale failure-card refresh to preserve the rollback-capable JSON contract: ${JSON.stringify(staleFailureCardRefreshState)}`);
+    }
     await page.locator(".group-item-main").first().click();
     await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
     await page.locator('[data-review-mode="merge"]').click();
@@ -238,11 +320,11 @@ async function run() {
     if (await page.locator(".merge-master-radio").count() > 1) {
       await page.locator(".merge-master-radio").nth(1).check();
     }
-    const mergePayload = await captureMergePayload(page);
-    const mergeReportDownloadState = await captureMergeReportDownload(page);
     await page.setViewportSize({ width: 1280, height: 560 });
     const workspaceColumnScroll = await assertVerticalScrollAvailable(page, ".workspace-column", "workspace column");
     const rightPaneScrollModel = await assertRightPaneSingleScrollModel(page);
+    const mergePayload = await captureMergePayload(page);
+    const mergeReportDownloadState = await captureMergeReportDownload(page);
     const rootScrollPolicy = await assertRootScrollPolicy(page);
     const scrollTrapState = await assertNoPrimaryScrollTraps(page);
     const interactiveReachability = await visibleInteractiveReachability(page);
@@ -280,6 +362,9 @@ async function run() {
 
     if (!emptyChooseVisible) throw new Error("Expected empty-state Import action to be visible.");
     if (!emptyDemoVisible) throw new Error("Expected empty-state Load Demo action to be visible.");
+    if (!emptyImportButtonState.workspaceImportDisabledBeforeLoad) {
+      throw new Error(`Expected Workspace import to stay disabled before a dataset is loaded: ${JSON.stringify(emptyImportButtonState)}`);
+    }
     if (!emptyImportButtonState.fileChooserOpened || emptyImportButtonState.rowCount !== contactSmokeRowCount || !emptyImportButtonState.groupCount) {
       throw new Error(`Expected empty-state Import to open a file picker and load a dataset: ${JSON.stringify(emptyImportButtonState)}`);
     }
@@ -291,11 +376,21 @@ async function run() {
       throw new Error(`Large Contact CSV candidate attempts exceeded budget: ${JSON.stringify(largeContactPerformance.matchingStats)}`);
     }
     if (
+      !largeContactPerformance.groupListScrollLockState ||
+      largeContactPerformance.groupListScrollLockState.after.afterScrollTop <= largeContactPerformance.groupListScrollLockState.before.scrollTop ||
+      largeContactPerformance.groupListScrollLockState.after.selectedVisible
+    ) {
+      throw new Error(`Expected Match Groups to keep scrolling after the selected item is pinned at the top: ${JSON.stringify(largeContactPerformance.groupListScrollLockState)}`);
+    }
+    if (
       lastNameChangeCandidateState.groupCount !== 1 ||
       lastNameChangeCandidateState.firstGroupScore < 86 ||
       !lastNameChangeCandidateState.matchingStats?.candidatePairs
     ) {
       throw new Error(`Expected last-name-change Contact pair to survive candidate pruning: ${JSON.stringify(lastNameChangeCandidateState)}`);
+    }
+    if (exactIdentityConflictState.groupCount !== 0) {
+      throw new Error(`Expected exact phone/LinkedIn conflict Contact pair to stay below the duplicate threshold: ${JSON.stringify(exactIdentityConflictState)}`);
     }
     assertPerformanceBudget("large Contact CSV worker import", largeContactPerformance.elapsedMs, PERFORMANCE_BUDGETS.largeContactCsvWorkerMs);
     if (!lightTheme.colorScheme.includes("light") || !darkTheme.colorScheme.includes("dark") || lightTheme.bodyBg === darkTheme.bodyBg) {
@@ -323,6 +418,9 @@ async function run() {
     }
     if (!brandLogo.actionsCentered || !brandLogo.actionRowsBalanced || !brandLogo.actionsComfortable) {
       throw new Error(`Expected Duplicate Reviewer header buttons to be centered in balanced, legible rows: ${JSON.stringify(brandLogo)}`);
+    }
+    if (!workspaceImportBox || workspaceImportBox.width > 4 || workspaceImportBox.height > 4) {
+      throw new Error(`Expected the workspace import file input to stay tiny and out of the header flow: ${JSON.stringify(workspaceImportBox)}`);
     }
     if (brandLogo.actionTexts.join("|") !== "Import|Export >|?|Send to Codex|Demo Data") {
       throw new Error(`Expected Duplicate Reviewer header actions to be simplified and ordered: ${JSON.stringify(brandLogo)}`);
@@ -397,22 +495,22 @@ async function run() {
     }
     assertPerformanceBudget("topbar Contact import", topbarImportState.elapsedMs, PERFORMANCE_BUDGETS.topbarImportContactsMs);
     if (matchControlsExpanded !== "true") throw new Error("Expected Match Controls panel to expand.");
-    if (thresholdReadout !== "80-99") throw new Error(`Expected threshold readout to update to 80-99, got ${thresholdReadout}.`);
-    if (thresholdControl.minRange !== "80" || thresholdControl.maxRange !== "99" || thresholdControl.minNumber !== "80" || thresholdControl.maxNumber !== "99") {
+    if (thresholdReadout !== "80-100") throw new Error(`Expected threshold readout to update to 80-100, got ${thresholdReadout}.`);
+    if (thresholdControl.minRange !== "80" || thresholdControl.maxRange !== "100" || thresholdControl.minNumber !== "80" || thresholdControl.maxNumber !== "100") {
       throw new Error(`Expected dual threshold control to sync sliders and number inputs: ${JSON.stringify(thresholdControl)}`);
     }
-    if (thresholdClampState.minRange !== "99" || thresholdClampState.maxRange !== "99") {
+    if (thresholdClampState.minRange !== "100" || thresholdClampState.maxRange !== "100") {
       throw new Error(`Expected min threshold typing to stop at the max handle: ${JSON.stringify(thresholdClampState)}`);
     }
-    if (thresholdTypedState.minRange !== "80" || thresholdTypedState.maxRange !== "99") {
+    if (thresholdTypedState.minRange !== "80" || thresholdTypedState.maxRange !== "100") {
       throw new Error(`Expected typed min threshold to update the slider: ${JSON.stringify(thresholdTypedState)}`);
     }
     if (!fastestSearchDefaultUnchecked) {
       throw new Error("Expected fastest search to be opt-in so broader candidate search is the default.");
     }
     if (!labelStatusEnabledAfterLoad) throw new Error("Expected label status filters to enable after loading a dataset.");
-    if (!thresholdFilteredScores.length || thresholdFilteredScores.some((score) => score < 80 || score > 99)) {
-      throw new Error(`Expected max threshold to limit visible scores to 80-99: ${JSON.stringify(thresholdFilteredScores)}`);
+    if (!thresholdFilteredScores.length || thresholdFilteredScores.some((score) => score < 80 || score > 100)) {
+      throw new Error(`Expected max threshold to limit visible scores to 80-100: ${JSON.stringify(thresholdFilteredScores)}`);
     }
     if (customFilterState.defaultLogicMode !== "and" || customFilterState.logicMode !== "custom") {
       throw new Error(`Expected filter logic to default to AND and expose custom logic by choice: ${JSON.stringify(customFilterState)}`);
@@ -539,6 +637,8 @@ async function run() {
       mergePayload.mergeSentBeforeConfirm ||
       !mergePayload.previewClearedAfterCancel ||
       mergePayload.mergeSentAfterCancel ||
+      !mergePayload.successPanelVisible ||
+      mergePayload.mergeSubmitCountAfterSuccess !== 0 ||
       !mergePayload.nextAdvanced ||
       !mergePayload.leftRailNavigationWorked ||
       mergePayload.reviewOnlyRowCount < 1 ||
@@ -620,6 +720,7 @@ async function run() {
       topbarImportState,
       fastestSearchDefaultUnchecked,
       thresholdFilteredScores,
+      cachedThresholdRebuildState,
       customFilterState,
       sortPressed,
       sortTopState,
@@ -640,6 +741,7 @@ async function run() {
       missingContactIdFallbackRefreshState,
       mergePayload,
       accountMergeDisabled,
+      datasetExportState,
       shortcutsVisible,
       fileModeRedirect,
       rootScrollPolicy,
@@ -682,6 +784,10 @@ async function assertEmptyImportButtonOpensFileChooser(browser, filePath) {
   try {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.locator('[data-empty-action="choose-csv"]').waitFor({ state: "visible", timeout: 5000 });
+    await page.locator("#chooseCsvButton").click();
+    await page.getByRole("menuitem", { name: "Workspace" }).waitFor({ state: "visible", timeout: 5000 });
+    const workspaceImportDisabledBeforeLoad = await page.getByRole("menuitem", { name: "Workspace" }).isDisabled();
+    await page.keyboard.press("Escape");
     const startedAt = Date.now();
     const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
     await page.locator('[data-empty-action="choose-csv"]').click();
@@ -691,6 +797,7 @@ async function assertEmptyImportButtonOpensFileChooser(browser, filePath) {
     await waitForFirstGroup(page, "Empty-state Import load");
     return {
       fileChooserOpened: true,
+      workspaceImportDisabledBeforeLoad,
       elapsedMs: Date.now() - startedAt,
       ...(await datasetLoadState(page))
     };
@@ -729,6 +836,78 @@ async function assertLastNameChangeCandidateMatch(browser, filePath) {
   }
 }
 
+async function assertExactIdentityConflictSeparated(browser, filePath) {
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const diagnostics = [];
+  page.on("console", (message) => {
+    if (["error", "warning"].includes(message.type())) {
+      diagnostics.push(`${message.type()}: ${message.text()}`);
+    }
+  });
+  page.on("pageerror", (error) => diagnostics.push(`pageerror: ${error.message}`));
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('[data-empty-action="choose-csv"]').waitFor({ state: "visible", timeout: 5000 });
+    const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
+    await page.locator('[data-empty-action="choose-csv"]').click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles(filePath);
+    await waitForLoadingModalHidden(page, "Exact identity conflict Contact load", diagnostics);
+    await setRangeValue(page, "#threshold", "80");
+    await setRangeValue(page, "#maxThreshold", "99");
+    await page.locator("#applyControlsButton").click();
+    await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
+    return {
+      ...(await datasetLoadState(page))
+    };
+  } finally {
+    await page.close();
+  }
+}
+
+async function assertMirrorRelationshipSeparated(browser, filePath) {
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const diagnostics = [];
+  page.on("console", (message) => {
+    if (["error", "warning"].includes(message.type())) {
+      diagnostics.push(`${message.type()}: ${message.text()}`);
+    }
+  });
+  page.on("pageerror", (error) => diagnostics.push(`pageerror: ${error.message}`));
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator('[data-empty-action="choose-csv"]').waitFor({ state: "visible", timeout: 5000 });
+    const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
+    await page.locator('[data-empty-action="choose-csv"]').click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles(filePath);
+    await waitForLoadingModalHidden(page, "Mirror relationship Contact load", diagnostics);
+    await waitForFirstGroup(page, "Mirror relationship Contact load");
+    const groupMemberships = await page.evaluate(() => {
+      return state.groups.map((group) => ({
+        score: group.score,
+        recordIds: group.records.map((record) => record.Id)
+      }));
+    });
+
+    if (!groupMemberships.length) {
+      throw new Error("Expected at least one duplicate group for the mirror-bridge regression.");
+    }
+    if (groupMemberships.some((group) => group.recordIds.includes("003R00000000001") && group.recordIds.includes("003R00000000002"))) {
+      throw new Error(`Mirror relationship regression failed: mirrored contacts were grouped together: ${JSON.stringify(groupMemberships)}`);
+    }
+    if (!groupMemberships.some((group) => group.recordIds.length >= 2)) {
+      throw new Error(`Mirror relationship regression failed: expected a surviving duplicate group after splitting the mirror bridge: ${JSON.stringify(groupMemberships)}`);
+    }
+    return {
+      ...(await datasetLoadState(page)),
+      groupMemberships
+    };
+  } finally {
+    await page.close();
+  }
+}
+
 async function assertLargeContactCsvPerformance(browser, filePath) {
   const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
   const diagnostics = [];
@@ -748,9 +927,32 @@ async function assertLargeContactCsvPerformance(browser, filePath) {
     await fileChooser.setFiles(filePath);
     await waitForLoadingModalHidden(page, "Large Contact CSV performance load", diagnostics, PERFORMANCE_BUDGETS.largeContactCsvWorkerMs);
     await waitForFirstGroup(page, "Large Contact CSV performance load");
+    const groupListScrollLockState = await exerciseGroupListScrollAfterSelection(page);
+    const matchControlsButton = page.getByRole("button", { name: /Match Controls/ });
+    if (await matchControlsButton.getAttribute("aria-expanded") !== "true") {
+      await matchControlsButton.click();
+    }
+    const largeContactFilterStartedAt = Date.now();
+    const firstFilterRow = page.locator(".filter-row").first();
+    await firstFilterRow.locator(".filter-field-select").selectOption("email");
+    await firstFilterRow.locator(".filter-operator-select").selectOption("contains");
+    await firstFilterRow.locator(".filter-value-control").fill("person1@perf1.example");
+    await page.locator("#applyControlsButton").click();
+    await page.waitForFunction(() => {
+      const groupCount = document.querySelector("#groupCount");
+      return groupCount?.textContent?.replace(/,/g, "").trim() === "1";
+    }, null, { timeout: 30000 });
+    const largeContactFilterApplyElapsedMs = Date.now() - largeContactFilterStartedAt;
+    assertPerformanceBudget(
+      "large Contact CSV custom filter apply",
+      largeContactFilterApplyElapsedMs,
+      PERFORMANCE_BUDGETS.largeContactCsvFilterApplyMs
+    );
     return {
       elapsedMs: Date.now() - startedAt,
-      ...(await datasetLoadState(page))
+      ...(await datasetLoadState(page)),
+      groupListScrollLockState,
+      largeContactFilterApplyElapsedMs
     };
   } finally {
     await page.close();
@@ -806,7 +1008,7 @@ function visibleInteractiveReachability(page) {
 
 async function waitForFirstGroup(page, label) {
   try {
-    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
   } catch (error) {
     const debugState = await duplicateReviewerDebugState(page);
     console.error(`${label} did not render a visible group: ${JSON.stringify(debugState)}`);
@@ -1152,7 +1354,9 @@ async function captureMergePayload(page) {
   await page.locator(".merge-submit-button").click();
   await page.locator(".merge-review-panel").waitFor({ state: "visible", timeout: 5000 });
   await page.locator(".merge-confirm-preview-button").click();
-  await page.locator(".merge-result.success").waitFor({ state: "visible", timeout: 5000 });
+  await page.locator(".merge-success-panel").waitFor({ state: "visible", timeout: 5000 });
+  const successPanelVisible = await page.locator(".merge-success-panel").isVisible();
+  const mergeSubmitCountAfterSuccess = await page.locator(".merge-submit-button").count();
   await page.unroute("**/api/salesforce/premerge-check");
   await page.unroute("**/api/salesforce/merge");
   page.off("dialog", handleDialog);
@@ -1175,6 +1379,8 @@ async function captureMergePayload(page) {
     mergeSentBeforeConfirm,
     previewClearedAfterCancel,
     mergeSentAfterCancel,
+    successPanelVisible,
+    mergeSubmitCountAfterSuccess,
     nextAdvanced,
     leftRailNavigationWorked,
     readOnly: previewState.readOnly,
@@ -1280,21 +1486,118 @@ async function captureMergeReportDownload(page) {
   return state;
 }
 
-async function captureStaleRefreshFlow(page, refreshedCsv) {
-  const refreshEndpoint = "/api/smoke/stale-refresh/latest.csv";
+async function captureWorkspaceExport(page, exportPath) {
+  await page.locator("#exportMenuButton").click();
+  await page.getByRole("menuitem", { name: "Workspace" }).waitFor({ state: "visible", timeout: 5000 });
+  const button = page.locator("#workspaceExportButton");
+  const state = {
+    buttonVisible: await button.isVisible(),
+    downloaded: false,
+    json: null
+  };
+
+  if (!state.buttonVisible) return state;
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("menuitem", { name: "Workspace" }).click();
+  const download = await downloadPromise;
+  await download.saveAs(exportPath);
+  state.downloaded = true;
+  state.json = JSON.parse(await fs.readFile(exportPath, "utf8"));
+  return state.json;
+}
+
+async function captureDatasetExport(page, exportPath) {
+  const menu = page.locator("#exportMenu");
+  if (await menu.isHidden()) {
+    await page.locator("#exportMenuButton").click();
+  }
+  const button = page.locator("#datasetExportButton");
+  await button.waitFor({ state: "visible", timeout: 5000 });
+  const state = {
+    buttonVisible: await button.isVisible(),
+    downloaded: false,
+    csv: "",
+    headerRow: [],
+    csvRowCount: 0
+  };
+
+  if (!state.buttonVisible) return state;
+
+  const downloadPromise = page.waitForEvent("download");
+  await button.click();
+  const download = await downloadPromise;
+  await download.saveAs(exportPath);
+  state.downloaded = true;
+  state.csv = await fs.readFile(exportPath, "utf8");
+  const rows = state.csv.trim().split(/\r?\n/);
+  state.csvRowCount = rows.length;
+  state.headerRow = rows[0]?.split(",") || [];
+  return state;
+}
+
+async function importWorkspaceThroughMenu(page, filePath) {
+  await page.locator("#chooseCsvButton").click();
+  await page.getByRole("menuitem", { name: "Workspace" }).waitFor({ state: "visible", timeout: 5000 });
+  const startedAt = Date.now();
+  const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
+  await page.getByRole("menuitem", { name: "Workspace" }).click();
+  const fileChooser = await fileChooserPromise;
+  await fileChooser.setFiles(filePath);
+  await waitForLoadingModalHidden(page, "Topbar Import Workspace load");
+  await waitForFirstGroup(page, "Topbar Import Workspace load");
+  return {
+    fileChooserOpened: true,
+    elapsedMs: Date.now() - startedAt,
+    ...(await datasetLoadState(page))
+  };
+}
+
+async function assertWorkspaceExportRoundTrip(browser, exportPath, datasetPath) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 960 } });
+  const page = await context.newPage();
+  try {
+    await page.emulateMedia({ colorScheme: "light" });
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await importContactsThroughMenu(page, datasetPath);
+    await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
+    await waitForFirstGroup(page, "Workspace round-trip dataset reload");
+    const importState = await importWorkspaceThroughMenu(page, exportPath);
+    await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
+    await waitForFirstGroup(page, "Workspace round-trip import");
+    const state = await page.evaluate(() => ({
+      decisionCount: [...state.decisions.values()].filter((decision) => decision === "duplicate").length,
+      trainingLabelCount: state.trainingLabels.size,
+      reviewStateStatus: state.reviewStateStatus
+    }));
+    return {
+      ...state,
+      importState
+    };
+  } finally {
+    await context.close();
+  }
+}
+
+async function captureStaleRefreshFlow(page) {
+  const refreshEndpoint = "/api/smoke/stale-refresh/latest.json";
   const state = {
     preMergeCalled: false,
     refreshCalled: false,
     mergeCalled: false,
-    dialogMessage: ""
+    dialogMessage: "",
+    datasetContractVersion: "",
+    datasetRollbackInventoryCount: 0,
+    sourceFormat: ""
   };
   await page.evaluate((endpoint) => {
     state.datasetSource = {
       endpoint,
-      fileName: "contacts-smoke.csv",
+      fileName: "salesforce-report-latest.json",
       displayName: "Latest Contacts",
       objectType: "contact",
-      format: "csv"
+      format: "json",
+      contractVersion: "salesforce-contact-rollback-v1"
     };
   }, refreshEndpoint);
   await page.route("**/api/salesforce/premerge-check", async (route) => {
@@ -1341,8 +1644,8 @@ async function captureStaleRefreshFlow(page, refreshedCsv) {
     state.refreshCalled = true;
     await route.fulfill({
       status: 200,
-      contentType: "text/csv",
-      body: refreshedCsv
+      contentType: "application/json",
+      body: JSON.stringify(buildRollbackRefreshDataset())
     });
   });
 
@@ -1354,15 +1657,24 @@ async function captureStaleRefreshFlow(page, refreshedCsv) {
   await page.locator(".merge-submit-button").click();
   await refreshResponsePromise;
   await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
-  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
+  const datasetState = await page.evaluate(() => ({
+    datasetContractVersion: String(state.datasetSource?.contractVersion || ""),
+    datasetRollbackInventoryCount: Array.isArray(state.datasetMetadata?.rollbackInventory) ? state.datasetMetadata.rollbackInventory.length : 0,
+    sourceFormat: String(state.datasetSource?.format || "")
+  }));
   await page.unroute("**/api/salesforce/premerge-check");
   await page.unroute("**/api/salesforce/merge");
   await page.unroute(`**${refreshEndpoint}`);
-  return state;
+  return {
+    ...state,
+    ...datasetState,
+    refreshEndpoint
+  };
 }
 
-async function captureStaleFailureCardRefreshFlow(page, refreshedCsv) {
-  const refreshEndpoint = "/api/smoke/stale-failure-card-refresh/latest.csv";
+async function captureStaleFailureCardRefreshFlow(page) {
+  const refreshEndpoint = "/api/smoke/stale-failure-card-refresh/latest.json";
   const state = {
     preMergeCalled: false,
     refreshCalled: false,
@@ -1370,16 +1682,20 @@ async function captureStaleFailureCardRefreshFlow(page, refreshedCsv) {
     cardVisible: false,
     refreshButtonVisible: false,
     dismissedDialogMessage: "",
-    buttonDialogMessage: ""
+    buttonDialogMessage: "",
+    datasetContractVersion: "",
+    datasetRollbackInventoryCount: 0,
+    sourceFormat: ""
   };
 
   await page.evaluate((endpoint) => {
     state.datasetSource = {
       endpoint,
-      fileName: "contacts-smoke.csv",
+      fileName: "salesforce-report-latest.json",
       displayName: "Latest Contacts",
       objectType: "contact",
-      format: "csv"
+      format: "json",
+      contractVersion: "salesforce-contact-rollback-v1"
     };
   }, refreshEndpoint);
   await page.locator(".group-item-main").first().click();
@@ -1448,8 +1764,8 @@ async function captureStaleFailureCardRefreshFlow(page, refreshedCsv) {
     state.refreshCalled = true;
     await route.fulfill({
       status: 200,
-      contentType: "text/csv",
-      body: refreshedCsv
+      contentType: "application/json",
+      body: JSON.stringify(buildRollbackRefreshDataset())
     });
   });
 
@@ -1462,7 +1778,7 @@ async function captureStaleFailureCardRefreshFlow(page, refreshedCsv) {
   await page.locator(".merge-refresh-stale-data-button").click();
   await refreshResponsePromise;
   await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
-  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
   const confirmMessages = await page.evaluate(() => {
     const messages = window.__smokeConfirmMessages || [];
     if (window.__smokeOriginalConfirm) window.confirm = window.__smokeOriginalConfirm;
@@ -1470,11 +1786,115 @@ async function captureStaleFailureCardRefreshFlow(page, refreshedCsv) {
   });
   state.dismissedDialogMessage = confirmMessages[0] || "";
   state.buttonDialogMessage = confirmMessages[1] || "";
+  const datasetState = await page.evaluate(() => ({
+    datasetContractVersion: String(state.datasetSource?.contractVersion || ""),
+    datasetRollbackInventoryCount: Array.isArray(state.datasetMetadata?.rollbackInventory) ? state.datasetMetadata.rollbackInventory.length : 0,
+    sourceFormat: String(state.datasetSource?.format || "")
+  }));
 
   await page.unroute("**/api/salesforce/premerge-check");
   await page.unroute("**/api/salesforce/merge");
   await page.unroute(`**${refreshEndpoint}`);
-  return state;
+  return {
+    ...state,
+    ...datasetState,
+    refreshEndpoint
+  };
+}
+
+function buildRollbackRefreshDataset() {
+  const records = rollbackRefreshRecords();
+  const columns = ["Id", "First Name", "Last Name", "Company", "Email", "Lead Source", "Created Date", "Phone", "Mobile"];
+  return {
+    schema: "salesforce-duplicate-reviewer.dataset",
+    schemaVersion: 2,
+    contractVersion: "salesforce-contact-rollback-v1",
+    objectType: "contact",
+    fileName: "salesforce-report-latest.json",
+    source: {
+      system: "salesforce",
+      name: "Latest Contacts",
+      format: "salesforce-rest-soql-json",
+      contractVersion: "salesforce-contact-rollback-v1"
+    },
+    fields: columns.map((column) => ({ apiName: column, label: column, type: "text" })),
+    columns,
+    rows: records.map((record) => columns.map((column) => record[column] || "")),
+    records,
+    rollbackInventory: [
+      {
+        recordId: records[0].Id,
+        recordName: `${records[0]["First Name"]} ${records[0]["Last Name"]}`,
+        relationships: [
+          {
+            path: "Tasks",
+            kind: "array",
+            records: [
+              {
+                Id: "00T000000000AAA",
+                Subject: "Intro call",
+                OwnerId: "005000000000AAA"
+              }
+            ]
+          },
+          {
+            path: "Opportunities",
+            kind: "array",
+            records: [
+              {
+                Id: "006000000000AAA",
+                Name: "Test Opportunity",
+                AccountId: "001000000000AAA"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    rowCount: records.length,
+    generatedAt: new Date().toISOString()
+  };
+}
+
+function rollbackRefreshRecords() {
+  return [
+    {
+      Id: "003T00000000001",
+      "First Name": "Ada",
+      "Last Name": "Lovelace",
+      Company: "Analytical Engines",
+      Email: "ada@example.com",
+      "Lead Source": "Web",
+      "Created Date": "2024-01-01T09:00:00.000Z",
+      Phone: "(555) 010-0001",
+      Mobile: "",
+      Tasks: [
+        {
+          Id: "00T000000000AAA",
+          Subject: "Intro call",
+          OwnerId: "005000000000AAA"
+        }
+      ],
+      Opportunities: [
+        {
+          Id: "006000000000AAA",
+          Name: "Test Opportunity",
+          AccountId: "001000000000AAA"
+        }
+      ]
+    },
+    {
+      Id: "003T00000000002",
+      "First Name": "Ada",
+      "Last Name": "Lovelace",
+      Company: "Analytical Engines Inc.",
+      Email: "ada.updated@example.com",
+      "Lead Source": "Referral",
+      "Created Date": "2025-01-01T09:00:00.000Z",
+      Phone: "",
+      Mobile: "(555) 020-0001"
+    }
+  ];
 }
 
 async function captureMissingContactIdRefreshFlow(page, missingIdCsvPath, refreshedCsv) {
@@ -1552,7 +1972,7 @@ async function captureMissingContactIdRefreshFlow(page, missingIdCsvPath, refres
 }
 
 async function captureMissingContactIdFallbackRefreshFlow(page, missingIdCsvPath, refreshedCsv) {
-  const refreshEndpoint = "/api/staging-contacts/latest.csv";
+  const refreshEndpoint = "/api/staging-contacts/latest.json";
   const state = {
     noticeVisible: false,
     refreshButtonVisible: false,
@@ -1607,8 +2027,8 @@ async function captureMissingContactIdFallbackRefreshFlow(page, missingIdCsvPath
     state.refreshCalled = true;
     await route.fulfill({
       status: 200,
-      contentType: "text/csv",
-      body: refreshedCsv
+      contentType: "application/json",
+      body: JSON.stringify(buildRollbackRefreshDataset())
     });
   });
 
@@ -1794,7 +2214,7 @@ async function exerciseCustomFilters(page) {
   await page.locator(".filter-logic-input").fill("1 OR 2");
 
   await page.locator("#applyControlsButton").click();
-  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
   const filteredCount = await page.locator("#groupCount").evaluate((node) => Number(node.textContent?.replace(/,/g, "") || 0));
   const logicMode = await page.locator(".filter-logic-mode-select").inputValue();
   const logicValue = await page.locator(".filter-logic-input").inputValue();
@@ -1803,7 +2223,7 @@ async function exerciseCustomFilters(page) {
     await page.locator("[data-filter-remove]").first().click();
   }
   await page.locator("#applyControlsButton").click();
-  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
 
   return {
     filteredCount,
@@ -1827,13 +2247,13 @@ async function exerciseLabelStatusFilter(page) {
   const applyButton = page.locator("[data-label-status-apply]");
   const applyEnabledAfterChange = await applyButton.isEnabled();
   await applyButton.click();
-  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
   const filteredCount = await page.locator("#groupCount").evaluate((node) => Number(node.textContent?.replace(/,/g, "") || 0));
   const visibleFullCount = await page.locator(".group-item.is-label-full").count();
   const applyDisabledAfterApply = await applyButton.isDisabled();
   await fullCheckbox.uncheck();
   await applyButton.click();
-  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 10000 });
+  await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
   return { startingCount, countBeforeApply, applyEnabledAfterChange, filteredCount, visibleFullCount, applyDisabledAfterApply };
 }
 
@@ -1920,6 +2340,34 @@ async function groupListTopState(page) {
       scoresAscending: scores.every((score, index) => index === 0 || scores[index - 1] <= score)
     };
   });
+}
+
+async function exerciseGroupListScrollAfterSelection(page) {
+  const list = page.locator("#groupList");
+  await list.scrollIntoViewIfNeeded();
+  await list.hover();
+  const before = await list.evaluate((element) => ({
+    scrollTop: element.scrollTop,
+    maxScrollTop: Math.max(0, element.scrollHeight - element.clientHeight),
+    selectedVisible: !!element.querySelector(".group-item.is-selected")
+  }));
+  await page.locator(".group-item").first().click();
+  await page.mouse.wheel(0, 300);
+  await page.waitForTimeout(150);
+  const after = await list.evaluate((element) => {
+    const selected = element.querySelector(".group-item.is-selected");
+    const listRect = element.getBoundingClientRect();
+    const selectedRect = selected?.getBoundingClientRect();
+    const selectedVisible = !!selectedRect && selectedRect.bottom > listRect.top && selectedRect.top < listRect.bottom;
+    return {
+      afterScrollTop: element.scrollTop,
+      maxScrollTop: Math.max(0, element.scrollHeight - element.clientHeight),
+      selectedVisible,
+      selectedTop: selectedRect ? selectedRect.top - listRect.top : null,
+      selectedBottom: selectedRect ? selectedRect.bottom - listRect.top : null
+    };
+  });
+  return { before, after };
 }
 
 async function assertRootScrollPolicy(page) {
