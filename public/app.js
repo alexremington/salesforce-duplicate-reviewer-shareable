@@ -817,19 +817,9 @@ const state = {
     displayName: "",
     objectType: "contact",
     format: "",
-    contractVersion: "",
-    orgAlias: "",
-    instanceUrl: ""
+    contractVersion: ""
   },
   datasetMetadata: {},
-  selectedOrgAlias: "",
-  selectedInstanceUrl: "",
-  pendingOrgAlias: "",
-  pendingInstanceUrl: "",
-  orgCatalog: [],
-  orgCatalogLoading: false,
-  orgCatalogWarning: "",
-  serverHealth: null,
   datasetKey: "",
   reviewStateStatus: "",
   loadError: "",
@@ -1721,13 +1711,11 @@ async function loadDatasetText(datasetText, {
   setLoadedDatasetSource({
     endpoint,
     fileName: result.fileName || fileName || datasetFileNameForFormat(format),
-    displayName: displayName || result.displayName || fileName || state.fileName || "",
-    objectType: result.objectType || normalizedObjectType,
+    displayName,
+    objectType: normalizeObjectType(result.objectType || state.objectType),
     format: result.format || format,
     contractVersion: result.contractVersion || result.datasetMetadata?.contractVersion || "",
-    metadata: result.datasetMetadata || {},
-    orgAlias: state.datasetSource?.orgAlias || "",
-    instanceUrl: state.datasetSource?.instanceUrl || ""
+    metadata: extractDatasetMetadata(result)
   });
   if (saveRecent) {
     saveRecentFileInBackground({
@@ -1879,14 +1867,46 @@ function cancelActiveLoad() {
   renderDetail();
 }
 
-function isCurrentLoadRequest(loadRequestId) {
-  return Number(loadRequestId) === activeLoadRequestId;
-}
-
-function clearActiveLoadRequest(loadRequestId) {
-  if (!isCurrentLoadRequest(loadRequestId)) return;
-  activeLoadReader = null;
-  activeLoadAbortController = null;
+function clearLoadedDatasetForPendingLoad() {
+  state.fileName = "";
+  state.datasetSource = {
+    endpoint: "",
+    fileName: "",
+    displayName: "",
+    objectType: state.objectType,
+    format: "",
+    contractVersion: ""
+  };
+  state.datasetMetadata = {};
+  state.lastProcessingMode = "";
+  state.lastMatchingStats = null;
+  state.headers = [];
+  state.rows = [];
+  state.mapping = {};
+  state.groups = [];
+  groupListRenderCache = null;
+  detailRenderCache = "";
+  state.selectedGroupKey = "";
+  state.filters = [];
+  state.filterLogic = "";
+  state.filterLogicMode = "and";
+  state.labelStatusFilters.clear();
+  state.pendingLabelStatusFilters.clear();
+  state.decisions.clear();
+  state.mergeResults.clear();
+  state.trainingLabels.clear();
+  state.trainingPairIndexes.clear();
+  state.fieldResolutions.clear();
+  state.separatedRecords.clear();
+  mergeMasterSelections.clear();
+  mergePreviewStates.clear();
+  mergeInFlightGroupKeys.clear();
+  resetMergeReviewSession();
+  scoringContextCache = null;
+  matchingArtifactsCache = null;
+  matchingArtifactsWarmCacheJob = null;
+  groupLookupCache = null;
+  visibleGroupsCache = null;
 }
 
 function endFileLoad() {
@@ -2005,7 +2025,7 @@ async function loadRecentFile(fileId) {
       displayName,
       size: record.size || datasetText.length,
       objectType: normalizeObjectType(state.objectType),
-      format: record.format || datasetFormatFromFileName(fileName || endpoint),
+      format: record.format || datasetFormatFromFileName(record.name || record.endpoint),
       contractVersion: record.contractVersion || "",
       content: record.content || "",
       endpoint
@@ -2036,92 +2056,14 @@ async function recentFileDatasetText(record, endpoint = record.endpoint) {
   return record.content || "";
 }
 
-function canonicalRecentEndpoint(record) {
-  const endpoint = String(record?.endpoint || "").toLowerCase();
-  if (endpoint === "/api/prod-contacts/latest.json" || endpoint === "/api/prod-contacts/latest.csv") {
-    return endpoint;
-  }
-  if (
-    endpoint === "/api/staging-contacts/latest.json" ||
-    endpoint === "/api/staging-contacts/latest.csv" ||
-    endpoint === "/api/staging-accounts/latest.json" ||
-    endpoint === "/api/staging-accounts/latest.csv"
-  ) {
-    return endpoint;
-  }
-  if (isProdContactsRecentRecord(record)) {
-    return "/api/prod-contacts/latest.json";
-  }
-  return recentEndpointForRecord(record);
-}
-
-function canonicalRecentFileName(record) {
-  const endpoint = String(canonicalRecentEndpoint(record) || "").toLowerCase();
-  if (
-    endpoint === "/api/staging-contacts/latest.csv" ||
-    endpoint === "/api/staging-accounts/latest.csv" ||
-    endpoint === "/api/prod-contacts/latest.csv"
-  ) {
-    return "salesforce-report-latest.csv";
-  }
-  if (
-    endpoint === "/api/staging-contacts/latest.json" ||
-    endpoint === "/api/staging-accounts/latest.json" ||
-    endpoint === "/api/prod-contacts/latest.json"
-  ) {
-    return "salesforce-report-latest.json";
-  }
-  return String(record?.name || datasetFileNameForFormat(record?.format || datasetFormatFromFileName(record?.endpoint || record?.name || "salesforce-report-latest.json")));
-}
-
-function canonicalRecentDisplayName(record) {
-  if (isProdContactsRecentRecord(record)) {
-    return "Latest Prod Contacts";
-  }
-  const endpoint = String(canonicalRecentEndpoint(record) || "").toLowerCase();
-  if (endpoint === "/api/prod-contacts/latest.json" || endpoint === "/api/prod-contacts/latest.csv") {
-    return "Latest Prod Contacts";
-  }
-  if (
-    endpoint === "/api/staging-contacts/latest.json" ||
-    endpoint === "/api/staging-contacts/latest.csv" ||
-    endpoint === "/api/staging-accounts/latest.json" ||
-    endpoint === "/api/staging-accounts/latest.csv"
-  ) {
-    return String(record?.displayName || "Latest Contacts");
-  }
-  return String(record?.displayName || record?.name || "");
-}
-
-function isProdContactsRecentRecord(record) {
-  const endpoint = String(record?.endpoint || "").toLowerCase();
-  if (endpoint === "/api/prod-contacts/latest.json" || endpoint === "/api/prod-contacts/latest.csv") {
-    return true;
-  }
-
-  const id = String(record?.id || "").toLowerCase();
-  const name = String(record?.name || "").toLowerCase();
-  const displayName = String(record?.displayName || "").toLowerCase();
-  return (
-    id.includes("prod-contacts") ||
-    name.includes("prod-contacts") ||
-    name.includes("prod contacts") ||
-    displayName.includes("prod contacts") ||
-    displayName.includes("latest prod contacts")
-  );
-}
-
-function setLoadedDatasetSource({ endpoint = "", fileName = "", displayName = "", objectType = state.objectType, format = "", contractVersion = "", metadata = {}, orgAlias = "", instanceUrl = "" } = {}) {
-  const normalizedInstanceUrl = normalizeSalesforceInstanceUrl(instanceUrl || metadata.instanceUrl || metadata.source?.instanceUrl || "");
+function setLoadedDatasetSource({ endpoint = "", fileName = "", displayName = "", objectType = state.objectType, format = "", contractVersion = "", metadata = {} } = {}) {
   state.datasetSource = {
     endpoint: String(endpoint || ""),
     fileName: String(fileName || state.fileName || ""),
     displayName: String(displayName || fileName || state.fileName || ""),
     objectType: normalizeObjectType(objectType, state.objectType),
     format: String(format || datasetFormatFromFileName(fileName || endpoint || state.fileName)),
-    contractVersion: String(contractVersion || metadata.contractVersion || state.datasetMetadata?.contractVersion || ""),
-    orgAlias: normalizeSalesforceOrgAlias(orgAlias || metadata.orgAlias || metadata.source?.orgAlias || "", normalizedInstanceUrl),
-    instanceUrl: normalizedInstanceUrl
+    contractVersion: String(contractVersion || metadata.contractVersion || state.datasetMetadata?.contractVersion || "")
   };
   state.datasetMetadata = sanitizeDatasetMetadata({
     ...(state.datasetMetadata || {}),
@@ -2219,21 +2161,15 @@ async function compactOversizedRecentFiles(db, records) {
   return true;
 }
 
-function recentEndpointForRecord(record) {
-  const normalizedName = String(record?.name || "");
-  const displayName = String(record?.displayName || "").toLowerCase();
-  const objectType = String(record?.objectType || "");
-  const isProdContacts = isProdContactsRecentRecord(record);
-
+function recentEndpointForName(name, objectType = "") {
+  const normalizedName = String(name || "");
   if (normalizedName === "salesforce-report-latest.json") {
-    if (isProdContacts) return "/api/prod-contacts/latest.json";
-    return objectType.toLowerCase() === "account"
+    return String(objectType || "").toLowerCase() === "account"
       ? "/api/staging-accounts/latest.json"
       : "/api/staging-contacts/latest.json";
   }
   if (normalizedName === "salesforce-report-latest.csv") {
-    if (isProdContacts) return "/api/prod-contacts/latest.csv";
-    return objectType.toLowerCase() === "account"
+    return String(objectType || "").toLowerCase() === "account"
       ? "/api/staging-accounts/latest.csv"
       : "/api/staging-contacts/latest.csv";
   }
@@ -2402,8 +2338,6 @@ function buildDatasetKey() {
   hash = updateHash(hash, state.objectType);
   hash = updateHash(hash, normalizeText(state.fileName));
   hash = updateHash(hash, normalizeText(state.datasetSource?.contractVersion || state.datasetMetadata?.contractVersion || ""));
-  hash = updateHash(hash, normalizeText(orgProfile.orgAlias));
-  hash = updateHash(hash, normalizeText(orgProfile.instanceUrl));
   hash = updateHash(hash, state.rows.length);
   state.headers.forEach((header) => {
     hash = updateHash(hash, normalizeHeader(header));
@@ -2883,9 +2817,8 @@ async function applyProcessedDataset(result, { fromObjects = false, objectType =
     fromObjects,
     headers: result.headers,
     mapping: result.mapping,
-    objectType: result.objectType || objectType,
-    metadata,
-    sourceOrg
+    objectType: result.objectType,
+    metadata: extractDatasetMetadata(result)
   });
   await updateLoadingProgress("Rendering duplicate groups.", 98);
   applyComputedGroups(result.groups || [], result.matchingStats || null);
@@ -2896,56 +2829,12 @@ async function applyProcessedDataset(result, { fromObjects = false, objectType =
   return fromObjects ? Promise.resolve() : restoreReviewStateForCurrentDataset();
 }
 
-async function applyParsedDataset(result, { fromObjects = false, objectType = state.objectType, loadRequestId = 0 } = {}) {
-  if (!isCurrentLoadRequest(loadRequestId)) return;
-  state.lastProcessingMode = result.processingMode || "";
-  state.lastMatchingStats = result.matchingStats || null;
-  const metadata = extractDatasetMetadata(result);
-  const extractedOrg = extractSalesforceOrgProfileFromDataset(result);
-  const sourceOrg = isCompleteSalesforceOrgProfile(extractedOrg) ? extractedOrg : getSelectedSalesforceOrgProfile();
-  setLoadedDatasetSource({
-    endpoint: result.endpoint || "",
-    fileName: result.fileName || datasetFileNameForFormat(result.format),
-    displayName: result.displayName || "",
-    objectType: result.objectType || objectType,
-    format: result.format,
-    contractVersion: result.contractVersion || metadata.contractVersion || "",
-    metadata,
-    orgAlias: sourceOrg.orgAlias,
-    instanceUrl: sourceOrg.instanceUrl
-  });
-  stageRowsForReview({
-    rows: result.rows || [],
-    fileName: result.fileName || datasetFileNameForFormat(result.format),
-    fromObjects,
-    headers: result.headers,
-    mapping: result.mapping,
-    objectType: result.objectType || objectType,
-    metadata,
-    sourceOrg
-  });
-  state.matchingDeferred = true;
-  state.loadPhase = "parsed-ready";
-  state.reviewStateStatus = state.datasetKey && isFileHistoryAvailable()
-    ? "Matching deferred until you click Match now."
-    : "Matching deferred";
-  applyComputedGroups([], null, { preserveDeferredState: true });
-  await updateLoadingProgress("Parsed dataset ready. Matching is deferred.", 100);
-  setSelectedSalesforceOrgProfile(sourceOrg, { persist: true });
-  return fromObjects ? Promise.resolve() : Promise.resolve();
-}
-
-function stageRowsForReview({ rows, fileName, fromObjects, headers, mapping, objectType, metadata = {}, sourceOrg = {} }) {
+function stageRowsForReview({ rows, fileName, fromObjects, headers, mapping, objectType, metadata = {} }) {
   flushPendingReviewStateSave();
   endFileLoad();
   state.objectType = normalizeObjectType(objectType, state.objectType);
   state.fileName = fileName;
   state.datasetMetadata = sanitizeDatasetMetadata(metadata);
-  state.datasetSource = {
-    ...state.datasetSource,
-    orgAlias: normalizeSalesforceOrgAlias(sourceOrg.orgAlias, sourceOrg.instanceUrl),
-    instanceUrl: normalizeSalesforceInstanceUrl(sourceOrg.instanceUrl)
-  };
   state.rows = Array.isArray(rows) ? rows : [];
   state.rows.forEach((row, index) => {
     row.__rowIndex = index;
@@ -3440,6 +3329,26 @@ function normalizeReviewDatasetPayload(payload, { fileName = "", objectType = st
     };
   }
 
+  if (Array.isArray(payload.records)) {
+    const rows = payload.records.map(normalizeJsonRecord);
+    const metadata = sanitizeDatasetMetadata({
+      schema: String(payload.schema || ""),
+      schemaVersion: Number(payload.schemaVersion) || 0,
+      contractVersion: String(payload.contractVersion || payload.source?.contractVersion || ""),
+      rollbackInventory: Array.isArray(payload.rollbackInventory) ? payload.rollbackInventory : [],
+      source: payload.source && typeof payload.source === "object" && !Array.isArray(payload.source) ? { ...payload.source } : {},
+      fields: Array.isArray(payload.fields) ? payload.fields.map((field) => ({ ...field })) : []
+    });
+    return {
+      format: "json",
+      fileName: normalizedFileName,
+      objectType: normalizedObjectType,
+      headers: datasetHeadersFromJsonPayload(payload, rows),
+      rows,
+      ...metadata
+    };
+  }
+
   if (Array.isArray(payload.columns) && Array.isArray(payload.rows)) {
     const headers = payload.columns.map((header) => String(header || ""));
     return {
@@ -3448,16 +3357,12 @@ function normalizeReviewDatasetPayload(payload, { fileName = "", objectType = st
       objectType: normalizedObjectType,
       headers,
       rows: payload.rows.map((row) => rowArrayToObject(headers, row)),
-      orgAlias: orgProfile.orgAlias,
-      instanceUrl: orgProfile.instanceUrl,
       ...sanitizeDatasetMetadata({
         schema: String(payload.schema || ""),
         schemaVersion: Number(payload.schemaVersion) || 0,
         contractVersion: String(payload.contractVersion || payload.source?.contractVersion || ""),
         rollbackInventory: Array.isArray(payload.rollbackInventory) ? payload.rollbackInventory : [],
-        source: payload.source && typeof payload.source === "object" && !Array.isArray(payload.source)
-          ? { ...payload.source, orgAlias: orgProfile.orgAlias || payload.source.orgAlias || "", instanceUrl: orgProfile.instanceUrl || payload.source.instanceUrl || "" }
-          : { orgAlias: orgProfile.orgAlias, instanceUrl: orgProfile.instanceUrl },
+        source: payload.source && typeof payload.source === "object" && !Array.isArray(payload.source) ? { ...payload.source } : {},
         fields: Array.isArray(payload.fields) ? payload.fields.map((field) => ({ ...field })) : []
       })
     };
@@ -3474,16 +3379,12 @@ function normalizeReviewDatasetPayload(payload, { fileName = "", objectType = st
       objectType: normalizedObjectType,
       headers: datasetHeadersFromJsonPayload(payload, rows),
       rows,
-      orgAlias: orgProfile.orgAlias,
-      instanceUrl: orgProfile.instanceUrl,
       ...sanitizeDatasetMetadata({
         schema: String(payload.schema || ""),
         schemaVersion: Number(payload.schemaVersion) || 0,
         contractVersion: String(payload.contractVersion || payload.source?.contractVersion || ""),
         rollbackInventory: Array.isArray(payload.rollbackInventory) ? payload.rollbackInventory : [],
-        source: payload.source && typeof payload.source === "object" && !Array.isArray(payload.source)
-          ? { ...payload.source, orgAlias: orgProfile.orgAlias || payload.source.orgAlias || "", instanceUrl: orgProfile.instanceUrl || payload.source.instanceUrl || "" }
-          : { orgAlias: orgProfile.orgAlias, instanceUrl: orgProfile.instanceUrl },
+        source: payload.source && typeof payload.source === "object" && !Array.isArray(payload.source) ? { ...payload.source } : {},
         fields: Array.isArray(payload.fields) ? payload.fields.map((field) => ({ ...field })) : []
       })
     };
@@ -3529,16 +3430,7 @@ function extractDatasetMetadata(result = {}) {
     schemaVersion: Number(result.schemaVersion) || 0,
     contractVersion: String(result.contractVersion || result.source?.contractVersion || ""),
     rollbackInventory: Array.isArray(result.rollbackInventory) ? result.rollbackInventory : [],
-    source: result.source && typeof result.source === "object" && !Array.isArray(result.source)
-      ? {
-          ...result.source,
-          orgAlias: String(result.orgAlias || result.source.orgAlias || result.source?.org?.orgAlias || ""),
-          instanceUrl: String(result.instanceUrl || result.source.instanceUrl || result.source?.org?.instanceUrl || "")
-        }
-      : {
-          orgAlias: String(result.orgAlias || ""),
-          instanceUrl: String(result.instanceUrl || "")
-        },
+    source: result.source && typeof result.source === "object" && !Array.isArray(result.source) ? { ...result.source } : {},
     fields: Array.isArray(result.fields) ? result.fields.map((field) => ({ ...field })) : []
   });
 }
@@ -3552,9 +3444,7 @@ function sanitizeDatasetMetadata(metadata = {}) {
         query: String(metadata.source.query || ""),
         operation: String(metadata.source.operation || ""),
         totalSize: Number(metadata.source.totalSize) || 0,
-        contractVersion: String(metadata.source.contractVersion || ""),
-        orgAlias: String(metadata.source.orgAlias || metadata.orgAlias || ""),
-        instanceUrl: String(metadata.source.instanceUrl || metadata.instanceUrl || "")
+        contractVersion: String(metadata.source.contractVersion || "")
       }
     : {};
 
@@ -3562,8 +3452,6 @@ function sanitizeDatasetMetadata(metadata = {}) {
     schema: String(metadata.schema || ""),
     schemaVersion: Number(metadata.schemaVersion) || 0,
     contractVersion: String(metadata.contractVersion || ""),
-    orgAlias: String(metadata.orgAlias || metadata.source?.orgAlias || ""),
-    instanceUrl: String(metadata.instanceUrl || metadata.source?.instanceUrl || ""),
     rollbackInventory: Array.isArray(metadata.rollbackInventory) ? metadata.rollbackInventory : [],
     source,
     fields: Array.isArray(metadata.fields) ? metadata.fields.map((field) => ({ ...field })) : []
@@ -9877,13 +9765,8 @@ function latestContactsSourceFromRecentFiles() {
   const recent = (state.recentFiles || [])
     .filter((record) => {
       if (!record?.endpoint || normalizeObjectType(record.objectType) !== "contact") return false;
-      const endpoint = String(record.endpoint || "").toLowerCase();
-      return (
-        endpoint === "/api/staging-contacts/latest.json" ||
-        endpoint === "/api/staging-contacts/latest.csv" ||
-        endpoint === "/api/prod-contacts/latest.json" ||
-        endpoint === "/api/prod-contacts/latest.csv"
-      );
+      const text = `${record.endpoint} ${record.displayName || ""} ${record.name || ""}`.toLowerCase();
+      return text.includes("staging-contacts") || text.includes("latest contacts");
     })
     .sort((left, right) => {
       const leftJson = String(left.format || left.name || left.endpoint || "").toLowerCase().endsWith(".json") || String(left.format || "").toLowerCase() === "json";
