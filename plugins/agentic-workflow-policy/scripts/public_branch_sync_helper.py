@@ -10,8 +10,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+PUBLIC_SAFE_PATHS = (
+    "AGENTS.md",
+    ".codex/config.toml",
+    "plugins/agentic-workflow-policy",
+)
+PUBLIC_SAFE_PATTERNS = (
+    "/Users/aremington",
+    "OneDrive-POLITICO",
+    "C:/Users/runneradmin",
+    "C:\\Users\\runneradmin",
+)
 
-def run_git(repo: Path, *args: str) -> str:
+
+def run_git(repo: Path, *args: str, allow_no_match: bool = False) -> str:
     result = subprocess.run(
         ["git", "-C", str(repo), *args],
         check=False,
@@ -19,8 +31,29 @@ def run_git(repo: Path, *args: str) -> str:
         text=True,
     )
     if result.returncode != 0:
+        if allow_no_match and result.returncode == 1:
+            return ""
         raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "git command failed")
     return result.stdout.strip()
+
+
+def scan_public_safe(repo: Path, branch: str) -> list[str]:
+    hits = []
+    for pattern in PUBLIC_SAFE_PATTERNS:
+        match_output = run_git(
+            repo,
+            "grep",
+            "-n",
+            "-F",
+            pattern,
+            branch,
+            "--",
+            *PUBLIC_SAFE_PATHS,
+            allow_no_match=True,
+        )
+        if match_output:
+            hits.extend(match_output.splitlines())
+    return hits
 
 
 def main(argv: list[str]) -> int:
@@ -28,6 +61,11 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--repo", required=True, help="Repository path.")
     parser.add_argument("--source-branch", default="main", help="Private branch to mirror from.")
     parser.add_argument("--public-branch", default="public/main", help="Public branch to mirror to.")
+    parser.add_argument(
+        "--assert-public-safe",
+        action="store_true",
+        help="Fail if the public branch still contains local-path markers in mirrored policy files.",
+    )
     args = parser.parse_args(argv)
 
     repo = Path(args.repo).expanduser()
@@ -59,6 +97,15 @@ def main(argv: list[str]) -> int:
     print(f"public_branch: {args.public_branch} ({public})")
     print(f"merge_base: {base}")
     print(f"working_tree_clean: {'yes' if not status else 'no'}")
+
+    if args.assert_public_safe:
+        hits = scan_public_safe(repo, args.public_branch)
+        if hits:
+            print("public-safe scan failed:")
+            for hit in hits:
+                print(hit)
+            return 1
+        print("public-safe scan passed")
 
     if source == public:
         print("status: already in sync")
