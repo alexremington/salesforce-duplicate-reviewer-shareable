@@ -7943,10 +7943,8 @@ function renderDetail() {
         <span>${
           state.loadError
             ? escapeHtml(state.loadError)
-            : state.matchingDeferred && state.rows.length
-              ? "The dataset is parsed. Use Match now or Apply to build duplicate groups."
-              : state.rows.length
-                ? "Adjust the thresholds or mapping."
+            : state.rows.length
+              ? "Adjust the thresholds or mapping."
               : "Use the header Import menu to choose Contacts, Accounts, or Labels, or load demo data."
         }</span>
         <div class="empty-actions">

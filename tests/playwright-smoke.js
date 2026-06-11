@@ -120,12 +120,7 @@ async function run() {
 
   try {
     const fileModeRedirect = await assertFileModeRedirect(browser);
-    prodContactsPage = await browser.newPage({ viewport: { width: 1440, height: 960 } });
-    const prodContactsAutoloadState = await assertProdContactsAutoload(prodContactsPage, { closePage: false });
-    await prodContactsPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
-    await assertProdContactsRecentFileSourceMapping(prodContactsPage);
-    await assertLegacyProdContactsRecentFileCompatibility(prodContactsPage);
-    const emptyImportButtonState = await assertEmptyImportButtonOpensFileChooser(browser, csvPath);
+    const emptyImportButtonState = await assertEmptyStateOmitsDuplicateImportAction(browser);
     const lastNameChangeCandidateState = await assertLastNameChangeCandidateMatch(browser, lastNameChangeCsvPath);
     const differentCompanyConflictState = await assertDifferentCompanyConflictSeparated(browser, differentCompanyConflictCsvPath);
     const sharedCompanyExactPhoneNameConflictState = await assertSharedCompanyExactPhoneNameConflictSeparated(browser, sharedCompanyExactPhoneNameConflictCsvPath);
@@ -157,7 +152,7 @@ async function run() {
     await page.screenshot({ path: path.join(outDir, "desktop-empty-dark.png"), fullPage: false });
     await page.emulateMedia({ colorScheme: "light" });
 
-    const emptyChooseVisible = await page.locator('[data-empty-action="choose-csv"]').isVisible();
+    const emptyDuplicateImportCount = await page.locator('[data-empty-action="choose-csv"]').count();
     const emptyDemoVisible = await page.locator('[data-empty-action="demo-data"]').isVisible();
     const filterFieldDisabledBeforeLoad = await page.locator(".filter-row .filter-field-select").first().isDisabled();
     const applyDisabledBeforeLoad = await page.locator("#applyControlsButton").isDisabled();
@@ -413,15 +408,10 @@ async function run() {
       bodyScrollWidth: document.body.scrollWidth
     }));
 
-    if (!emptyChooseVisible) throw new Error("Expected empty-state Import action to be visible.");
+    if (emptyDuplicateImportCount !== 0) {
+      throw new Error(`Expected the empty-state Import button to be removed because the header Import menu already owns object selection: ${emptyDuplicateImportCount}`);
+    }
     if (!emptyDemoVisible) throw new Error("Expected empty-state Load Demo action to be visible.");
-    if (!emptyImportButtonState.workspaceImportDisabledBeforeLoad) {
-      throw new Error(`Expected Workspace import to stay disabled before a dataset is loaded: ${JSON.stringify(emptyImportButtonState)}`);
-    }
-    if (!emptyImportButtonState.fileChooserOpened || emptyImportButtonState.rowCount !== contactSmokeRowCount || !emptyImportButtonState.groupCount) {
-      throw new Error(`Expected empty-state Import to open a file picker and load a dataset: ${JSON.stringify(emptyImportButtonState)}`);
-    }
-    assertPerformanceBudget("empty-state Contact import", emptyImportButtonState.elapsedMs, PERFORMANCE_BUDGETS.emptyImportContactsMs);
     if (largeContactPerformance.rowCount !== largeContactSmokeRowCount || !largeContactPerformance.groupCount || largeContactPerformance.processingMode !== "worker") {
       throw new Error(`Expected large Contact CSV fixture to load through worker-backed matching: ${JSON.stringify(largeContactPerformance)}`);
     }
@@ -754,7 +744,7 @@ async function run() {
     console.log(JSON.stringify({
       ok: true,
       baseUrl,
-      emptyChooseVisible,
+      emptyDuplicateImportCount,
       emptyDemoVisible,
       emptyImportButtonState,
       latestRecentFiles,
@@ -839,7 +829,7 @@ function isExpectedBrowserConsoleMessage(message) {
   return message.type() === "error" && /server responded with a status of 409 \(Conflict\)/i.test(message.text());
 }
 
-async function assertEmptyImportButtonOpensFileChooser(browser, filePath) {
+async function assertEmptyStateOmitsDuplicateImportAction(browser) {
   const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
   const diagnostics = [];
   page.on("console", (message) => {
@@ -850,23 +840,12 @@ async function assertEmptyImportButtonOpensFileChooser(browser, filePath) {
   page.on("pageerror", (error) => diagnostics.push(`pageerror: ${error.message}`));
   try {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('[data-empty-action="choose-csv"]').waitFor({ state: "visible", timeout: 5000 });
-    await page.locator("#chooseCsvButton").click();
-    await page.getByRole("menuitem", { name: "Workspace" }).waitFor({ state: "visible", timeout: 5000 });
-    const workspaceImportDisabledBeforeLoad = await page.getByRole("menuitem", { name: "Workspace" }).isDisabled();
-    await page.keyboard.press("Escape");
-    const startedAt = Date.now();
-    const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
-    await page.locator('[data-empty-action="choose-csv"]').click();
-    const fileChooser = await fileChooserPromise;
-    await fileChooser.setFiles(filePath);
-    await waitForLoadingModalHidden(page, "Empty-state Import load", diagnostics);
-    await waitForFirstGroup(page, "Empty-state Import load");
+    await page.locator('[data-empty-action="demo-data"]').waitFor({ state: "visible", timeout: 5000 });
+    const duplicateImportButtonCount = await page.locator('[data-empty-action="choose-csv"]').count();
+    const demoButtonVisible = await page.locator('[data-empty-action="demo-data"]').isVisible();
     return {
-      fileChooserOpened: true,
-      workspaceImportDisabledBeforeLoad,
-      elapsedMs: Date.now() - startedAt,
-      ...(await datasetLoadState(page))
+      duplicateImportButtonCount,
+      demoButtonVisible
     };
   } finally {
     await page.close();
@@ -884,11 +863,7 @@ async function assertLastNameChangeCandidateMatch(browser, filePath) {
   page.on("pageerror", (error) => diagnostics.push(`pageerror: ${error.message}`));
   try {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('[data-empty-action="choose-csv"]').waitFor({ state: "visible", timeout: 5000 });
-    const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
-    await page.locator('[data-empty-action="choose-csv"]').click();
-    const fileChooser = await fileChooserPromise;
-    await fileChooser.setFiles(filePath);
+    await importContactsThroughMenu(page, filePath);
     await waitForLoadingModalHidden(page, "Last-name-change Contact candidate load", diagnostics);
     await waitForFirstGroup(page, "Last-name-change Contact candidate load");
     return {
@@ -914,11 +889,7 @@ async function assertDifferentCompanyConflictSeparated(browser, filePath) {
   page.on("pageerror", (error) => diagnostics.push(`pageerror: ${error.message}`));
   try {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('[data-empty-action="choose-csv"]').waitFor({ state: "visible", timeout: 5000 });
-    const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
-    await page.locator('[data-empty-action="choose-csv"]').click();
-    const fileChooser = await fileChooserPromise;
-    await fileChooser.setFiles(filePath);
+    await importContactsThroughMenu(page, filePath);
     await waitForLoadingModalHidden(page, "Different-company Contact load", diagnostics);
     await setRangeValue(page, "#threshold", "80");
     await setRangeValue(page, "#maxThreshold", "99");
@@ -943,11 +914,7 @@ async function assertSharedCompanyExactPhoneNameConflictSeparated(browser, fileP
   page.on("pageerror", (error) => diagnostics.push(`pageerror: ${error.message}`));
   try {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('[data-empty-action="choose-csv"]').waitFor({ state: "visible", timeout: 5000 });
-    const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
-    await page.locator('[data-empty-action="choose-csv"]').click();
-    const fileChooser = await fileChooserPromise;
-    await fileChooser.setFiles(filePath);
+    await importContactsThroughMenu(page, filePath);
     await waitForLoadingModalHidden(page, "Shared-company exact-phone Contact load", diagnostics);
     const loadState = await datasetLoadState(page);
     const runtimeScore = await page.evaluate(() => {
@@ -984,11 +951,7 @@ async function assertMirrorRelationshipSeparated(browser, filePath) {
   page.on("pageerror", (error) => diagnostics.push(`pageerror: ${error.message}`));
   try {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('[data-empty-action="choose-csv"]').waitFor({ state: "visible", timeout: 5000 });
-    const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
-    await page.locator('[data-empty-action="choose-csv"]').click();
-    const fileChooser = await fileChooserPromise;
-    await fileChooser.setFiles(filePath);
+    await importContactsThroughMenu(page, filePath);
     await waitForLoadingModalHidden(page, "Mirror relationship Contact load", diagnostics);
     await waitForFirstGroup(page, "Mirror relationship Contact load");
     const groupMemberships = await page.evaluate(() => {
@@ -1027,12 +990,8 @@ async function assertLargeContactCsvPerformance(browser, filePath) {
   page.on("pageerror", (error) => diagnostics.push(`pageerror: ${error.message}`));
   try {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator('[data-empty-action="choose-csv"]').waitFor({ state: "visible", timeout: 5000 });
     const startedAt = Date.now();
-    const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
-    await page.locator('[data-empty-action="choose-csv"]').click();
-    const fileChooser = await fileChooserPromise;
-    await fileChooser.setFiles(filePath);
+    await importContactsThroughMenu(page, filePath);
     await waitForLoadingModalHidden(page, "Large Contact CSV performance load", diagnostics, PERFORMANCE_BUDGETS.largeContactCsvWorkerMs);
     await waitForFirstGroup(page, "Large Contact CSV performance load");
     const groupListScrollLockState = await exerciseGroupListScrollAfterSelection(page);
@@ -1098,7 +1057,6 @@ async function importContactsThroughMenu(page, filePath) {
   const fileChooser = await fileChooserPromise;
   await fileChooser.setFiles(filePath);
   await waitForLoadingModalHidden(page, "Topbar Import Contacts load");
-  await waitForFirstGroup(page, "Topbar Import Contacts load");
   return {
     fileChooserOpened: true,
     elapsedMs: Date.now() - startedAt,
