@@ -78,45 +78,8 @@ async function run() {
 
   const browser = await chromium.launch();
   const messages = [];
-  const primaryOrg = {
-    orgAlias: "qa-smoke-org",
-    instanceUrl: "https://qa-smoke-org.example.invalid"
-  };
-  const secondaryOrg = {
-    orgAlias: "qa-secondary-org",
-    instanceUrl: "https://qa-secondary-org.example.invalid"
-  };
-  const longOrg = {
-    orgAlias: "qa-smoke-org-with-an-extremely-long-name-that-should-truncate",
-    instanceUrl: "https://qa-smoke-org-with-an-extremely-long-instance-url.example.invalid"
-  };
-  const smokeSalesforceOrgs = [
-    primaryOrg,
-    secondaryOrg,
-    longOrg,
-    {
-      orgAlias: "qa-third-org",
-      instanceUrl: "https://qa-third-org.example.invalid"
-    },
-    {
-      orgAlias: "qa-fourth-org",
-      instanceUrl: "https://qa-fourth-org.example.invalid"
-    },
-    {
-      orgAlias: "qa-fifth-org",
-      instanceUrl: "https://qa-fifth-org.example.invalid"
-    },
-    {
-      orgAlias: "qa-staging-org",
-      instanceUrl: "https://qa-staging-org.example.invalid"
-    },
-    {
-      orgAlias: "qa-staging",
-      instanceUrl: "https://qa-staging.example.invalid"
-    }
-  ];
-  let context = null;
-  let prodContactsPage = null;
+  const customOrgAlias = "qa-smoke-org";
+  const customOrgInstanceUrl = "https://qa-smoke-org.example.invalid";
 
   try {
     const fileModeRedirect = await assertFileModeRedirect(browser);
@@ -168,6 +131,23 @@ async function run() {
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
     const latestJsonLoadElapsedMs = Date.now() - latestJsonLoadStartedAt;
     const latestJsonLoad = await datasetLoadState(page);
+    const embeddedOrgState = await orgSelectorState(page);
+    if (
+      !embeddedOrgState.alias ||
+      embeddedOrgState.alias !== latestJsonLoad.sourceOrgAlias ||
+      embeddedOrgState.instanceUrl !== latestJsonLoad.sourceInstanceUrl
+    ) {
+      throw new Error(`Expected the embedded dataset org to populate the selector: ${JSON.stringify(embeddedOrgState)}`);
+    }
+    await setSalesforceOrgSelection(page, { alias: customOrgAlias, instanceUrl: customOrgInstanceUrl });
+    const mismatchOrgState = await orgSelectorState(page);
+    if (
+      !mismatchOrgState.warningVisible ||
+      !mismatchOrgState.warningText.includes(customOrgAlias) ||
+      !mismatchOrgState.warningText.includes(latestJsonLoad.sourceOrgAlias)
+    ) {
+      throw new Error(`Expected a visible org mismatch warning after changing the target org: ${JSON.stringify(mismatchOrgState)}`);
+    }
     const latestReportSummary = await reportSummaryState(page);
     const leftPaneSmallListLayout = await assertLeftPaneSmallListLayout(page);
     const humeRegionLayout = await assertHumeRegionLayout(page);
@@ -212,6 +192,14 @@ async function run() {
     const topbarImportState = await importContactsThroughMenu(page, csvPath);
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
+    const fallbackOrgState = await orgSelectorState(page);
+    if (
+      fallbackOrgState.alias !== customOrgAlias ||
+      fallbackOrgState.instanceUrl !== customOrgInstanceUrl ||
+      fallbackOrgState.warningVisible
+    ) {
+      throw new Error(`Expected manual upload to retain the most recently selected org: ${JSON.stringify(fallbackOrgState)}`);
+    }
     await page.locator(".group-item-main").first().click();
     const matchControlsButton = page.getByRole("button", { name: /Match Controls/ });
     if (await matchControlsButton.getAttribute("aria-expanded") !== "true") {
@@ -289,6 +277,12 @@ async function run() {
     const workspaceExportState = await captureWorkspaceExport(page, workspaceExportPath);
     if (workspaceExportState.kind !== "workspace" || workspaceExportState.workspaceVersion !== 1) {
       throw new Error(`Expected workspace export metadata to mark the file as a workspace record: ${JSON.stringify(workspaceExportState)}`);
+    }
+    if (
+      workspaceExportState.sourceDataset?.orgAlias !== customOrgAlias ||
+      workspaceExportState.sourceDataset?.instanceUrl !== customOrgInstanceUrl
+    ) {
+      throw new Error(`Expected workspace export to preserve the selected Salesforce org metadata: ${JSON.stringify(workspaceExportState)}`);
     }
     if (!Array.isArray(workspaceExportState.trainingLabels) || !workspaceExportState.trainingLabels.length) {
       throw new Error(`Expected workspace export to include saved training labels: ${JSON.stringify(workspaceExportState)}`);
@@ -664,6 +658,14 @@ async function run() {
       !missingContactIdFallbackRefreshState.refreshedHasIds
     ) {
       throw new Error(`Expected local Contacts without IDs to offer loading Latest Contacts: ${JSON.stringify(missingContactIdFallbackRefreshState)}`);
+    }
+    if (
+      mergePayload.preMergePayload?.orgAlias !== customOrgAlias ||
+      mergePayload.preMergePayload?.instanceUrl !== customOrgInstanceUrl ||
+      mergePayload.orgAlias !== customOrgAlias ||
+      mergePayload.instanceUrl !== customOrgInstanceUrl
+    ) {
+      throw new Error(`Expected Salesforce merge requests to honor the selected org: ${JSON.stringify({ preMergePayload: mergePayload.preMergePayload, mergePayload })}`);
     }
     if (mergePayload.masterFields?.LeadSource !== "Web") {
       throw new Error(`Expected Salesforce merge payload to preserve oldest Lead Source: ${JSON.stringify(mergePayload)}`);
@@ -1090,7 +1092,9 @@ async function datasetLoadState(page) {
     groupCount: state.groups.length,
     workerAvailable: typeof Worker !== "undefined",
     processingMode: state.lastProcessingMode,
-    matchingStats: state.lastMatchingStats
+    matchingStats: state.lastMatchingStats,
+    sourceOrgAlias: state.datasetSource?.orgAlias || "",
+    sourceInstanceUrl: state.datasetSource?.instanceUrl || ""
   }));
 }
 
@@ -2067,6 +2071,35 @@ async function captureDatasetExport(page, exportPath) {
   state.csvRowCount = rows.length;
   state.headerRow = rows[0]?.split(",") || [];
   return state;
+}
+
+async function setSalesforceOrgSelection(page, { alias, instanceUrl }) {
+  await page.locator("#orgAliasInput").fill(alias);
+  await page.locator("#orgInstanceUrlInput").fill(instanceUrl);
+  await page.locator("#orgApplyButton").click();
+  await page.waitForFunction(
+    ([expectedAlias, expectedInstanceUrl]) => {
+      const label = document.querySelector("#orgSelectionLabel")?.textContent || "";
+      const aliasValue = document.querySelector("#orgAliasInput")?.value || "";
+      const instanceValue = document.querySelector("#orgInstanceUrlInput")?.value || "";
+      return label.includes(expectedAlias) && aliasValue === expectedAlias && instanceValue === expectedInstanceUrl;
+    },
+    [alias, instanceUrl],
+    { timeout: 5000 }
+  );
+}
+
+async function orgSelectorState(page) {
+  return page.evaluate(() => ({
+    label: document.querySelector("#orgSelectionLabel")?.textContent?.trim() || "",
+    pill: document.querySelector("#orgSelectionPill")?.textContent?.trim() || "",
+    recentValue: document.querySelector("#orgRecentSelect")?.value || "",
+    alias: document.querySelector("#orgAliasInput")?.value || "",
+    instanceUrl: document.querySelector("#orgInstanceUrlInput")?.value || "",
+    status: document.querySelector("#orgStatus")?.textContent?.trim() || "",
+    warningVisible: !document.querySelector("#orgMismatchWarning")?.hidden,
+    warningText: document.querySelector("#orgMismatchWarning")?.textContent?.trim() || ""
+  }));
 }
 
 async function importWorkspaceThroughMenu(page, filePath) {

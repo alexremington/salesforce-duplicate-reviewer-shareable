@@ -219,6 +219,99 @@ p {
   cursor: not-allowed;
 }
 
+.org-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px 16px;
+  border: 1px solid var(--line-muted);
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--surface-panel), var(--surface-subtle));
+  box-shadow: 0 10px 22px rgba(16, 32, 51, 0.06);
+}
+
+.org-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.org-panel-title {
+  display: block;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.org-panel-header strong {
+  display: block;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.org-panel-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.org-field {
+  display: grid;
+  gap: 6px;
+}
+
+.org-field span {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.org-field input,
+.org-field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line-muted);
+  border-radius: 12px;
+  background: var(--surface-input);
+  color: var(--ink);
+  box-shadow: 0 1px 0 var(--inset-highlight) inset;
+  font-size: 13px;
+}
+
+.org-field input:focus,
+.org-field select:focus {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+}
+
+.org-panel-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.org-status {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.org-warning {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--amber);
+  background: var(--amber-soft);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 #csvInput,
 #workspaceImportInput,
 #trainingImportInput {

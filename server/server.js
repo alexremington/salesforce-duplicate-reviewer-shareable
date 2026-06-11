@@ -33,7 +33,7 @@ const API_CONTRACT_VERSION = "duplicate-reviewer-api-contract-v2";
 const DEFAULT_PATH = managedPlatform.defaultCommandPath();
 const salesforceMergeService = createSalesforceMergeService();
 let salesforceCliCommandCache = null;
-let salesforceAuthCache = null;
+const salesforceAuthCache = new Map();
 const SALESFORCE_AUTH_CACHE_TTL_MS = 5 * 60 * 1000;
 const ENDPOINT_RESPONSE_CACHE_LIMIT = 8;
 const endpointResponseCache = new Map();
@@ -563,7 +563,9 @@ function reviewDatasetFromJsonExport(json, endpoint) {
       fileName: endpoint.fileName,
       source: {
         ...(payload.source || {}),
-        name: endpoint.label
+        name: endpoint.label,
+        orgAlias: payload.source?.orgAlias || SF_ORG_ALIAS,
+        instanceUrl: payload.source?.instanceUrl || normalizeInstanceUrl(SF_INSTANCE_URL)
       }
     };
   }
@@ -616,7 +618,9 @@ function reviewDatasetEnvelope({ endpoint, fields, records, format }) {
     source: {
       system: "salesforce",
       name: endpoint.label,
-      format
+      format,
+      orgAlias: SF_ORG_ALIAS,
+      instanceUrl: normalizeInstanceUrl(SF_INSTANCE_URL)
     },
     fields,
     records
@@ -732,7 +736,7 @@ async function checkSalesforcePreMergeFreshness(body) {
     masterId: mergeRequest.masterId,
     mergeIds: mergeRequest.mergeIds,
     loadedRecords: mergeRequest.loadedRecords
-  }));
+  }), mergeRequest);
 }
 
 async function mergeSalesforceRecords(body) {
@@ -746,11 +750,12 @@ async function mergeSalesforceRecords(body) {
     masterFields: mergeRequest.masterFields,
     masterFieldsToNull: mergeRequest.masterFieldsToNull,
     loadedRecords: mergeRequest.loadedRecords,
-    orgAlias: SF_ORG_ALIAS
+    orgAlias: mergeRequest.orgAlias,
+    instanceUrl: mergeRequest.instanceUrl
   };
 
   try {
-    let auth = await getSalesforceAuth();
+    let auth = await getSalesforceAuth(mergeRequest);
     let preMergeCheck;
     try {
       preMergeCheck = await buildPreMergeFreshnessResult({
@@ -763,8 +768,8 @@ async function mergeSalesforceRecords(body) {
       });
     } catch (error) {
       if (!isSalesforceAuthRejected(error)) throw error;
-      clearSalesforceAuthCache();
-      auth = await getSalesforceAuth({ forceRefresh: true });
+      clearSalesforceAuthCache(mergeRequest);
+      auth = await getSalesforceAuth({ ...mergeRequest, forceRefresh: true });
       preMergeCheck = await buildPreMergeFreshnessResult({
         auth,
         objectType: mergeRequest.objectType,
@@ -808,6 +813,8 @@ async function mergeSalesforceRecords(body) {
       instanceUrl: auth.instanceUrl,
       apiVersion: auth.apiVersion,
       orgAlias: auth.orgAlias,
+      selectedOrgAlias: mergeRequest.orgAlias,
+      selectedInstanceUrl: mergeRequest.instanceUrl,
       preMergeCheck,
       recoverySnapshot: buildMergeRecoverySnapshot(preMergeCheck),
       mergedAt: new Date().toISOString()
@@ -839,6 +846,7 @@ function validateMergeRequest(body, options = {}) {
   const masterFields = validateMergeMasterFields(body.masterFields);
   const masterFieldsToNull = validateMergeMasterFieldsToNull(body.masterFieldsToNull, masterFields);
   const loadedRecords = validatePreMergeLoadedRecords(body.records);
+  const selectedOrg = normalizeRequestedSalesforceOrg(body);
   const expectedPrefix = "003";
 
   if (!masterId) throw httpError(400, "A master Salesforce ID is required.");
@@ -858,7 +866,9 @@ function validateMergeRequest(body, options = {}) {
     masterFields,
     masterFieldsToNull,
     loadedRecords,
-    groupKey: String(body.groupKey || "")
+    groupKey: String(body.groupKey || ""),
+    orgAlias: selectedOrg.orgAlias,
+    instanceUrl: selectedOrg.instanceUrl
   };
 }
 
@@ -1272,6 +1282,18 @@ function normalizeSalesforceId(value) {
   return id;
 }
 
+function normalizeRequestedSalesforceOrg(value = {}) {
+  return {
+    orgAlias: String(value.orgAlias || SF_ORG_ALIAS || "").trim() || SF_ORG_ALIAS,
+    instanceUrl: normalizeInstanceUrl(value.instanceUrl || SF_INSTANCE_URL)
+  };
+}
+
+function salesforceAuthCacheKey(value = {}) {
+  const org = normalizeRequestedSalesforceOrg(value);
+  return `${org.orgAlias.toLowerCase()}|${org.instanceUrl}|${normalizeApiVersion(SF_API_VERSION)}`;
+}
+
 function uniqueIds(values) {
   const ids = [];
   const seen = new Set();
@@ -1284,62 +1306,70 @@ function uniqueIds(values) {
   return ids;
 }
 
-async function withSalesforceAuthRefresh(operation) {
+async function withSalesforceAuthRefresh(operation, orgOptions = {}) {
   try {
-    return await operation(await getSalesforceAuth());
+    return await operation(await getSalesforceAuth(orgOptions));
   } catch (error) {
     if (!isSalesforceAuthRejected(error)) throw error;
-    clearSalesforceAuthCache();
-    return operation(await getSalesforceAuth({ forceRefresh: true }));
+    clearSalesforceAuthCache(orgOptions);
+    return operation(await getSalesforceAuth({ ...orgOptions, forceRefresh: true }));
   }
 }
 
 async function getSalesforceAuth(options = {}) {
+  const requestedOrg = normalizeRequestedSalesforceOrg(options);
   const envAccessToken = process.env.SF_ACCESS_TOKEN;
+  const cacheKey = salesforceAuthCacheKey(requestedOrg);
   if (envAccessToken) {
     return {
       accessToken: envAccessToken,
-      instanceUrl: normalizeInstanceUrl(SF_INSTANCE_URL),
+      instanceUrl: requestedOrg.instanceUrl,
       apiVersion: normalizeApiVersion(SF_API_VERSION),
-      orgAlias: SF_ORG_ALIAS
+      orgAlias: requestedOrg.orgAlias
     };
   }
 
-  if (!options.forceRefresh && salesforceAuthCache?.expiresAt > Date.now()) {
-    return salesforceAuthCache.value;
+  if (!options.forceRefresh && salesforceAuthCache.has(cacheKey)) {
+    const cached = salesforceAuthCache.get(cacheKey);
+    if (cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+    salesforceAuthCache.delete(cacheKey);
   }
 
-  const display = await execFileJson(salesforceCliCommand(), ["org", "display", "--target-org", SF_ORG_ALIAS, "--json"], {
+  const display = await execFileJson(salesforceCliCommand(), ["org", "display", "--target-org", requestedOrg.orgAlias, "--json"], {
     env: salesforceCliEnv()
   });
   const result = display.result || {};
-  const accessToken = await getSalesforceCliAccessToken();
+  const accessToken = await getSalesforceCliAccessToken(requestedOrg.orgAlias);
 
   const auth = {
     accessToken,
-    instanceUrl: normalizeInstanceUrl(SF_INSTANCE_URL || result.instanceUrl),
+    instanceUrl: requestedOrg.instanceUrl || normalizeInstanceUrl(SF_INSTANCE_URL || result.instanceUrl),
     apiVersion: normalizeApiVersion(SF_API_VERSION),
-    orgAlias: SF_ORG_ALIAS
+    orgAlias: requestedOrg.orgAlias
   };
-  salesforceAuthCache = {
+  salesforceAuthCache.set(cacheKey, {
     value: auth,
     expiresAt: Date.now() + SALESFORCE_AUTH_CACHE_TTL_MS
-  };
+  });
   return auth;
 }
 
-function clearSalesforceAuthCache() {
-  salesforceAuthCache = null;
+function clearSalesforceAuthCache(options = {}) {
+  const cacheKey = salesforceAuthCacheKey(normalizeRequestedSalesforceOrg(options));
+  salesforceAuthCache.delete(cacheKey);
 }
 
-async function getSalesforceCliAccessToken() {
-  const tokenResult = await execFileJson(salesforceCliCommand(), ["org", "auth", "show-access-token", "--target-org", SF_ORG_ALIAS, "--json"], {
+async function getSalesforceCliAccessToken(orgAlias) {
+  const targetOrg = String(orgAlias || SF_ORG_ALIAS).trim() || SF_ORG_ALIAS;
+  const tokenResult = await execFileJson(salesforceCliCommand(), ["org", "auth", "show-access-token", "--target-org", targetOrg, "--json"], {
     env: salesforceCliEnv()
   });
   const accessToken = String(tokenResult?.result?.accessToken || tokenResult?.result?.token || "").trim();
-  if (!accessToken) throw httpError(500, `Salesforce CLI did not return an access token for ${SF_ORG_ALIAS}.`);
+  if (!accessToken) throw httpError(500, `Salesforce CLI did not return an access token for ${targetOrg}.`);
   if (/^\[redacted\]/i.test(accessToken)) {
-    throw httpError(500, `Salesforce CLI returned a redacted access token for ${SF_ORG_ALIAS}.`);
+    throw httpError(500, `Salesforce CLI returned a redacted access token for ${targetOrg}.`);
   }
   return accessToken;
 }

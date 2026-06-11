@@ -96,6 +96,34 @@
                 <strong id="fileName">Dataset import</strong>
                 <span id="fileMeta">No records loaded</span>
               </div>
+              <div class="org-panel" aria-label="Salesforce org selector">
+                <div class="org-panel-header">
+                  <div>
+                    <span class="org-panel-title">Salesforce org</span>
+                    <strong id="orgSelectionLabel">No org selected</strong>
+                  </div>
+                  <span class="pill" id="orgSelectionPill">Unselected</span>
+                </div>
+                <div class="org-panel-grid">
+                  <label class="org-field org-field-select" for="orgRecentSelect">
+                    <span>Recent orgs</span>
+                    <select id="orgRecentSelect"></select>
+                  </label>
+                  <label class="org-field" for="orgAliasInput">
+                    <span>Alias</span>
+                    <input id="orgAliasInput" type="text" autocomplete="off" spellcheck="false" />
+                  </label>
+                  <label class="org-field" for="orgInstanceUrlInput">
+                    <span>Instance URL</span>
+                    <input id="orgInstanceUrlInput" type="url" autocomplete="off" spellcheck="false" />
+                  </label>
+                </div>
+                <div class="org-panel-actions">
+                  <button class="mini-button" type="button" id="orgApplyButton">Use org</button>
+                  <span class="org-status" id="orgStatus">No saved Salesforce orgs yet.</span>
+                </div>
+                <div class="org-warning" id="orgMismatchWarning" hidden></div>
+              </div>
               <div class="recent-files">
                 <div class="recent-files-title">Recent files</div>
                 <div class="recent-file-list" id="recentFileList">

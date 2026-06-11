@@ -191,6 +191,16 @@ async function assertLatestEndpointCaching(baseUrl) {
   if (first.statusCode !== 200 || !etag || !first.body.includes("salesforce-duplicate-reviewer.dataset")) {
     throw new Error(`Latest JSON cache contract failed: HTTP ${first.statusCode}: ${first.body}`);
   }
+  const payload = JSON.parse(first.body);
+  if (payload?.source?.orgAlias !== "smoke-org" || payload?.source?.instanceUrl !== fakeSalesforceServer.baseUrl) {
+    throw new Error(`Latest JSON cache contract did not preserve source org metadata: ${first.body}`);
+  }
+
+  const accounts = await requestText(`${baseUrl}/api/staging-accounts/latest.json`);
+  const accountsPayload = JSON.parse(accounts.body);
+  if (accountsPayload?.source?.orgAlias !== "smoke-org" || accountsPayload?.source?.instanceUrl !== fakeSalesforceServer.baseUrl) {
+    throw new Error(`Latest account JSON contract did not preserve source org metadata: ${accounts.body}`);
+  }
 
   const second = await requestText(`${baseUrl}/api/staging-contacts/latest.json`, {
     headers: { "If-None-Match": etag }
@@ -1019,6 +1029,8 @@ async function assertUnsupportedMergeRoute(baseUrl, routePath) {
 
 async function assertSalesforcePreMergeWithWarningCli(baseUrl) {
   const payload = smokeMergePayload();
+  payload.orgAlias = "qa-smoke-org";
+  payload.instanceUrl = fakeSalesforceServer.baseUrl;
   const response = await requestText(`${baseUrl}/api/salesforce/premerge-check`, {
     method: "POST",
     body: payload
@@ -1028,7 +1040,7 @@ async function assertSalesforcePreMergeWithWarningCli(baseUrl) {
   }
 
   const body = JSON.parse(response.body);
-  if (body.status !== "fresh" || body.orgAlias !== "smoke-org" || body.instanceUrl !== fakeSalesforceServer.baseUrl) {
+  if (body.status !== "fresh" || body.orgAlias !== payload.orgAlias || body.instanceUrl !== payload.instanceUrl) {
     throw new Error(`Warning CLI pre-merge contract returned unexpected body: ${response.body}`);
   }
 }
@@ -1036,7 +1048,9 @@ async function assertSalesforcePreMergeWithWarningCli(baseUrl) {
 async function assertSalesforceMergeWithWarningCli(baseUrl) {
   const payload = {
     ...smokeMergePayload(),
-    masterFields: { LeadSource: "Web" }
+    masterFields: { LeadSource: "Web" },
+    orgAlias: "qa-smoke-org",
+    instanceUrl: fakeSalesforceServer.baseUrl
   };
   const expectedMasterRecord = payload.records[0];
   const expectedDuplicateRecord = payload.records[1];
@@ -1052,6 +1066,9 @@ async function assertSalesforceMergeWithWarningCli(baseUrl) {
   }
 
   const body = JSON.parse(response.body);
+  if (body.orgAlias !== payload.orgAlias || body.instanceUrl !== payload.instanceUrl) {
+    throw new Error(`Warning CLI merge contract did not echo the selected org: ${response.body}`);
+  }
   if (
     body.status !== "success" ||
     body.masterId !== payload.masterId ||

@@ -197,6 +197,7 @@ const PREMERGE_FRESHNESS_FIELDS = [
   "mobile"
 ];
 const ORG_PREFERENCES_STORAGE_KEY = "salesforce-duplicate-reviewer.org-preferences-v1";
+const MAX_RECENT_ORG_PROFILES = 5;
 const GROUP_FILTER_FIELD_TYPES = {
   recordId: "text",
   fullName: "text",
@@ -800,9 +801,14 @@ const state = {
     displayName: "",
     objectType: "contact",
     format: "",
-    contractVersion: ""
+    contractVersion: "",
+    orgAlias: "",
+    instanceUrl: ""
   },
   datasetMetadata: {},
+  selectedOrgAlias: "",
+  selectedInstanceUrl: "",
+  recentOrgProfiles: [],
   datasetKey: "",
   reviewStateStatus: "",
   loadError: "",
@@ -885,7 +891,8 @@ const els = {
   orgSelectionLabel: document.getElementById("orgSelectionLabel"),
   orgSelectionPill: document.getElementById("orgSelectionPill"),
   orgRecentSelect: document.getElementById("orgRecentSelect"),
-  orgInstanceUrlValue: document.getElementById("orgInstanceUrlValue"),
+  orgAliasInput: document.getElementById("orgAliasInput"),
+  orgInstanceUrlInput: document.getElementById("orgInstanceUrlInput"),
   orgApplyButton: document.getElementById("orgApplyButton"),
   orgStatus: document.getElementById("orgStatus"),
   orgMismatchWarning: document.getElementById("orgMismatchWarning"),
@@ -1030,9 +1037,11 @@ els.groupFilterBuilder.addEventListener("click", handleGroupFilterClick);
 els.groupFilterBuilder.addEventListener("change", handleGroupFilterChange);
 els.groupFilterBuilder.addEventListener("input", handleGroupFilterInput);
 els.orgRecentSelect.addEventListener("change", (event) => {
-  queueRecentOrgSelection(event.target.value);
+  applyRecentOrgSelection(event.target.value);
 });
-els.orgApplyButton.addEventListener("click", applyQueuedOrgSelection);
+els.orgAliasInput.addEventListener("input", syncOrgEditorControls);
+els.orgInstanceUrlInput.addEventListener("input", syncOrgEditorControls);
+els.orgApplyButton.addEventListener("click", applySelectedOrgFromControls);
 
 els.rerunButton.addEventListener("click", () => {
   state.mapping = readMappingFromControls();
@@ -1182,8 +1191,6 @@ els.dropZone.addEventListener("drop", (event) => {
 
 setupCollapsiblePanels();
 loadSalesforceOrgPreferences();
-refreshServerHealth();
-refreshSalesforceOrgCatalog();
 initializeFileHistory().finally(() => {
   loadFromUrlIfRequested();
 });
@@ -1297,18 +1304,16 @@ function datasetFormatFromFileName(fileName = "") {
 }
 
 function normalizeSalesforceOrgProfile(profile = {}) {
+  const orgAlias = normalizeSalesforceOrgAlias(profile.orgAlias ?? profile.alias ?? "");
   const instanceUrl = normalizeSalesforceInstanceUrl(profile.instanceUrl ?? profile.url ?? "");
-  const orgAlias = normalizeSalesforceOrgAlias(profile.orgAlias ?? profile.alias ?? "", instanceUrl);
   return {
     orgAlias,
     instanceUrl
   };
 }
 
-function normalizeSalesforceOrgAlias(value = "", instanceUrl = "") {
-  const alias = String(value || "").trim();
-  if (!alias) return "";
-  return alias;
+function normalizeSalesforceOrgAlias(value = "") {
+  return String(value || "").trim();
 }
 
 function normalizeSalesforceInstanceUrl(value = "") {
@@ -1338,7 +1343,8 @@ function salesforceOrgProfileLabel(profile = {}) {
   const normalized = normalizeSalesforceOrgProfile(profile);
   if (!normalized.orgAlias && !normalized.instanceUrl) return "No org selected";
   if (!normalized.orgAlias) return normalized.instanceUrl;
-  return normalized.orgAlias;
+  if (!normalized.instanceUrl) return normalized.orgAlias;
+  return `${normalized.orgAlias} · ${salesforceOrgInstanceUrlHost(normalized.instanceUrl)}`;
 }
 
 function salesforceOrgInstanceUrlHost(instanceUrl = "") {
@@ -1347,32 +1353,6 @@ function salesforceOrgInstanceUrlHost(instanceUrl = "") {
   } catch {
     return String(instanceUrl || "");
   }
-}
-
-function salesforceOrgProfileSummary(profile = {}) {
-  const normalized = normalizeSalesforceOrgProfile(profile);
-  if (!normalized.orgAlias && !normalized.instanceUrl) return "No org selected";
-  if (!normalized.orgAlias) return normalized.instanceUrl;
-  if (!normalized.instanceUrl) return normalized.orgAlias;
-  return `${normalized.orgAlias} · ${salesforceOrgInstanceUrlHost(normalized.instanceUrl)}`;
-}
-
-function getQueuedSalesforceOrgProfile() {
-  return normalizeSalesforceOrgProfile({
-    orgAlias: state.pendingOrgAlias,
-    instanceUrl: state.pendingInstanceUrl
-  });
-}
-
-function getSelectedOrQueuedSalesforceOrgProfile() {
-  const queued = getQueuedSalesforceOrgProfile();
-  if (isCompleteSalesforceOrgProfile(queued)) return queued;
-  return getSelectedSalesforceOrgProfile();
-}
-
-function hasQueuedSalesforceOrgProfile() {
-  const queued = getQueuedSalesforceOrgProfile();
-  return isCompleteSalesforceOrgProfile(queued) && salesforceOrgProfileKey(queued) !== salesforceOrgProfileKey(getSelectedSalesforceOrgProfile());
 }
 
 function isCompleteSalesforceOrgProfile(profile = {}) {
@@ -1409,19 +1389,22 @@ function loadSalesforceOrgPreferences() {
     if (!raw) return;
 
     const parsed = JSON.parse(raw);
-    const selectedOrg = normalizeSalesforceOrgProfile(
-      parsed.selectedOrg ||
-        parsed.currentOrg ||
-        (Array.isArray(parsed.recentOrgProfiles) ? parsed.recentOrgProfiles[0] : null) ||
-        (Array.isArray(parsed.recentOrgs) ? parsed.recentOrgs[0] : null) ||
-        {}
-    );
+    const recentOrgProfiles = Array.isArray(parsed.recentOrgProfiles)
+      ? parsed.recentOrgProfiles.map(normalizeSalesforceOrgProfile).filter(isCompleteSalesforceOrgProfile)
+      : Array.isArray(parsed.recentOrgs)
+        ? parsed.recentOrgs.map(normalizeSalesforceOrgProfile).filter(isCompleteSalesforceOrgProfile)
+        : [];
+    state.recentOrgProfiles = dedupeSalesforceOrgProfiles(recentOrgProfiles).slice(0, MAX_RECENT_ORG_PROFILES);
+
+    const selectedOrg = normalizeSalesforceOrgProfile(parsed.selectedOrg || parsed.currentOrg || state.recentOrgProfiles[0] || {});
     if (isCompleteSalesforceOrgProfile(selectedOrg)) {
       state.selectedOrgAlias = selectedOrg.orgAlias;
       state.selectedInstanceUrl = selectedOrg.instanceUrl;
+      upsertSalesforceOrgProfile(selectedOrg);
+    } else if (state.recentOrgProfiles.length) {
+      state.selectedOrgAlias = state.recentOrgProfiles[0].orgAlias;
+      state.selectedInstanceUrl = state.recentOrgProfiles[0].instanceUrl;
     }
-    state.pendingOrgAlias = "";
-    state.pendingInstanceUrl = "";
   } catch (error) {
     console.warn("Salesforce org preferences could not be loaded", error);
   }
@@ -1434,7 +1417,8 @@ function persistSalesforceOrgPreferences() {
     localStorage.setItem(
       ORG_PREFERENCES_STORAGE_KEY,
       JSON.stringify({
-        selectedOrg: getSelectedSalesforceOrgProfile()
+        selectedOrg: getSelectedSalesforceOrgProfile(),
+        recentOrgProfiles: state.recentOrgProfiles.slice(0, MAX_RECENT_ORG_PROFILES)
       })
     );
   } catch (error) {
@@ -1464,20 +1448,24 @@ function dedupeSalesforceOrgProfiles(profiles = []) {
   return unique;
 }
 
+function upsertSalesforceOrgProfile(profile = {}) {
+  const normalized = normalizeSalesforceOrgProfile(profile);
+  if (!isCompleteSalesforceOrgProfile(normalized)) return;
+
+  state.recentOrgProfiles = [
+    normalized,
+    ...state.recentOrgProfiles.filter((entry) => salesforceOrgProfileKey(entry) !== salesforceOrgProfileKey(normalized))
+  ].slice(0, MAX_RECENT_ORG_PROFILES);
+}
+
 function setSelectedSalesforceOrgProfile(profile = {}, { persist = true } = {}) {
   const normalized = normalizeSalesforceOrgProfile(profile);
   state.selectedOrgAlias = normalized.orgAlias;
   state.selectedInstanceUrl = normalized.instanceUrl;
-  state.pendingOrgAlias = "";
-  state.pendingInstanceUrl = "";
+  if (isCompleteSalesforceOrgProfile(normalized)) {
+    upsertSalesforceOrgProfile(normalized);
+  }
   if (persist) persistSalesforceOrgPreferences();
-  renderOrgSelector();
-}
-
-function setQueuedSalesforceOrgProfile(profile = {}) {
-  const normalized = normalizeSalesforceOrgProfile(profile);
-  state.pendingOrgAlias = normalized.orgAlias;
-  state.pendingInstanceUrl = normalized.instanceUrl;
   renderOrgSelector();
 }
 
@@ -1488,164 +1476,81 @@ function selectedSalesforceOrgMatchesLoadedDataset() {
   return salesforceOrgProfileKey(selected) === salesforceOrgProfileKey(source);
 }
 
-async function refreshSalesforceOrgCatalog() {
-  state.orgCatalogLoading = true;
-  renderOrgSelector();
-
-  try {
-    const response = await fetch("/api/salesforce/orgs", { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`Salesforce org catalog could not be loaded: HTTP ${response.status}`);
-    }
-    const payload = await response.json();
-    state.orgCatalog = dedupeSalesforceOrgProfiles(Array.isArray(payload.orgs) ? payload.orgs : []);
-    state.orgCatalogWarning = String(payload.warning || "").trim();
-  } catch (error) {
-    console.warn("Salesforce org catalog could not be loaded", error);
-    state.orgCatalogWarning = error.message || "Salesforce org catalog could not be loaded.";
-    state.orgCatalog = dedupeSalesforceOrgProfiles(state.orgCatalog);
-  } finally {
-    state.orgCatalogLoading = false;
-    renderOrgSelector();
-  }
-}
-
-async function refreshServerHealth() {
-  if (!isServerBackedApp()) return;
-
-  try {
-    const response = await fetch("/api/health", { cache: "no-store" });
-    if (!response.ok) throw new Error(`Health check failed: HTTP ${response.status}`);
-    state.serverHealth = await response.json();
-  } catch (error) {
-    console.warn("Salesforce Duplicate Reviewer health could not be loaded", error);
-    state.serverHealth = null;
-  } finally {
-    renderOrgSelector();
-  }
-}
-
 function renderOrgSelector() {
-  const preview = getSelectedOrQueuedSalesforceOrgProfile();
+  const selected = getSelectedSalesforceOrgProfile();
   const source = getLoadedDatasetSalesforceOrgProfile();
+  const hasSelected = isCompleteSalesforceOrgProfile(selected);
   const hasSource = isCompleteSalesforceOrgProfile(source);
-  const hasPreview = isCompleteSalesforceOrgProfile(preview);
-  const hasQueued = hasQueuedSalesforceOrgProfile();
-  const hasMismatch = hasPreview && hasSource && salesforceOrgProfileKey(preview) !== salesforceOrgProfileKey(source);
-  const catalogProfiles = dedupeSalesforceOrgProfiles(state.orgCatalog);
-  const selectedKey = hasPreview ? salesforceOrgProfileKey(preview) : "";
-  const optionsProfiles = hasPreview && !catalogProfiles.some((profile) => salesforceOrgProfileKey(profile) === selectedKey)
-    ? [preview, ...catalogProfiles]
-    : catalogProfiles;
-  const healthSummary = salesforceHealthSummary(state.serverHealth);
-  const healthBlocked = salesforceHealthBlockedReason(state.serverHealth);
-  const healthSupport = salesforceHealthSupportSummary(state.serverHealth);
+  const hasMismatch = hasSelected && hasSource && salesforceOrgProfileKey(selected) !== salesforceOrgProfileKey(source);
 
   if (els.orgSelectionLabel) {
-    const selectionLabel = hasPreview ? salesforceOrgProfileLabel(preview) : "No org selected";
-    els.orgSelectionLabel.textContent = selectionLabel;
-    els.orgSelectionLabel.title = selectionLabel;
+    els.orgSelectionLabel.textContent = hasSelected ? salesforceOrgProfileLabel(selected) : "No org selected";
   }
   if (els.orgSelectionPill) {
-    els.orgSelectionPill.textContent = hasPreview ? (hasQueued ? "Ready" : "Selected") : "Unselected";
-    els.orgSelectionPill.classList.toggle("is-loaded", hasPreview);
+    els.orgSelectionPill.textContent = hasSelected ? "Selected" : "Unselected";
+    els.orgSelectionPill.classList.toggle("is-loaded", hasSelected);
   }
   if (els.orgRecentSelect) {
+    const recentProfiles = dedupeSalesforceOrgProfiles(state.recentOrgProfiles).slice(0, MAX_RECENT_ORG_PROFILES);
+    const selectedKey = hasSelected ? salesforceOrgProfileKey(selected) : "";
     const options = [];
-    const placeholderLabel = state.orgCatalogLoading
-      ? "Loading Salesforce org catalog..."
-      : optionsProfiles.length
-        ? "Available orgs"
-        : "No Salesforce orgs available";
-    options.push(`<option value="" disabled ${hasPreview ? "" : "selected"}>${escapeHtml(placeholderLabel)}</option>`);
-    optionsProfiles.forEach((profile) => {
+    options.push('<option value="">Recent orgs</option>');
+    recentProfiles.forEach((profile) => {
       const key = salesforceOrgProfileKey(profile);
       const label = escapeHtml(salesforceOrgProfileLabel(profile));
       const active = key === selectedKey ? "selected" : "";
-      options.push(`<option value="${escapeHtml(key)}" title="${escapeHtml(salesforceOrgProfileSummary(profile))}" ${active}>${label}</option>`);
+      options.push(`<option value="${escapeHtml(key)}" ${active}>${label}</option>`);
     });
     els.orgRecentSelect.innerHTML = options.join("");
-    els.orgRecentSelect.value = selectedKey || "";
+    els.orgRecentSelect.value = selectedKey;
   }
-  if (els.orgInstanceUrlValue) {
-    const instanceValue = hasPreview ? preview.instanceUrl : "";
-    const valueText = instanceValue || "No instance URL selected";
-    els.orgInstanceUrlValue.textContent = valueText;
-    els.orgInstanceUrlValue.title = valueText;
-    els.orgInstanceUrlValue.classList.toggle("is-empty", !instanceValue);
+  if (els.orgAliasInput) {
+    els.orgAliasInput.value = selected.orgAlias;
   }
+  if (els.orgInstanceUrlInput) {
+    els.orgInstanceUrlInput.value = selected.instanceUrl;
+  }
+  syncOrgEditorControls();
   if (els.orgStatus) {
-    let statusText;
-    if (hasPreview) {
-      statusText = hasQueued
-        ? `Ready to use: ${salesforceOrgProfileSummary(preview)}`
-        : `Target org: ${salesforceOrgProfileSummary(preview)}`;
-    } else if (state.orgCatalogLoading) {
-      statusText = "Loading Salesforce org catalog...";
-    } else if (state.orgCatalogWarning) {
-      statusText = state.orgCatalogWarning;
+    if (hasSelected) {
+      els.orgStatus.textContent = hasSource
+        ? `Target org: ${salesforceOrgProfileLabel(selected)}`
+        : `Target org: ${salesforceOrgProfileLabel(selected)}.`;
     } else {
-      statusText = "Choose a Salesforce org before refreshing or merging.";
+      els.orgStatus.textContent = "Choose a Salesforce org before refreshing or merging.";
     }
-    if (healthBlocked) {
-      statusText = `Blocked: ${healthBlocked}${healthSupport ? ` · ${healthSupport}` : ""}`;
-    } else if (healthSummary) {
-      statusText = `${statusText} · ${healthSummary}`;
-    }
-    if (state.orgCatalogWarning && !healthBlocked) {
-      statusText += ` · ${state.orgCatalogWarning}`;
-    }
-    els.orgStatus.textContent = statusText;
-    els.orgStatus.title = statusText;
-    els.orgStatus.classList.toggle("is-blocked", Boolean(healthBlocked));
-    els.orgStatus.classList.toggle("is-ready", Boolean(healthSummary && !healthBlocked));
   }
   if (els.orgMismatchWarning) {
     els.orgMismatchWarning.hidden = !hasMismatch;
     if (hasMismatch) {
-      const warningText = `Target org ${salesforceOrgProfileSummary(preview)} differs from the loaded dataset source ${salesforceOrgProfileSummary(source)}. Salesforce requests will use the target org.`;
-      els.orgMismatchWarning.textContent = warningText;
-      els.orgMismatchWarning.title = warningText;
+      els.orgMismatchWarning.textContent = `Target org ${salesforceOrgProfileLabel(selected)} differs from the loaded dataset source ${salesforceOrgProfileLabel(source)}. Salesforce requests will use the target org.`;
     }
   }
+}
+
+function syncOrgEditorControls() {
   if (!els.orgApplyButton) return;
-  els.orgApplyButton.disabled = !hasQueued;
+  els.orgApplyButton.disabled = !isCompleteSalesforceOrgProfile({
+    orgAlias: els.orgAliasInput?.value,
+    instanceUrl: els.orgInstanceUrlInput?.value
+  });
 }
 
-function salesforceHealthSummary(health = null) {
-  return salesforceHealthSupportSummary(health);
+function applySelectedOrgFromControls() {
+  setSelectedSalesforceOrgProfile({
+    orgAlias: els.orgAliasInput?.value || "",
+    instanceUrl: els.orgInstanceUrlInput?.value || ""
+  });
 }
 
-function salesforceHealthSupportSummary(health = null) {
-  if (!health) return "";
-  const parts = [];
-  if (health.salesforceAuthFresh === true) parts.push("Auth ready");
-  if (health.runtimeAligned === true) parts.push("Runtime aligned");
-  return parts.join(" · ");
-}
-
-function salesforceHealthBlockedReason(health = null) {
-  if (!health) return "";
-  if (health.runtimeAligned === false) return "Runtime stale";
-  if (health.salesforceAuthFresh === false) return "Auth blocked";
-  return "";
-}
-
-function queueRecentOrgSelection(value) {
-  const recent = dedupeSalesforceOrgProfiles(state.orgCatalog);
+function applyRecentOrgSelection(value) {
+  const recent = dedupeSalesforceOrgProfiles(state.recentOrgProfiles).slice(0, MAX_RECENT_ORG_PROFILES);
   const selected = recent.find((profile) => salesforceOrgProfileKey(profile) === String(value || ""));
   if (!selected) {
-    setQueuedSalesforceOrgProfile({});
+    renderOrgSelector();
     return;
   }
-  setQueuedSalesforceOrgProfile(selected);
-}
-
-function applyQueuedOrgSelection() {
-  const queued = getQueuedSalesforceOrgProfile();
-  if (!isCompleteSalesforceOrgProfile(queued)) return;
-  if (salesforceOrgProfileKey(queued) === salesforceOrgProfileKey(getSelectedSalesforceOrgProfile())) return;
-  setSelectedSalesforceOrgProfile(queued);
+  setSelectedSalesforceOrgProfile(selected);
 }
 
 async function loadDatasetText(datasetText, {
@@ -2039,14 +1944,16 @@ async function recentFileDatasetText(record, endpoint = record.endpoint) {
   return record.content || "";
 }
 
-function setLoadedDatasetSource({ endpoint = "", fileName = "", displayName = "", objectType = state.objectType, format = "", contractVersion = "", metadata = {} } = {}) {
+function setLoadedDatasetSource({ endpoint = "", fileName = "", displayName = "", objectType = state.objectType, format = "", contractVersion = "", metadata = {}, orgAlias = "", instanceUrl = "" } = {}) {
   state.datasetSource = {
     endpoint: String(endpoint || ""),
     fileName: String(fileName || state.fileName || ""),
     displayName: String(displayName || fileName || state.fileName || ""),
     objectType: normalizeObjectType(objectType, state.objectType),
     format: String(format || datasetFormatFromFileName(fileName || endpoint || state.fileName)),
-    contractVersion: String(contractVersion || metadata.contractVersion || state.datasetMetadata?.contractVersion || "")
+    contractVersion: String(contractVersion || metadata.contractVersion || state.datasetMetadata?.contractVersion || ""),
+    orgAlias: normalizeSalesforceOrgAlias(orgAlias || metadata.orgAlias || metadata.source?.orgAlias || ""),
+    instanceUrl: normalizeSalesforceInstanceUrl(instanceUrl || metadata.instanceUrl || metadata.source?.instanceUrl || "")
   };
   state.datasetMetadata = sanitizeDatasetMetadata({
     ...(state.datasetMetadata || {}),
@@ -2321,6 +2228,8 @@ function buildDatasetKey() {
   hash = updateHash(hash, state.objectType);
   hash = updateHash(hash, normalizeText(state.fileName));
   hash = updateHash(hash, normalizeText(state.datasetSource?.contractVersion || state.datasetMetadata?.contractVersion || ""));
+  hash = updateHash(hash, normalizeText(orgProfile.orgAlias));
+  hash = updateHash(hash, normalizeText(orgProfile.instanceUrl));
   hash = updateHash(hash, state.rows.length);
   state.headers.forEach((header) => {
     hash = updateHash(hash, normalizeHeader(header));
@@ -2801,7 +2710,8 @@ async function applyProcessedDataset(result, { fromObjects = false, objectType =
     headers: result.headers,
     mapping: result.mapping,
     objectType: result.objectType,
-    metadata: extractDatasetMetadata(result)
+    metadata,
+    sourceOrg
   });
   await updateLoadingProgress("Rendering duplicate groups.", 98);
   applyComputedGroups(result.groups || [], result.matchingStats || null);
@@ -2812,12 +2722,17 @@ async function applyProcessedDataset(result, { fromObjects = false, objectType =
   return fromObjects ? Promise.resolve() : restoreReviewStateForCurrentDataset();
 }
 
-function stageRowsForReview({ rows, fileName, fromObjects, headers, mapping, objectType, metadata = {} }) {
+function stageRowsForReview({ rows, fileName, fromObjects, headers, mapping, objectType, metadata = {}, sourceOrg = {} }) {
   flushPendingReviewStateSave();
   endFileLoad();
   state.objectType = normalizeObjectType(objectType, state.objectType);
   state.fileName = fileName;
   state.datasetMetadata = sanitizeDatasetMetadata(metadata);
+  state.datasetSource = {
+    ...state.datasetSource,
+    orgAlias: normalizeSalesforceOrgAlias(sourceOrg.orgAlias),
+    instanceUrl: normalizeSalesforceInstanceUrl(sourceOrg.instanceUrl)
+  };
   state.rows = Array.isArray(rows) ? rows : [];
   state.rows.forEach((row, index) => {
     row.__rowIndex = index;
@@ -3312,26 +3227,6 @@ function normalizeReviewDatasetPayload(payload, { fileName = "", objectType = st
     };
   }
 
-  if (Array.isArray(payload.records)) {
-    const rows = payload.records.map(normalizeJsonRecord);
-    const metadata = sanitizeDatasetMetadata({
-      schema: String(payload.schema || ""),
-      schemaVersion: Number(payload.schemaVersion) || 0,
-      contractVersion: String(payload.contractVersion || payload.source?.contractVersion || ""),
-      rollbackInventory: Array.isArray(payload.rollbackInventory) ? payload.rollbackInventory : [],
-      source: payload.source && typeof payload.source === "object" && !Array.isArray(payload.source) ? { ...payload.source } : {},
-      fields: Array.isArray(payload.fields) ? payload.fields.map((field) => ({ ...field })) : []
-    });
-    return {
-      format: "json",
-      fileName: normalizedFileName,
-      objectType: normalizedObjectType,
-      headers: datasetHeadersFromJsonPayload(payload, rows),
-      rows,
-      ...metadata
-    };
-  }
-
   if (Array.isArray(payload.columns) && Array.isArray(payload.rows)) {
     const headers = payload.columns.map((header) => String(header || ""));
     return {
@@ -3340,12 +3235,16 @@ function normalizeReviewDatasetPayload(payload, { fileName = "", objectType = st
       objectType: normalizedObjectType,
       headers,
       rows: payload.rows.map((row) => rowArrayToObject(headers, row)),
+      orgAlias: orgProfile.orgAlias,
+      instanceUrl: orgProfile.instanceUrl,
       ...sanitizeDatasetMetadata({
         schema: String(payload.schema || ""),
         schemaVersion: Number(payload.schemaVersion) || 0,
         contractVersion: String(payload.contractVersion || payload.source?.contractVersion || ""),
         rollbackInventory: Array.isArray(payload.rollbackInventory) ? payload.rollbackInventory : [],
-        source: payload.source && typeof payload.source === "object" && !Array.isArray(payload.source) ? { ...payload.source } : {},
+        source: payload.source && typeof payload.source === "object" && !Array.isArray(payload.source)
+          ? { ...payload.source, orgAlias: orgProfile.orgAlias || payload.source.orgAlias || "", instanceUrl: orgProfile.instanceUrl || payload.source.instanceUrl || "" }
+          : { orgAlias: orgProfile.orgAlias, instanceUrl: orgProfile.instanceUrl },
         fields: Array.isArray(payload.fields) ? payload.fields.map((field) => ({ ...field })) : []
       })
     };
@@ -3362,12 +3261,16 @@ function normalizeReviewDatasetPayload(payload, { fileName = "", objectType = st
       objectType: normalizedObjectType,
       headers: datasetHeadersFromJsonPayload(payload, rows),
       rows,
+      orgAlias: orgProfile.orgAlias,
+      instanceUrl: orgProfile.instanceUrl,
       ...sanitizeDatasetMetadata({
         schema: String(payload.schema || ""),
         schemaVersion: Number(payload.schemaVersion) || 0,
         contractVersion: String(payload.contractVersion || payload.source?.contractVersion || ""),
         rollbackInventory: Array.isArray(payload.rollbackInventory) ? payload.rollbackInventory : [],
-        source: payload.source && typeof payload.source === "object" && !Array.isArray(payload.source) ? { ...payload.source } : {},
+        source: payload.source && typeof payload.source === "object" && !Array.isArray(payload.source)
+          ? { ...payload.source, orgAlias: orgProfile.orgAlias || payload.source.orgAlias || "", instanceUrl: orgProfile.instanceUrl || payload.source.instanceUrl || "" }
+          : { orgAlias: orgProfile.orgAlias, instanceUrl: orgProfile.instanceUrl },
         fields: Array.isArray(payload.fields) ? payload.fields.map((field) => ({ ...field })) : []
       })
     };
@@ -3413,7 +3316,16 @@ function extractDatasetMetadata(result = {}) {
     schemaVersion: Number(result.schemaVersion) || 0,
     contractVersion: String(result.contractVersion || result.source?.contractVersion || ""),
     rollbackInventory: Array.isArray(result.rollbackInventory) ? result.rollbackInventory : [],
-    source: result.source && typeof result.source === "object" && !Array.isArray(result.source) ? { ...result.source } : {},
+    source: result.source && typeof result.source === "object" && !Array.isArray(result.source)
+      ? {
+          ...result.source,
+          orgAlias: String(result.orgAlias || result.source.orgAlias || result.source?.org?.orgAlias || ""),
+          instanceUrl: String(result.instanceUrl || result.source.instanceUrl || result.source?.org?.instanceUrl || "")
+        }
+      : {
+          orgAlias: String(result.orgAlias || ""),
+          instanceUrl: String(result.instanceUrl || "")
+        },
     fields: Array.isArray(result.fields) ? result.fields.map((field) => ({ ...field })) : []
   });
 }
@@ -3427,7 +3339,9 @@ function sanitizeDatasetMetadata(metadata = {}) {
         query: String(metadata.source.query || ""),
         operation: String(metadata.source.operation || ""),
         totalSize: Number(metadata.source.totalSize) || 0,
-        contractVersion: String(metadata.source.contractVersion || "")
+        contractVersion: String(metadata.source.contractVersion || ""),
+        orgAlias: String(metadata.source.orgAlias || metadata.orgAlias || ""),
+        instanceUrl: String(metadata.source.instanceUrl || metadata.instanceUrl || "")
       }
     : {};
 
@@ -3435,6 +3349,8 @@ function sanitizeDatasetMetadata(metadata = {}) {
     schema: String(metadata.schema || ""),
     schemaVersion: Number(metadata.schemaVersion) || 0,
     contractVersion: String(metadata.contractVersion || ""),
+    orgAlias: String(metadata.orgAlias || metadata.source?.orgAlias || ""),
+    instanceUrl: String(metadata.instanceUrl || metadata.source?.instanceUrl || ""),
     rollbackInventory: Array.isArray(metadata.rollbackInventory) ? metadata.rollbackInventory : [],
     source,
     fields: Array.isArray(metadata.fields) ? metadata.fields.map((field) => ({ ...field })) : []
