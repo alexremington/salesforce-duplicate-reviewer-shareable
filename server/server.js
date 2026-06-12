@@ -34,7 +34,9 @@ const DEFAULT_PATH = managedPlatform.defaultCommandPath();
 const salesforceMergeService = createSalesforceMergeService();
 let salesforceCliCommandCache = null;
 const salesforceAuthCache = new Map();
+const salesforceOrgListCache = new Map();
 const SALESFORCE_AUTH_CACHE_TTL_MS = 5 * 60 * 1000;
+const SALESFORCE_ORG_LIST_CACHE_TTL_MS = 5 * 60 * 1000;
 const ENDPOINT_RESPONSE_CACHE_LIMIT = 8;
 const endpointResponseCache = new Map();
 const MERGE_AUDIT_LOG = path.join(OUTPUT_DIR, "salesforce-merge-log.jsonl");
@@ -203,6 +205,12 @@ async function handleRequest(request, response) {
       pid: process.pid,
       port: PORT
     }, 200, fileModeCorsHeaders(request));
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/salesforce/orgs") {
+    const result = await salesforceMergeService.listOrgs();
+    sendJson(response, result);
     return;
   }
 
@@ -723,8 +731,48 @@ async function readJsonBody(request, maxBytes = 32 * 1024) {
 function createSalesforceMergeService() {
   return {
     checkPreMergeFreshness: checkSalesforcePreMergeFreshness,
-    mergeRecords: mergeSalesforceRecords
+    mergeRecords: mergeSalesforceRecords,
+    listOrgs: listSalesforceOrgs
   };
+}
+
+async function listSalesforceOrgs() {
+  const cacheKey = "default";
+  const cached = salesforceOrgListCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  const configuredOrgs = [
+    {
+      alias: SF_ORG_ALIAS,
+      instanceUrl: normalizeInstanceUrl(SF_INSTANCE_URL)
+    }
+  ];
+
+  try {
+    const payload = await execFileJson(salesforceCliCommand(), ["org", "list", "--json"], {
+      env: salesforceCliEnv()
+    });
+    const orgs = mergeSalesforceOrgRecords(salesforceOrgsFromListPayload(payload), configuredOrgs);
+    const value = { orgs };
+    salesforceOrgListCache.set(cacheKey, {
+      value,
+      expiresAt: Date.now() + SALESFORCE_ORG_LIST_CACHE_TTL_MS
+    });
+    return value;
+  } catch (error) {
+    const warning = error.message || "Salesforce org catalog could not be loaded.";
+    const value = {
+      orgs: mergeSalesforceOrgRecords(configuredOrgs),
+      warning
+    };
+    salesforceOrgListCache.set(cacheKey, {
+      value,
+      expiresAt: Date.now() + SALESFORCE_ORG_LIST_CACHE_TTL_MS
+    });
+    return value;
+  }
 }
 
 async function checkSalesforcePreMergeFreshness(body) {
@@ -1372,6 +1420,66 @@ async function getSalesforceCliAccessToken(orgAlias) {
     throw httpError(500, `Salesforce CLI returned a redacted access token for ${targetOrg}.`);
   }
   return accessToken;
+}
+
+function salesforceOrgsFromListPayload(payload) {
+  const result = payload.result || payload;
+  const candidates = [
+    result.nonScratchOrgs,
+    result.scratchOrgs,
+    result.sandboxes,
+    result.devHubs,
+    result.orgs
+  ].filter(Array.isArray).flat();
+  const byAlias = new Map();
+
+  for (const candidate of candidates) {
+    const org = salesforceOrgRecord(candidate);
+    if (!org.alias || !org.instanceUrl) continue;
+    if (candidate.isExpired === true) continue;
+    if (org.connectedStatus && !/connected/i.test(org.connectedStatus)) continue;
+    byAlias.set(org.alias, org);
+  }
+
+  return [...byAlias.values()].sort((a, b) => a.alias.localeCompare(b.alias));
+}
+
+function mergeSalesforceOrgRecords(...lists) {
+  const byAlias = new Map();
+  for (const list of lists) {
+    for (const candidate of list || []) {
+      const org = salesforceOrgRecord(candidate);
+      if (!org.alias) continue;
+      const existing = byAlias.get(org.alias);
+      byAlias.set(org.alias, existing ? mergeSalesforceOrgRecord(existing, org) : org);
+    }
+  }
+
+  return [...byAlias.values()]
+    .filter((org) => org.alias && org.instanceUrl)
+    .sort((a, b) => a.alias.localeCompare(b.alias));
+}
+
+function mergeSalesforceOrgRecord(existing, next) {
+  return {
+    alias: existing.alias || next.alias,
+    username: existing.username || next.username,
+    orgId: existing.orgId || next.orgId,
+    instanceUrl: existing.instanceUrl || next.instanceUrl,
+    loginUrl: existing.loginUrl || next.loginUrl,
+    connectedStatus: existing.connectedStatus || next.connectedStatus
+  };
+}
+
+function salesforceOrgRecord(org, fallbackAlias = "") {
+  return {
+    alias: String(org.alias || fallbackAlias || org.username || "").trim(),
+    username: String(org.username || "").trim(),
+    orgId: String(org.id || org.orgId || "").trim(),
+    instanceUrl: String(org.instanceUrl || "").trim(),
+    loginUrl: String(org.loginUrl || "").trim(),
+    connectedStatus: String(org.connectedStatus || org.status || "").trim()
+  };
 }
 
 function isSalesforceAuthRejected(error) {

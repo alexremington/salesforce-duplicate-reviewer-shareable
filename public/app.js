@@ -197,7 +197,6 @@ const PREMERGE_FRESHNESS_FIELDS = [
   "mobile"
 ];
 const ORG_PREFERENCES_STORAGE_KEY = "salesforce-duplicate-reviewer.org-preferences-v1";
-const MAX_RECENT_ORG_PROFILES = 5;
 const GROUP_FILTER_FIELD_TYPES = {
   recordId: "text",
   fullName: "text",
@@ -810,7 +809,9 @@ const state = {
   selectedInstanceUrl: "",
   pendingOrgAlias: "",
   pendingInstanceUrl: "",
-  recentOrgProfiles: [],
+  orgCatalog: [],
+  orgCatalogLoading: false,
+  orgCatalogWarning: "",
   datasetKey: "",
   reviewStateStatus: "",
   loadError: "",
@@ -1190,6 +1191,7 @@ els.dropZone.addEventListener("drop", (event) => {
 
 setupCollapsiblePanels();
 loadSalesforceOrgPreferences();
+refreshSalesforceOrgCatalog();
 initializeFileHistory().finally(() => {
   loadFromUrlIfRequested();
 });
@@ -1413,21 +1415,16 @@ function loadSalesforceOrgPreferences() {
     if (!raw) return;
 
     const parsed = JSON.parse(raw);
-    const recentOrgProfiles = Array.isArray(parsed.recentOrgProfiles)
-      ? parsed.recentOrgProfiles.map(normalizeSalesforceOrgProfile).filter(isCompleteSalesforceOrgProfile)
-      : Array.isArray(parsed.recentOrgs)
-        ? parsed.recentOrgs.map(normalizeSalesforceOrgProfile).filter(isCompleteSalesforceOrgProfile)
-        : [];
-    state.recentOrgProfiles = dedupeSalesforceOrgProfiles(recentOrgProfiles).slice(0, MAX_RECENT_ORG_PROFILES);
-
-    const selectedOrg = normalizeSalesforceOrgProfile(parsed.selectedOrg || parsed.currentOrg || state.recentOrgProfiles[0] || {});
+    const selectedOrg = normalizeSalesforceOrgProfile(
+      parsed.selectedOrg ||
+        parsed.currentOrg ||
+        (Array.isArray(parsed.recentOrgProfiles) ? parsed.recentOrgProfiles[0] : null) ||
+        (Array.isArray(parsed.recentOrgs) ? parsed.recentOrgs[0] : null) ||
+        {}
+    );
     if (isCompleteSalesforceOrgProfile(selectedOrg)) {
       state.selectedOrgAlias = selectedOrg.orgAlias;
       state.selectedInstanceUrl = selectedOrg.instanceUrl;
-      upsertSalesforceOrgProfile(selectedOrg);
-    } else if (state.recentOrgProfiles.length) {
-      state.selectedOrgAlias = state.recentOrgProfiles[0].orgAlias;
-      state.selectedInstanceUrl = state.recentOrgProfiles[0].instanceUrl;
     }
     state.pendingOrgAlias = "";
     state.pendingInstanceUrl = "";
@@ -1443,8 +1440,7 @@ function persistSalesforceOrgPreferences() {
     localStorage.setItem(
       ORG_PREFERENCES_STORAGE_KEY,
       JSON.stringify({
-        selectedOrg: getSelectedSalesforceOrgProfile(),
-        recentOrgProfiles: state.recentOrgProfiles.slice(0, MAX_RECENT_ORG_PROFILES)
+        selectedOrg: getSelectedSalesforceOrgProfile()
       })
     );
   } catch (error) {
@@ -1474,25 +1470,12 @@ function dedupeSalesforceOrgProfiles(profiles = []) {
   return unique;
 }
 
-function upsertSalesforceOrgProfile(profile = {}) {
-  const normalized = normalizeSalesforceOrgProfile(profile);
-  if (!isCompleteSalesforceOrgProfile(normalized)) return;
-
-  state.recentOrgProfiles = [
-    normalized,
-    ...state.recentOrgProfiles.filter((entry) => salesforceOrgProfileKey(entry) !== salesforceOrgProfileKey(normalized))
-  ].slice(0, MAX_RECENT_ORG_PROFILES);
-}
-
 function setSelectedSalesforceOrgProfile(profile = {}, { persist = true } = {}) {
   const normalized = normalizeSalesforceOrgProfile(profile);
   state.selectedOrgAlias = normalized.orgAlias;
   state.selectedInstanceUrl = normalized.instanceUrl;
   state.pendingOrgAlias = "";
   state.pendingInstanceUrl = "";
-  if (isCompleteSalesforceOrgProfile(normalized)) {
-    upsertSalesforceOrgProfile(normalized);
-  }
   if (persist) persistSalesforceOrgPreferences();
   renderOrgSelector();
 }
@@ -1511,6 +1494,28 @@ function selectedSalesforceOrgMatchesLoadedDataset() {
   return salesforceOrgProfileKey(selected) === salesforceOrgProfileKey(source);
 }
 
+async function refreshSalesforceOrgCatalog() {
+  state.orgCatalogLoading = true;
+  renderOrgSelector();
+
+  try {
+    const response = await fetch("/api/salesforce/orgs", { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`Salesforce org catalog could not be loaded: HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    state.orgCatalog = dedupeSalesforceOrgProfiles(Array.isArray(payload.orgs) ? payload.orgs : []);
+    state.orgCatalogWarning = String(payload.warning || "").trim();
+  } catch (error) {
+    console.warn("Salesforce org catalog could not be loaded", error);
+    state.orgCatalogWarning = error.message || "Salesforce org catalog could not be loaded.";
+    state.orgCatalog = dedupeSalesforceOrgProfiles(state.orgCatalog);
+  } finally {
+    state.orgCatalogLoading = false;
+    renderOrgSelector();
+  }
+}
+
 function renderOrgSelector() {
   const preview = getSelectedOrQueuedSalesforceOrgProfile();
   const source = getLoadedDatasetSalesforceOrgProfile();
@@ -1518,6 +1523,11 @@ function renderOrgSelector() {
   const hasPreview = isCompleteSalesforceOrgProfile(preview);
   const hasQueued = hasQueuedSalesforceOrgProfile();
   const hasMismatch = hasPreview && hasSource && salesforceOrgProfileKey(preview) !== salesforceOrgProfileKey(source);
+  const catalogProfiles = dedupeSalesforceOrgProfiles(state.orgCatalog);
+  const selectedKey = hasPreview ? salesforceOrgProfileKey(preview) : "";
+  const optionsProfiles = hasPreview && !catalogProfiles.some((profile) => salesforceOrgProfileKey(profile) === selectedKey)
+    ? [preview, ...catalogProfiles]
+    : catalogProfiles;
 
   if (els.orgSelectionLabel) {
     const selectionLabel = hasPreview ? salesforceOrgProfileLabel(preview) : "No org selected";
@@ -1529,18 +1539,21 @@ function renderOrgSelector() {
     els.orgSelectionPill.classList.toggle("is-loaded", hasPreview);
   }
   if (els.orgRecentSelect) {
-    const recentProfiles = dedupeSalesforceOrgProfiles(state.recentOrgProfiles).slice(0, MAX_RECENT_ORG_PROFILES);
-    const selectedKey = hasPreview ? salesforceOrgProfileKey(preview) : "";
     const options = [];
-    options.push('<option value="">Recent orgs</option>');
-    recentProfiles.forEach((profile) => {
+    const placeholderLabel = state.orgCatalogLoading
+      ? "Loading Salesforce org catalog..."
+      : optionsProfiles.length
+        ? "Available orgs"
+        : "No Salesforce orgs available";
+    options.push(`<option value="" disabled ${hasPreview ? "" : "selected"}>${escapeHtml(placeholderLabel)}</option>`);
+    optionsProfiles.forEach((profile) => {
       const key = salesforceOrgProfileKey(profile);
       const label = escapeHtml(salesforceOrgProfileLabel(profile));
       const active = key === selectedKey ? "selected" : "";
       options.push(`<option value="${escapeHtml(key)}" title="${escapeHtml(salesforceOrgProfileSummary(profile))}" ${active}>${label}</option>`);
     });
     els.orgRecentSelect.innerHTML = options.join("");
-    els.orgRecentSelect.value = selectedKey;
+    els.orgRecentSelect.value = selectedKey || "";
   }
   if (els.orgInstanceUrlValue) {
     const instanceValue = hasPreview ? preview.instanceUrl : "";
@@ -1555,6 +1568,13 @@ function renderOrgSelector() {
       statusText = hasQueued
         ? `Ready to use: ${salesforceOrgProfileSummary(preview)}`
         : `Target org: ${salesforceOrgProfileSummary(preview)}`;
+      if (state.orgCatalogWarning) {
+        statusText += ` · ${state.orgCatalogWarning}`;
+      }
+    } else if (state.orgCatalogLoading) {
+      statusText = "Loading Salesforce org catalog...";
+    } else if (state.orgCatalogWarning) {
+      statusText = state.orgCatalogWarning;
     } else {
       statusText = "Choose a Salesforce org before refreshing or merging.";
     }
@@ -1574,7 +1594,7 @@ function renderOrgSelector() {
 }
 
 function queueRecentOrgSelection(value) {
-  const recent = dedupeSalesforceOrgProfiles(state.recentOrgProfiles).slice(0, MAX_RECENT_ORG_PROFILES);
+  const recent = dedupeSalesforceOrgProfiles(state.orgCatalog);
   const selected = recent.find((profile) => salesforceOrgProfileKey(profile) === String(value || ""));
   if (!selected) {
     setQueuedSalesforceOrgProfile({});

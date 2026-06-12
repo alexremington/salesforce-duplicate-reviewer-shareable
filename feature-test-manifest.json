@@ -1,7 +1,7 @@
 {
   "version": 1,
   "app": "salesforce-duplicate-reviewer",
-  "updatedAt": "2026-06-12T20:00:00.000Z",
+  "updatedAt": "2026-06-12T19:15:35.000Z",
   "features": [
     {
       "id": "salesforce-org-selector-simplification",
@@ -12,20 +12,22 @@
       "brief": "docs/features/salesforce-org-selector-simplification.md",
       "requirements": [
         "Keep the selector inside the existing Source rail.",
-        "Render recent org choices as alias-only options.",
+        "Render shared org catalog choices as alias-only options.",
         "Remove the separate editable Alias field from the inline selector.",
         "Render the instance URL as a clearly labeled read-only display control.",
-        "Preserve the apply flow and mismatch behavior when a recent org is selected."
+        "Preserve the apply flow and mismatch behavior when a catalog org is selected.",
+        "Remove the display cap so every available org entry can render."
       ],
       "acceptanceCriteria": [
-        "The Source rail shows an alias-only recent org dropdown.",
+        "The Source rail shows an alias-only shared org catalog dropdown.",
         "The Alias input is no longer present in the selector.",
         "The instance URL is visible but not editable.",
-        "Selecting a recent org and pressing Use org updates the active target org and mismatch warning state.",
+        "Selecting a catalog org and pressing Use org updates the active target org and mismatch warning state.",
+        "The dropdown renders every available catalog entry without truncating the list at five items.",
         "The selector remains compact, scrollable, and hit-testable at supported desktop and mobile widths."
       ],
       "fixtures": [
-        "At least two complete recent Salesforce org profiles, one matching the loaded dataset source and one different.",
+        "At least six complete Salesforce org profiles, one matching the loaded dataset source and several others to verify the list is uncapped.",
         "A loaded dataset whose source org metadata can be compared against the selected target org.",
         "No demo-only fallback should alter the selector layout."
       ],

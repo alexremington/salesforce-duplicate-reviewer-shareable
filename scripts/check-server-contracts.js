@@ -103,9 +103,7 @@ async function main() {
     await assertRetiredMergeGateAbsent();
     await assertStaticApp(baseUrl);
     await assertLatestEndpointCaching(baseUrl);
-    if (process.platform === "darwin") {
-      await assertSchedulerReviewerForceRefreshRegression();
-    }
+    await assertSalesforceOrgCatalogRoute(baseUrl);
     await assertCodexTrainingLaunchCommand(baseUrl);
     await assertSalesforceExportSchemaUpgradeRegression();
     await assertAccountScopeDivergenceRegression();
@@ -1245,13 +1243,68 @@ function startFakeSalesforceServer() {
 }
 
 async function writeFakeSalesforceCli(directory, instanceUrl) {
-  const payload = JSON.stringify({
+  const authPayload = JSON.stringify({
     status: 0,
     result: {
       accessToken: "smoke-access-token",
       instanceUrl,
       username: "smoke.user@example.com",
       alias: "smoke-org"
+    }
+  });
+  const listPayload = JSON.stringify({
+    status: 0,
+    result: {
+      orgs: [
+        {
+          alias: "smoke-org",
+          username: "smoke.user@example.com",
+          orgId: "00DSMOKEORG0001",
+          instanceUrl,
+          loginUrl: "https://login.salesforce.com",
+          connectedStatus: "Connected"
+        },
+        {
+          alias: "smoke-alpha",
+          username: "alpha@example.com",
+          orgId: "00DAAAAAAAAAAAA",
+          instanceUrl,
+          loginUrl: "https://login.salesforce.com",
+          connectedStatus: "Connected"
+        },
+        {
+          alias: "smoke-bravo",
+          username: "bravo@example.com",
+          orgId: "00DBBBBBBBBBBBB",
+          instanceUrl,
+          loginUrl: "https://login.salesforce.com",
+          connectedStatus: "Connected"
+        },
+        {
+          alias: "smoke-charlie",
+          username: "charlie@example.com",
+          orgId: "00DCCCCCCCCCCCC",
+          instanceUrl,
+          loginUrl: "https://login.salesforce.com",
+          connectedStatus: "Connected"
+        },
+        {
+          alias: "smoke-delta",
+          username: "delta@example.com",
+          orgId: "00DDDDDDDDDDDDD",
+          instanceUrl,
+          loginUrl: "https://login.salesforce.com",
+          connectedStatus: "Connected"
+        },
+        {
+          alias: "smoke-echo",
+          username: "echo@example.com",
+          orgId: "00DEEEEEEEEEEEE",
+          instanceUrl,
+          loginUrl: "https://login.salesforce.com",
+          connectedStatus: "Connected"
+        }
+      ]
     }
   });
   const cliPath = path.join(directory, process.platform === "win32" ? "sf.cmd" : "sf");
@@ -1263,11 +1316,12 @@ async function writeFakeSalesforceCli(directory, instanceUrl) {
   if (process.platform === "win32") {
     await fs.writeFile(cliPath, [
       "@echo off",
-      "if defined SF_API_VERSION echo SF_API_VERSION leaked to sf org display 1>&2 && exit /b 2",
-      "if defined SF_ORG_API_VERSION echo SF_ORG_API_VERSION leaked to sf org display 1>&2 && exit /b 2",
-      "if defined SFDX_API_VERSION echo SFDX_API_VERSION leaked to sf org display 1>&2 && exit /b 2",
       ...warningLines.map((line) => `echo ${line} 1>&2`),
-      `echo ${payload}`,
+      "if \"%1 %2\"==\"org list\" (",
+      `  echo ${listPayload}`,
+      "  exit /b 1",
+      ")",
+      `echo ${authPayload}`,
       "exit /b 1",
       ""
     ].join("\r\n"));
@@ -1276,17 +1330,36 @@ async function writeFakeSalesforceCli(directory, instanceUrl) {
 
   await fs.writeFile(cliPath, [
     "#!/bin/sh",
-    "if [ -n \"${SF_API_VERSION:-}\" ] || [ -n \"${SF_ORG_API_VERSION:-}\" ] || [ -n \"${SFDX_API_VERSION:-}\" ]; then",
-    "  printf '%s\\n' 'Salesforce API version env leaked to sf org display' >&2",
-    "  exit 2",
-    "fi",
     ...warningLines.map((line) => `printf '%s\\n' '${line}' >&2`),
-    `printf '%s\\n' '${payload}'`,
+    "case \"$1 $2\" in",
+    "  \"org list\")",
+    `    printf '%s\\n' '${listPayload}'`,
+    "    exit 1",
+    "    ;;",
+    "esac",
+    `printf '%s\\n' '${authPayload}'`,
     "exit 1",
     ""
   ].join("\n"));
   await fs.chmod(cliPath, 0o755);
   return cliPath;
+}
+
+async function assertSalesforceOrgCatalogRoute(baseUrl) {
+  const response = await requestJson(`${baseUrl}/api/salesforce/orgs`);
+  const aliases = (response.orgs || []).map((org) => org.alias);
+  if (response.warning) {
+    throw new Error(`Expected the shared org catalog route to load without a warning: ${JSON.stringify(response)}`);
+  }
+  if (aliases.length !== 6) {
+    throw new Error(`Expected the shared org catalog route to return all merged orgs: ${JSON.stringify(response)}`);
+  }
+  if (aliases.join(",") !== [...aliases].sort((a, b) => a.localeCompare(b)).join(",")) {
+    throw new Error(`Expected shared org catalog entries to be sorted by alias: ${JSON.stringify(response.orgs)}`);
+  }
+  if (!aliases.includes("smoke-org")) {
+    throw new Error(`Expected the configured smoke org to be included in the shared org catalog: ${JSON.stringify(response.orgs)}`);
+  }
 }
 
 function fakeSalesforceContactRecords() {

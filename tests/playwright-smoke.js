@@ -91,6 +91,27 @@ async function run() {
     orgAlias: "qa-smoke-org-with-an-extremely-long-name-that-should-truncate",
     instanceUrl: "https://qa-smoke-org-with-an-extremely-long-instance-url.example.invalid"
   };
+  const smokeSalesforceOrgs = [
+    primaryOrg,
+    secondaryOrg,
+    longOrg,
+    {
+      orgAlias: "qa-third-org",
+      instanceUrl: "https://qa-third-org.example.invalid"
+    },
+    {
+      orgAlias: "qa-fourth-org",
+      instanceUrl: "https://qa-fourth-org.example.invalid"
+    },
+    {
+      orgAlias: "qa-fifth-org",
+      instanceUrl: "https://qa-fifth-org.example.invalid"
+    },
+    {
+      orgAlias: "qa-sixth-org",
+      instanceUrl: "https://qa-sixth-org.example.invalid"
+    }
+  ];
   let context = null;
 
   try {
@@ -111,28 +132,24 @@ async function run() {
       }
     });
     page.on("pageerror", (error) => messages.push(`pageerror: ${error.message}`));
+    await page.route("**/api/salesforce/orgs", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ orgs: smokeSalesforceOrgs })
+      });
+    });
 
     await page.emulateMedia({ colorScheme: "light" });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.evaluate(({ storageKey, selectedOrg, recentOrgProfiles }) => {
-      localStorage.setItem(storageKey, JSON.stringify({ selectedOrg, recentOrgProfiles }));
+    await page.evaluate(({ storageKey, selectedOrg }) => {
+      localStorage.setItem(storageKey, JSON.stringify({ selectedOrg }));
     }, {
       storageKey: ORG_PREFERENCES_STORAGE_KEY,
-      selectedOrg: primaryOrg,
-      recentOrgProfiles: [primaryOrg, secondaryOrg, longOrg]
+      selectedOrg: primaryOrg
     });
     await page.reload({ waitUntil: "networkidle" });
-    await page.evaluate(({ selectedOrg, recentOrgProfiles }) => {
-      state.selectedOrgAlias = selectedOrg.orgAlias;
-      state.selectedInstanceUrl = selectedOrg.instanceUrl;
-      state.pendingOrgAlias = "";
-      state.pendingInstanceUrl = "";
-      state.recentOrgProfiles = recentOrgProfiles;
-      renderOrgSelector();
-    }, {
-      selectedOrg: primaryOrg,
-      recentOrgProfiles: [primaryOrg, secondaryOrg, longOrg]
-    });
+    await page.waitForFunction(() => (document.querySelector("#orgRecentSelect")?.options?.length || 0) > 1, null, { timeout: 10000 });
     const latestRecentFiles = await assertLatestRecentFiles(page);
     const lightTheme = await themeColorState(page);
     const lightPaneSurfaces = await paneSurfaceState(page);
@@ -171,8 +188,17 @@ async function run() {
     ) {
       throw new Error(`Expected the embedded dataset org to populate the selector: ${JSON.stringify(embeddedOrgState)}`);
     }
+    const expectedOptionCount = smokeSalesforceOrgs.some((org) => org.orgAlias === latestJsonLoad.sourceOrgAlias)
+      ? smokeSalesforceOrgs.length
+      : smokeSalesforceOrgs.length + 1;
+    if (embeddedOrgState.aliasOptions.length !== expectedOptionCount) {
+      throw new Error(`Expected every shared catalog entry to render in the dropdown: ${JSON.stringify(embeddedOrgState.aliasOptions)}`);
+    }
+    if (!smokeSalesforceOrgs.every((org) => embeddedOrgState.aliasOptions.some((option) => option.alias === org.orgAlias))) {
+      throw new Error(`Expected the dropdown to include every seeded org alias: ${JSON.stringify({ expected: smokeSalesforceOrgs, actual: embeddedOrgState.aliasOptions })}`);
+    }
     if (!embeddedOrgState.aliasOptions.every((option) => option.label === option.alias && !option.label.includes("·") && !option.label.includes("https://"))) {
-      throw new Error(`Expected recent org dropdown entries to show alias only: ${JSON.stringify(embeddedOrgState.aliasOptions)}`);
+      throw new Error(`Expected shared org catalog dropdown entries to show alias only: ${JSON.stringify(embeddedOrgState.aliasOptions)}`);
     }
     if (embeddedOrgState.aliasInputPresent || embeddedOrgState.instanceUrlInputPresent) {
       throw new Error(`Expected the inline alias and URL inputs to be removed: ${JSON.stringify(embeddedOrgState)}`);

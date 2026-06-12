@@ -10,15 +10,16 @@ Use this checklist when manually verifying the selector in a launched Duplicate 
 
 ## Selector Shape
 
-- Open the recent org dropdown and confirm each option shows the alias only.
+- Open the shared org catalog dropdown and confirm each option shows the alias only.
 - Confirm no dropdown option includes a host name or `https://` text.
+- Confirm more than five org entries are visible when the catalog contains them.
 - Confirm the separate Alias field is not present.
 - Confirm the instance URL appears as read-only text, not an input.
 - Confirm the instance URL label is visible and still legible at the current viewport width.
 
 ## Interaction
 
-- Choose a different recent org alias.
+- Choose a different org alias.
 - Click `Use org`.
 - Confirm the target org label updates.
 - Confirm the mismatch warning appears when the selected target org differs from the loaded dataset source.
@@ -30,4 +31,3 @@ Use this checklist when manually verifying the selector in a launched Duplicate 
 - Confirm the selector stays inside the `Source` rail without horizontal spill.
 - Confirm the `Source`, `Match Controls`, and `Match Groups` toggles remain visible and hit-testable.
 - Confirm the rail still has a working scroll path when content extends below the viewport.
-
