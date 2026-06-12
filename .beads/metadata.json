@@ -1,7 +1,0 @@
-{
-  "database": "dolt",
-  "backend": "dolt",
-  "dolt_mode": "embedded",
-  "dolt_database": "salesforce_duplicate_reviewer",
-  "project_id": "25de79fc-5495-452f-8e4f-7020c9017e1e"
-}

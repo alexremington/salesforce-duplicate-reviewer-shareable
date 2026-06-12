@@ -3,7 +3,7 @@
 Run this before committing or sharing Duplicate Reviewer changes.
 
 1. Run `npm run verify:release` and keep the generated `.managed-app-pipeline/<timestamp>-release/summary.md` as release evidence.
-2. Run `npm run closeout` and account for every changed, untracked, or generated file before handoff or push. Local Beads metadata under `.beads/` is workspace state, not release state, so Beads-only dirt should be reported separately and should not block closeout.
+2. Run `npm run closeout` and account for every changed, untracked, or generated file before handoff or push. Local Beads metadata under `.beads/` is workspace state, not release state, and should remain ignored and untracked so it does not block closeout.
 3. If a feature brief status drifts from the manifest, run `npm run feature:sync-status` before closeout so the two metadata sources stay aligned.
 4. Confirm the release evidence includes `npm run check:features`. New feature work must have a `feature-test-manifest.json` entry and a linked `docs/features/<slug>.md` brief before release.
 5. Confirm the release evidence includes the shared Hume design check. Visible UI changes must align with `docs/HUME-DESIGN-REVIEW.md`.
