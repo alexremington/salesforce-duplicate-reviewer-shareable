@@ -1305,16 +1305,19 @@ function datasetFormatFromFileName(fileName = "") {
 }
 
 function normalizeSalesforceOrgProfile(profile = {}) {
-  const orgAlias = normalizeSalesforceOrgAlias(profile.orgAlias ?? profile.alias ?? "");
   const instanceUrl = normalizeSalesforceInstanceUrl(profile.instanceUrl ?? profile.url ?? "");
+  const orgAlias = normalizeSalesforceOrgAlias(profile.orgAlias ?? profile.alias ?? "", instanceUrl);
   return {
     orgAlias,
     instanceUrl
   };
 }
 
-function normalizeSalesforceOrgAlias(value = "") {
-  return String(value || "").trim();
+function normalizeSalesforceOrgAlias(value = "", instanceUrl = "") {
+  const alias = String(value || "").trim();
+  if (!alias) return "";
+  if (alias.toLowerCase() !== "staging") return alias;
+  return isCanonicalStagingSandboxInstanceUrl(instanceUrl) ? "politico-staging" : alias;
 }
 
 function normalizeSalesforceInstanceUrl(value = "") {
@@ -1333,6 +1336,10 @@ function normalizeSalesforceInstanceUrl(value = "") {
   } catch {
     return "";
   }
+}
+
+function isCanonicalStagingSandboxInstanceUrl(value = "") {
+  return normalizeSalesforceInstanceUrl(value) === normalizeSalesforceInstanceUrl("https://politico--staging.sandbox.my.salesforce.com");
 }
 
 function salesforceOrgProfileKey(profile = {}) {
@@ -2002,6 +2009,7 @@ async function recentFileDatasetText(record, endpoint = record.endpoint) {
 }
 
 function setLoadedDatasetSource({ endpoint = "", fileName = "", displayName = "", objectType = state.objectType, format = "", contractVersion = "", metadata = {}, orgAlias = "", instanceUrl = "" } = {}) {
+  const normalizedInstanceUrl = normalizeSalesforceInstanceUrl(instanceUrl || metadata.instanceUrl || metadata.source?.instanceUrl || "");
   state.datasetSource = {
     endpoint: String(endpoint || ""),
     fileName: String(fileName || state.fileName || ""),
@@ -2009,8 +2017,8 @@ function setLoadedDatasetSource({ endpoint = "", fileName = "", displayName = ""
     objectType: normalizeObjectType(objectType, state.objectType),
     format: String(format || datasetFormatFromFileName(fileName || endpoint || state.fileName)),
     contractVersion: String(contractVersion || metadata.contractVersion || state.datasetMetadata?.contractVersion || ""),
-    orgAlias: normalizeSalesforceOrgAlias(orgAlias || metadata.orgAlias || metadata.source?.orgAlias || ""),
-    instanceUrl: normalizeSalesforceInstanceUrl(instanceUrl || metadata.instanceUrl || metadata.source?.instanceUrl || "")
+    orgAlias: normalizeSalesforceOrgAlias(orgAlias || metadata.orgAlias || metadata.source?.orgAlias || "", normalizedInstanceUrl),
+    instanceUrl: normalizedInstanceUrl
   };
   state.datasetMetadata = sanitizeDatasetMetadata({
     ...(state.datasetMetadata || {}),
@@ -2787,7 +2795,7 @@ function stageRowsForReview({ rows, fileName, fromObjects, headers, mapping, obj
   state.datasetMetadata = sanitizeDatasetMetadata(metadata);
   state.datasetSource = {
     ...state.datasetSource,
-    orgAlias: normalizeSalesforceOrgAlias(sourceOrg.orgAlias),
+    orgAlias: normalizeSalesforceOrgAlias(sourceOrg.orgAlias, sourceOrg.instanceUrl),
     instanceUrl: normalizeSalesforceInstanceUrl(sourceOrg.instanceUrl)
   };
   state.rows = Array.isArray(rows) ? rows : [];

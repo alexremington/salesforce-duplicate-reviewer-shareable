@@ -1297,9 +1297,17 @@ async function writeFakeSalesforceCli(directory, instanceUrl) {
           connectedStatus: "Connected"
         },
         {
-          alias: "smoke-echo",
+          alias: "politico-staging",
           username: "echo@example.com",
           orgId: "00DEEEEEEEEEEEE",
+          instanceUrl,
+          loginUrl: "https://login.salesforce.com",
+          connectedStatus: "Connected"
+        },
+        {
+          alias: "staging",
+          username: "staging@example.com",
+          orgId: "00DSTAGING00001",
           instanceUrl,
           loginUrl: "https://login.salesforce.com",
           connectedStatus: "Connected"
@@ -1357,9 +1365,18 @@ async function assertSalesforceOrgCatalogRoute(baseUrl) {
   if (aliases.join(",") !== [...aliases].sort((a, b) => a.localeCompare(b)).join(",")) {
     throw new Error(`Expected shared org catalog entries to be sorted by alias: ${JSON.stringify(response.orgs)}`);
   }
-  if (!aliases.includes("smoke-org")) {
-    throw new Error(`Expected the configured smoke org to be included in the shared org catalog: ${JSON.stringify(response.orgs)}`);
+  if (!aliases.includes("smoke-org") || !aliases.includes("politico-staging")) {
+    throw new Error(`Expected the configured smoke and canonical staging orgs to be included in the shared org catalog: ${JSON.stringify(response.orgs)}`);
   }
+  if (aliases.includes("staging")) {
+    throw new Error(`Expected the legacy staging alias to be canonicalized away: ${JSON.stringify(response.orgs)}`);
+  }
+}
+
+function canonicalSalesforceOrgAlias(alias, instanceUrl = "") {
+  const text = String(alias || "").trim();
+  if (text.toLowerCase() !== "staging") return text;
+  return String(instanceUrl || "").includes("politico--staging.sandbox.my.salesforce.com") ? "politico-staging" : text;
 }
 
 function fakeSalesforceContactRecords() {

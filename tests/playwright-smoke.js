@@ -108,8 +108,12 @@ async function run() {
       instanceUrl: "https://qa-fifth-org.example.invalid"
     },
     {
-      orgAlias: "qa-sixth-org",
-      instanceUrl: "https://qa-sixth-org.example.invalid"
+      orgAlias: "politico-staging",
+      instanceUrl: "https://politico--staging.sandbox.my.salesforce.com"
+    },
+    {
+      orgAlias: "staging",
+      instanceUrl: "https://politico--staging.sandbox.my.salesforce.com"
     }
   ];
   let context = null;
@@ -188,17 +192,22 @@ async function run() {
     ) {
       throw new Error(`Expected the embedded dataset org to populate the selector: ${JSON.stringify(embeddedOrgState)}`);
     }
-    const expectedOptionCount = smokeSalesforceOrgs.some((org) => org.orgAlias === latestJsonLoad.sourceOrgAlias)
-      ? smokeSalesforceOrgs.length
-      : smokeSalesforceOrgs.length + 1;
+    const expectedCatalogAliases = [...new Set(smokeSalesforceOrgs.map((org) => canonicalSalesforceOrgAlias(org.orgAlias, org.instanceUrl)))];
+    const expectedOptionCount = expectedCatalogAliases.length;
     if (embeddedOrgState.aliasOptions.length !== expectedOptionCount) {
       throw new Error(`Expected every shared catalog entry to render in the dropdown: ${JSON.stringify(embeddedOrgState.aliasOptions)}`);
     }
-    if (!smokeSalesforceOrgs.every((org) => embeddedOrgState.aliasOptions.some((option) => option.alias === org.orgAlias))) {
-      throw new Error(`Expected the dropdown to include every seeded org alias: ${JSON.stringify({ expected: smokeSalesforceOrgs, actual: embeddedOrgState.aliasOptions })}`);
+    if (!expectedCatalogAliases.every((alias) => embeddedOrgState.aliasOptions.some((option) => option.alias === alias))) {
+      throw new Error(`Expected the dropdown to include every canonical org alias: ${JSON.stringify({ expected: expectedCatalogAliases, actual: embeddedOrgState.aliasOptions })}`);
     }
     if (!embeddedOrgState.aliasOptions.every((option) => option.label === option.alias && !option.label.includes("·") && !option.label.includes("https://"))) {
       throw new Error(`Expected shared org catalog dropdown entries to show alias only: ${JSON.stringify(embeddedOrgState.aliasOptions)}`);
+    }
+    if (embeddedOrgState.aliasOptions.some((option) => option.alias === "staging")) {
+      throw new Error(`Expected the legacy staging alias to be hidden from the dropdown: ${JSON.stringify(embeddedOrgState.aliasOptions)}`);
+    }
+    if (!embeddedOrgState.aliasOptions.some((option) => option.alias === "politico-staging")) {
+      throw new Error(`Expected the canonical politico-staging alias to appear in the dropdown: ${JSON.stringify(embeddedOrgState.aliasOptions)}`);
     }
     if (embeddedOrgState.aliasInputPresent || embeddedOrgState.instanceUrlInputPresent) {
       throw new Error(`Expected the inline alias and URL inputs to be removed: ${JSON.stringify(embeddedOrgState)}`);
@@ -897,6 +906,12 @@ async function run() {
     }
     await browser.close();
   }
+}
+
+function canonicalSalesforceOrgAlias(alias, instanceUrl = "") {
+  const text = String(alias || "").trim();
+  if (text.toLowerCase() !== "staging") return text;
+  return String(instanceUrl || "").includes("politico--staging.sandbox.my.salesforce.com") ? "politico-staging" : text;
 }
 
 function isExpectedBrowserConsoleMessage(message) {

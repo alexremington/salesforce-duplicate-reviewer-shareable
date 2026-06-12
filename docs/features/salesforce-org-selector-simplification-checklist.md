@@ -12,6 +12,7 @@ Use this checklist when manually verifying the selector in a launched Duplicate 
 
 - Open the shared org catalog dropdown and confirm each option shows the alias only.
 - Confirm no dropdown option includes a host name or `https://` text.
+- Confirm the canonical staging alias is `politico-staging` and that `staging` does not appear as a separate option.
 - Confirm more than five org entries are visible when the catalog contains them.
 - Confirm the separate Alias field is not present.
 - Confirm the instance URL appears as read-only text, not an input.

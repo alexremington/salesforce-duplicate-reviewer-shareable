@@ -1332,7 +1332,7 @@ function normalizeSalesforceId(value) {
 
 function normalizeRequestedSalesforceOrg(value = {}) {
   return {
-    orgAlias: String(value.orgAlias || SF_ORG_ALIAS || "").trim() || SF_ORG_ALIAS,
+    orgAlias: canonicalSalesforceOrgAlias(value.orgAlias || SF_ORG_ALIAS || "", value.instanceUrl || SF_INSTANCE_URL),
     instanceUrl: normalizeInstanceUrl(value.instanceUrl || SF_INSTANCE_URL)
   };
 }
@@ -1473,7 +1473,7 @@ function mergeSalesforceOrgRecord(existing, next) {
 
 function salesforceOrgRecord(org, fallbackAlias = "") {
   return {
-    alias: String(org.alias || fallbackAlias || org.username || "").trim(),
+    alias: canonicalSalesforceOrgAlias(org.alias || fallbackAlias || org.username || "", org.instanceUrl || ""),
     username: String(org.username || "").trim(),
     orgId: String(org.id || org.orgId || "").trim(),
     instanceUrl: String(org.instanceUrl || "").trim(),
@@ -1655,6 +1655,17 @@ function normalizeInstanceUrl(value) {
   url.search = "";
   url.hash = "";
   return url.toString().replace(/\/$/, "");
+}
+
+function canonicalSalesforceOrgAlias(value, instanceUrl = "") {
+  const alias = String(value || "").trim();
+  if (!alias) return "";
+  if (alias.toLowerCase() !== "staging") return alias;
+  return isCanonicalStagingSandboxInstanceUrl(instanceUrl) ? "politico-staging" : alias;
+}
+
+function isCanonicalStagingSandboxInstanceUrl(value) {
+  return normalizeInstanceUrl(value || SF_INSTANCE_URL) === normalizeInstanceUrl(SF_INSTANCE_URL);
 }
 
 function normalizeApiVersion(value) {
