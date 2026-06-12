@@ -62,7 +62,6 @@ On Windows, if OneDrive shows a notice that `Node.js JavaScript Runtime` is down
 
 - `Evaluate`: review match scores, mark groups Duplicate or Not Duplicate, label pairs, and export model-feedback labels.
 - `Merge`: prepare Contact merges with a master Contact radio choice plus field-level retained-value overrides.
-
 Account matching remains available in `Evaluate`. Account merge is intentionally disabled because downstream Finance dependencies require business logic outside this app.
 
 ## Salesforce Merge
