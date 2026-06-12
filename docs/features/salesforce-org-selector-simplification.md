@@ -28,6 +28,7 @@ Manifest ID: salesforce-org-selector-simplification
 - Hume design target: Minimalist, high-contrast, accessibility-first `Source` rail surface with no new panel or workflow branch.
 - Required visible state: no org selected, queued recent org, applied org, and mismatch warning.
 - Required controls: alias-only recent org dropdown, read-only instance URL display, and `Use org` action.
+- Alias-only wording: recent org options should show the Salesforce alias only, with no host or URL appended in the option text.
 - Empty, loading, success, and error states: keep the existing status and mismatch messaging, but render the instance URL as read-only text rather than an input.
 - Whitespace, no-overlap, and scroll criteria: the selector must stay inside the contained left rail and preserve the scroll path when the rail exceeds the viewport.
 - Keyboard, focus, and contrast criteria: keep the dropdown and apply action reachable with visible focus states; the read-only URL must remain legible and clearly labeled.

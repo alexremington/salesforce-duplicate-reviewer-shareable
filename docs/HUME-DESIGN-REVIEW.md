@@ -48,7 +48,8 @@ Every Duplicate Reviewer feature request should include a Hume pass before code 
 ### Salesforce Org Selector Simplification
 
 - This follow-on feature stays in the existing `Source` rail and should simplify the selector without changing the import or merge workflow.
-- The recent org dropdown should show alias only, with the selected instance URL rendered read-only and clearly labeled beneath it.
+- The recent org dropdown should show alias-only labels, with no host or instance URL text in the option rows.
+- The selected instance URL should render read-only and clearly labeled beneath the dropdown, so it reads as context rather than an editable field.
 - The selector must remain compact, truncation-safe, and hit-testable, with no extra settings panel or secondary workflow branch.
 - The read-only org surface should still preserve mismatch warnings, clear spacing, and the rail scroll path on desktop and mobile.
 
