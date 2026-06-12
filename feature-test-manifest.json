@@ -63,62 +63,49 @@
       "updatedAt": "2026-06-09T16:00:00Z"
     },
     {
-      "id": "duplicate-reviewer-pull-efficiency-path",
-      "title": "Duplicate Reviewer Pull Efficiency Path",
+      "id": "salesforce-org-selector-reflow",
+      "title": "Salesforce Org Selector Reflow",
       "app": "salesforce-duplicate-reviewer",
       "status": "complete",
       "visibleUi": true,
-      "brief": "docs/features/duplicate-reviewer-pull-efficiency-path.md",
+      "brief": "docs/features/salesforce-org-selector-reflow.md",
       "requirements": [
-        "Fail fast before expensive Salesforce pull work when auth freshness or runtime alignment is not usable.",
-        "Expose auth freshness and runtime alignment in /api/health.",
-        "Resolve the requested org through the canonical shared catalog at the pull boundary.",
-        "Reuse an in-flight pull for the same canonical org plus source signature.",
-        "Reuse a recently completed pull for the same canonical org plus source signature for a short time window.",
-        "Keep the read-only instance URL display and existing apply flow intact.",
-        "Surface compact blocked or ready feedback in the existing workflow surface instead of adding a new admin view."
+        "Keep the Salesforce org selector inside the existing Source rail.",
+        "Keep the rail as a contained column so long org labels and URLs do not widen into the workspace pane.",
+        "Preserve the existing file import workflow, recent files list, and collapse toggles.",
+        "Provide a clear scroll path when the left rail contents exceed the viewport.",
+        "Keep the org selector compact and truncation-safe on desktop, with readable stacking behavior on narrow screens."
       ],
       "acceptanceCriteria": [
-        "/api/health reports both auth freshness and runtime alignment.",
-        "A stale auth state blocks the pull path before the Salesforce job starts.",
-        "A matching in-flight pull request reuses the first request instead of starting a duplicate query.",
-        "A matching recent pull request reuses the latest cached result when the short-lived reuse window is still valid.",
-        "Canonical org resolution prefers the shared catalog alias and does not regress the existing read-only instance URL display or apply flow.",
-        "The compact status summary is visible in the normal workflow surface and clearly explains blocked versus ready state."
+        "The Source rail no longer overlaps the workspace column at supported desktop and mobile widths.",
+        "The Source, Match Controls, and Match Groups collapse toggles remain visible and clickable after the org selector renders.",
+        "The left rail scrolls when its contents exceed the viewport instead of pushing controls offscreen without a scroll path.",
+        "Long org labels, aliases, and instance URLs remain usable without widening the rail.",
+        "Existing import, match, and merge behavior remains unchanged."
       ],
-      "humeDesign": {
-        "reviewed": true,
-        "notes": "Use the existing Source rail and status affordances. Keep the new feedback compact, accessible, and inline with the current org selector surface."
-      },
       "fixtures": [
-        "A canonical staging org, a legacy staging alias that resolves to the canonical alias, and a synthetic repeated pull signature.",
-        "Fake Salesforce CLI and fake org catalog fixtures for contract tests.",
-        "Live pull wrappers should still resolve orgs through Salesforce CLI and reuse the same output when the signature matches."
+        "At least one loaded dataset with a selected Salesforce org and at least one long org label or URL value to exercise the truncation-safe layout.",
+        "No demo-only fallback should alter the org selector layout.",
+        "The org selector must continue to drive the same Salesforce org-scoped requests as before."
       ],
       "tests": [
         {
           "name": "Fast checks",
           "command": "npm run check",
           "status": "passed",
-          "evidence": "npm run check passed on 2026-06-15."
-        },
-        {
-          "name": "Cross-platform check",
-          "command": "npm run check:windows",
-          "status": "passed",
-          "evidence": "npm run check:windows passed on 2026-06-15."
+          "evidence": "npm run check passed on 2026-06-12."
         },
         {
           "name": "Targeted Playwright smoke",
           "command": "npm run smoke:ui:local",
           "status": "passed",
-          "evidence": "npm run smoke:ui:local passed on 2026-06-15."
+          "evidence": "npm run smoke:ui:local passed on 2026-06-12."
         },
         {
-          "name": "Release pipeline",
-          "command": "npm run verify:release",
+          "name": "Cross-platform smoke",
+          "command": "npm run check:windows",
           "status": "passed",
-          "evidence": "npm run closeout passed after the manifest and brief statuses were synchronized on 2026-06-15."
+          "evidence": "npm run check:windows passed on 2026-06-12."
         }
       ],
       "crossPlatform": {
@@ -126,8 +113,12 @@
         "windows": "passed"
       },
       "risks": [],
-      "createdAt": "2026-06-15T18:55:04.987Z",
-      "updatedAt": "2026-06-15T19:24:52.000Z"
+      "humeDesign": {
+        "reviewed": true,
+        "notes": "Reviewed in docs/HUME-DESIGN-REVIEW.md under Salesforce Org Selector Reflow. Keep the selector inline in Source, make the rail scrollable instead of expanding, and keep collapse toggles reachable."
+      },
+      "createdAt": "2026-06-12T13:00:00Z",
+      "updatedAt": "2026-06-12T17:38:00Z"
     },
     {
       "id": "merge-preview-confirmation",

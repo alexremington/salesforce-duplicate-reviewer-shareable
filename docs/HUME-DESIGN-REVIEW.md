@@ -11,6 +11,7 @@ Duplicate Reviewer should keep current functionality while moving toward a minim
 - The UI uses shared typography, visible focus styling, accessible labels, and Playwright checks for clickable controls.
 - Content below the viewport must remain reachable by page-level or pane-level scroll. Scroll lock is treated as a release-blocking defect.
 - Unintentional overlap between controls, side rails, comparison panes, text, and action areas is treated as a release-blocking defect.
+- The left rail must remain a contained column: long org labels and URLs should truncate or wrap inside `Source` instead of widening into the workspace column.
 - Current functionality must be preserved when Hume-inspired visual simplification is implemented.
 
 ## Feature Request Review
@@ -43,6 +44,14 @@ Every Duplicate Reviewer feature request should include a Hume pass before code 
 - The exported workspace should feel like the existing menu-driven CSV actions: compact, accessible, and immediately available once a dataset is loaded.
 - The workspace import path should restore the current review state for the matching dataset without changing the page layout or introducing a separate restore screen.
 - The topbar menu layout and scroll model must stay intact on desktop and mobile, with no new overlap between menu items or controls.
+
+### Salesforce Org Selector Reflow
+
+- This feature belongs in the existing `Source` rail and should preserve the current file import workflow instead of adding a new settings surface.
+- The Salesforce org selector should remain inline under the file drop area, but the rail itself must behave like a contained column with its own scroll path when content exceeds the viewport.
+- Long org labels, aliases, and instance URLs must be truncation-safe on desktop and may wrap on narrow screens; they should not widen the rail into the workspace column.
+- The `Source`, `Match Controls`, and `Match Groups` collapse toggles must stay visible and hit-testable after the org selector is present.
+- The left rail must keep clear spacing between the selector, recent files, and collapse controls so the full stack stays readable and scrollable.
 
 ## Build And Test Gate
 

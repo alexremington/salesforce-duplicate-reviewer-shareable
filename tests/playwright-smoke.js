@@ -148,6 +148,15 @@ async function run() {
     ) {
       throw new Error(`Expected a visible org mismatch warning after changing the target org: ${JSON.stringify(mismatchOrgState)}`);
     }
+    const sourceRailReflowState = await assertSourceRailReflow(page, {
+      longAlias: "qa-smoke-org-with-an-extremely-long-name-that-should-truncate",
+      longInstanceUrl: "https://qa-smoke-org-with-an-extremely-long-instance-url.example.invalid",
+      restoreAlias: customOrgAlias,
+      restoreInstanceUrl: customOrgInstanceUrl
+    });
+    if (!sourceRailReflowState.ok) {
+      throw new Error(`Expected the Source rail to stay contained, scroll, and keep toggles reachable: ${JSON.stringify(sourceRailReflowState)}`);
+    }
     const latestReportSummary = await reportSummaryState(page);
     const leftPaneSmallListLayout = await assertLeftPaneSmallListLayout(page);
     const humeRegionLayout = await assertHumeRegionLayout(page);
@@ -3150,6 +3159,170 @@ async function assertHumeRegionLayout(page) {
       reportSummary
     };
   });
+}
+
+async function assertSourceRailReflow(page, { longAlias, longInstanceUrl, restoreAlias, restoreInstanceUrl }) {
+  const widths = [1440, 390];
+  const viewportStates = [];
+
+  for (const width of widths) {
+    await page.setViewportSize({ width, height: 960 });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(100);
+    viewportStates.push(await page.evaluate(() => {
+      const rectFor = (selector) => {
+        const element = document.querySelector(selector);
+        const rect = element?.getBoundingClientRect();
+        return rect
+          ? { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height }
+          : null;
+      };
+      const overlaps = (a, b) => Boolean(
+        a && b &&
+        a.left < b.right &&
+        a.right > b.left &&
+        a.top < b.bottom &&
+        a.bottom > b.top
+      );
+      const controlPane = rectFor(".control-pane");
+      const workspace = rectFor(".workspace-column");
+      const orgPanel = rectFor(".org-panel");
+      const rail = document.querySelector(".control-pane");
+      const railScrollBefore = rail ? rail.scrollTop : 0;
+      if (rail) {
+        rail.scrollTop = Math.min(rail.scrollHeight - rail.clientHeight, rail.scrollTop + 240);
+      }
+      const railScrollAfter = rail ? rail.scrollTop : 0;
+      if (rail) rail.scrollTop = railScrollBefore;
+      const root = document.scrollingElement || document.documentElement;
+      const rootScrollBefore = root.scrollTop;
+      root.scrollTop = Math.min(root.scrollHeight - root.clientHeight, root.scrollTop + 240);
+      const rootScrollAfter = root.scrollTop;
+      root.scrollTop = rootScrollBefore;
+      return {
+        width: document.documentElement.clientWidth,
+        controlPane,
+        workspace,
+        orgPanel,
+        overlap: overlaps(controlPane, workspace),
+        controlPaneFitsViewport: Boolean(controlPane && controlPane.bottom <= window.innerHeight + 1),
+        orgPanelFitsRail: Boolean(controlPane && orgPanel && orgPanel.right <= controlPane.right + 1),
+        rootOverflow: root.scrollHeight > root.clientHeight + 1,
+        rootScrollChanged: rootScrollAfter > rootScrollBefore,
+        railScroll: rail
+          ? {
+              before: railScrollBefore,
+              after: railScrollAfter,
+              scrollHeight: rail.scrollHeight,
+              clientHeight: rail.clientHeight,
+              maxScrollTop: Math.max(0, rail.scrollHeight - rail.clientHeight)
+            }
+          : null
+      };
+    }));
+  }
+
+  await setSalesforceOrgSelection(page, { alias: longAlias, instanceUrl: longInstanceUrl });
+  await page.waitForTimeout(100);
+
+  const sourceToggle = page.getByRole("button", { name: "Source", exact: true });
+  const matchControlsToggle = page.getByRole("button", { name: "Match Controls", exact: true });
+  const matchGroupsToggle = page.getByRole("button", { name: "Match Groups", exact: true });
+
+  const sourceHit = await probeHitTarget(page, '[aria-controls="sourcePanelBody"]', "center");
+  const sourceBefore = await sourceToggle.getAttribute("aria-expanded");
+  await sourceToggle.click();
+  await page.waitForFunction(() => document.querySelector('[aria-controls="sourcePanelBody"]')?.getAttribute("aria-expanded") === "false", null, { timeout: 5000 });
+  const sourceCollapsed = await sourceToggle.getAttribute("aria-expanded");
+  await sourceToggle.click();
+  await page.waitForFunction(() => document.querySelector('[aria-controls="sourcePanelBody"]')?.getAttribute("aria-expanded") === "true", null, { timeout: 5000 });
+
+  await matchControlsToggle.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(100);
+  const matchControlsHit = await probeHitTarget(page, '[aria-controls="matchControlsPanelBody"]', "center");
+  const matchControlsBefore = await matchControlsToggle.getAttribute("aria-expanded");
+  await matchControlsToggle.click();
+  await page.waitForFunction(() => document.querySelector('[aria-controls="matchControlsPanelBody"]')?.getAttribute("aria-expanded") === "false", null, { timeout: 5000 });
+  const matchControlsCollapsed = await matchControlsToggle.getAttribute("aria-expanded");
+  await matchControlsToggle.click();
+  await page.waitForFunction(() => document.querySelector('[aria-controls="matchControlsPanelBody"]')?.getAttribute("aria-expanded") === "true", null, { timeout: 5000 });
+
+  await matchGroupsToggle.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(100);
+  const matchGroupsHit = await probeHitTarget(page, '[aria-controls="matchGroupsPanelBody"]', "center");
+  const matchGroupsBefore = await matchGroupsToggle.getAttribute("aria-expanded");
+  await matchGroupsToggle.click();
+  await page.waitForFunction(() => document.querySelector('[aria-controls="matchGroupsPanelBody"]')?.getAttribute("aria-expanded") === "false", null, { timeout: 5000 });
+  const matchGroupsCollapsed = await matchGroupsToggle.getAttribute("aria-expanded");
+  await matchGroupsToggle.click();
+  await page.waitForFunction(() => document.querySelector('[aria-controls="matchGroupsPanelBody"]')?.getAttribute("aria-expanded") === "true", null, { timeout: 5000 });
+
+  const orgState = await page.evaluate(() => ({
+    label: document.querySelector("#orgSelectionLabel")?.textContent?.trim() || "",
+    labelTitle: document.querySelector("#orgSelectionLabel")?.title || "",
+    status: document.querySelector("#orgStatus")?.textContent?.trim() || "",
+    controlPane: document.querySelector(".control-pane")?.getBoundingClientRect()
+      ? (() => {
+          const rect = document.querySelector(".control-pane").getBoundingClientRect();
+          return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
+        })()
+      : null,
+    orgPanel: document.querySelector(".org-panel")?.getBoundingClientRect()
+      ? (() => {
+          const rect = document.querySelector(".org-panel").getBoundingClientRect();
+          return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height };
+        })()
+      : null,
+    rail: (() => {
+      const rail = document.querySelector(".control-pane");
+      return rail
+        ? {
+            scrollTop: rail.scrollTop,
+            scrollHeight: rail.scrollHeight,
+            clientHeight: rail.clientHeight,
+            maxScrollTop: Math.max(0, rail.scrollHeight - rail.clientHeight)
+          }
+        : null;
+    })()
+  }));
+
+  await setSalesforceOrgSelection(page, { alias: restoreAlias, instanceUrl: restoreInstanceUrl });
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(100);
+
+  return {
+    ok:
+      viewportStates.length === 2 &&
+      viewportStates.every((state) => state && !state.overlap && state.orgPanelFitsRail) &&
+      viewportStates.filter((state) => state.width >= 981).every((state) => state.controlPaneFitsViewport && state.railScroll && state.railScroll.after > state.railScroll.before && state.railScroll.maxScrollTop > 0) &&
+      viewportStates.filter((state) => state.width < 981).every((state) => state.rootOverflow && state.rootScrollChanged) &&
+      Boolean(sourceHit?.text?.includes("Source")) &&
+      sourceBefore === "true" &&
+      sourceCollapsed === "false" &&
+      Boolean(matchControlsHit?.text?.includes("Match Controls")) &&
+      matchControlsBefore === "true" &&
+      matchControlsCollapsed === "false" &&
+      Boolean(matchGroupsHit?.text?.includes("Match Groups")) &&
+      matchGroupsBefore === "true" &&
+      matchGroupsCollapsed === "false" &&
+      orgState.label.includes("qa-smoke-org-with-an-extremely-long-name-that-should-truncate") &&
+      orgState.label.includes("qa-smoke-org-with-an-extremely-long-instance-url.example.invalid") &&
+      orgState.labelTitle === orgState.label &&
+      orgState.status.includes("Target org:") &&
+      Boolean(orgState.rail),
+    viewportStates,
+    sourceHit,
+    sourceBefore,
+    sourceCollapsed,
+    matchControlsHit,
+    matchControlsBefore,
+    matchControlsCollapsed,
+    matchGroupsHit,
+    matchGroupsBefore,
+    matchGroupsCollapsed,
+    orgState
+  };
 }
 
 async function assertRightPaneSingleScrollModel(page) {

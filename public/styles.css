@@ -227,6 +227,8 @@ p {
   border-radius: 18px;
   background: linear-gradient(180deg, var(--surface-panel), var(--surface-subtle));
   box-shadow: 0 10px 22px rgba(16, 32, 51, 0.06);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .org-panel-header {
@@ -234,6 +236,12 @@ p {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
+}
+
+.org-panel-header > div {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .org-panel-title {
@@ -250,22 +258,28 @@ p {
   display: block;
   font-size: 13px;
   line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .org-panel-grid {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .org-field {
   display: grid;
   gap: 6px;
+  min-width: 0;
 }
 
 .org-field span {
   font-size: 12px;
   font-weight: 800;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .org-field input,
@@ -280,6 +294,9 @@ p {
   color: var(--ink);
   box-shadow: 0 1px 0 var(--inset-highlight) inset;
   font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .org-field input:focus,
@@ -294,12 +311,16 @@ p {
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
+  min-width: 0;
 }
 
 .org-status {
+  flex: 1 1 160px;
+  min-width: 0;
   font-size: 12px;
   color: var(--muted);
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .org-warning {
@@ -385,7 +406,7 @@ p {
 .main-grid {
   flex: 1;
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
   align-items: start;
   gap: 32px;
   min-height: auto;
@@ -411,7 +432,11 @@ p {
   border-right: 0;
   background: var(--bg);
   min-height: auto;
-  overflow: visible;
+  min-width: 0;
+  max-height: calc(100svh - 144px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .panel {

@@ -1484,7 +1484,9 @@ function renderOrgSelector() {
   const hasMismatch = hasSelected && hasSource && salesforceOrgProfileKey(selected) !== salesforceOrgProfileKey(source);
 
   if (els.orgSelectionLabel) {
-    els.orgSelectionLabel.textContent = hasSelected ? salesforceOrgProfileLabel(selected) : "No org selected";
+    const selectionLabel = hasSelected ? salesforceOrgProfileLabel(selected) : "No org selected";
+    els.orgSelectionLabel.textContent = selectionLabel;
+    els.orgSelectionLabel.title = selectionLabel;
   }
   if (els.orgSelectionPill) {
     els.orgSelectionPill.textContent = hasSelected ? "Selected" : "Unselected";
@@ -1512,18 +1514,23 @@ function renderOrgSelector() {
   }
   syncOrgEditorControls();
   if (els.orgStatus) {
+    let statusText;
     if (hasSelected) {
-      els.orgStatus.textContent = hasSource
+      statusText = hasSource
         ? `Target org: ${salesforceOrgProfileLabel(selected)}`
         : `Target org: ${salesforceOrgProfileLabel(selected)}.`;
     } else {
-      els.orgStatus.textContent = "Choose a Salesforce org before refreshing or merging.";
+      statusText = "Choose a Salesforce org before refreshing or merging.";
     }
+    els.orgStatus.textContent = statusText;
+    els.orgStatus.title = statusText;
   }
   if (els.orgMismatchWarning) {
     els.orgMismatchWarning.hidden = !hasMismatch;
     if (hasMismatch) {
-      els.orgMismatchWarning.textContent = `Target org ${salesforceOrgProfileLabel(selected)} differs from the loaded dataset source ${salesforceOrgProfileLabel(source)}. Salesforce requests will use the target org.`;
+      const warningText = `Target org ${salesforceOrgProfileLabel(selected)} differs from the loaded dataset source ${salesforceOrgProfileLabel(source)}. Salesforce requests will use the target org.`;
+      els.orgMismatchWarning.textContent = warningText;
+      els.orgMismatchWarning.title = warningText;
     }
   }
 }
