@@ -65,6 +65,7 @@ Shared UI stack policy:
 - Run `npm run closeout` before handoff so the working tree is clean and every remaining file is accounted for.
 - Local Beads workspace metadata under `.beads/` is not release state; closeout reports it separately and should not be blocked by Beads-only dirt.
 - If the change is user-visible, behavior-changing, or tied to a release, include a short release note in the handoff closeout before marking the work done. Use one of: `Release note: fixed <issue> for <users>, validated by <test or smoke>.` `Release note: updated launcher/runtime behavior for <scenario>, validated by <check> and <smoke>.` `Release note: release handoff for <branch or version>, includes <summary> and <validation>.`
+- Use the shared closeout templates in `/Users/aremington/codex-workspace/docs/CLOSEOUT-TEMPLATES.md` and keep the closeout summary, release note, commit SHA(s), and one residual-risk bullet in every handoff.
 - If a change touches the launcher or cached runtime path, confirm the live served bundle still reflects the current source before committing.
 
 ## Recommended Agent Workflow
@@ -80,9 +81,7 @@ The repo-local custom agents live under `.codex/agents/`, and the reusable workf
 
 New development-task prompts are hook-enforced through `.codex/config.toml`, so no special `agentic-delivery` prefix is required. For visible UI work, mention `Hume` only when design direction is still unresolved or you want design review.
 
-OpenSpec follows the workspace-level policy in the top-level workspace `AGENTS.md`. For user-visible, behavior-changing, cross-cutting, launcher/runtime, or multi-session work, create or update the required OpenSpec proposal, spec delta or capability spec, implementation tasks, and any behavior-affecting technical decisions before coding.
-
-For plan-to-implementation work that moves to a fresh session, use the canonical shared handoff format from the workspace automation shared resources docs and keep only the implementation context the next session needs to resume work without rereading the full thread.
+OpenSpec follows the workspace-level policy in `/Users/aremington/codex-workspace/AGENTS.md`. For user-visible, behavior-changing, cross-cutting, launcher/runtime, or multi-session work, create or update the required OpenSpec proposal, spec delta or capability spec, implementation tasks, and any behavior-affecting technical decisions before coding.
 
 ## Testing Ladder
 
