@@ -18,6 +18,10 @@ Use the launcher for normal server-backed work. When latest Contact or Account e
 
 For local UI smoke tests, run `npm run sync:shared` after shared resource updates, then run `npm run setup:playwright` once from any managed app. That creates a shared Playwright install in `Automation Projects/Apps/.shared-playwright`.
 
+## Release Notes
+
+- Release note: fixed staging-alias canonicalization for Duplicate Reviewer org selection, validated by `npm run check`, `npm run check:windows`, and `npm run smoke:ui:local`.
+
 ## Updating
 
 Replace the app folder with the latest release archive, or pull the latest approved branch. Keep each user's `.env`, exports, logs, and Salesforce CLI authentication local to that user's machine.
