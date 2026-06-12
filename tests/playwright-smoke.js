@@ -46,6 +46,7 @@ const PERFORMANCE_BUDGETS = {
   largeContactCandidateAttempts: 500000
 };
 const GROUP_ITEM_VISIBLE_TIMEOUT_MS = 30000;
+const ORG_PREFERENCES_STORAGE_KEY = "salesforce-duplicate-reviewer.org-preferences-v1";
 
 async function run() {
   await fs.mkdir(outDir, { recursive: true });
@@ -78,8 +79,19 @@ async function run() {
 
   const browser = await chromium.launch();
   const messages = [];
-  const customOrgAlias = "qa-smoke-org";
-  const customOrgInstanceUrl = "https://qa-smoke-org.example.invalid";
+  const primaryOrg = {
+    orgAlias: "qa-smoke-org",
+    instanceUrl: "https://qa-smoke-org.example.invalid"
+  };
+  const secondaryOrg = {
+    orgAlias: "qa-secondary-org",
+    instanceUrl: "https://qa-secondary-org.example.invalid"
+  };
+  const longOrg = {
+    orgAlias: "qa-smoke-org-with-an-extremely-long-name-that-should-truncate",
+    instanceUrl: "https://qa-smoke-org-with-an-extremely-long-instance-url.example.invalid"
+  };
+  let context = null;
 
   try {
     const fileModeRedirect = await assertFileModeRedirect(browser);
@@ -90,7 +102,8 @@ async function run() {
     await assertMirrorRelationshipSeparated(browser, mirrorRelationshipCsvPath);
     const largeContactPerformance = await assertLargeContactCsvPerformance(browser, largeContactCsvPath);
 
-    const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+    context = await browser.newContext({ viewport: { width: 1440, height: 960 } });
+    const page = await context.newPage();
     page.on("console", (message) => {
       if (isExpectedBrowserConsoleMessage(message)) return;
       if (["error", "warning"].includes(message.type())) {
@@ -101,6 +114,25 @@ async function run() {
 
     await page.emulateMedia({ colorScheme: "light" });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.evaluate(({ storageKey, selectedOrg, recentOrgProfiles }) => {
+      localStorage.setItem(storageKey, JSON.stringify({ selectedOrg, recentOrgProfiles }));
+    }, {
+      storageKey: ORG_PREFERENCES_STORAGE_KEY,
+      selectedOrg: primaryOrg,
+      recentOrgProfiles: [primaryOrg, secondaryOrg, longOrg]
+    });
+    await page.reload({ waitUntil: "networkidle" });
+    await page.evaluate(({ selectedOrg, recentOrgProfiles }) => {
+      state.selectedOrgAlias = selectedOrg.orgAlias;
+      state.selectedInstanceUrl = selectedOrg.instanceUrl;
+      state.pendingOrgAlias = "";
+      state.pendingInstanceUrl = "";
+      state.recentOrgProfiles = recentOrgProfiles;
+      renderOrgSelector();
+    }, {
+      selectedOrg: primaryOrg,
+      recentOrgProfiles: [primaryOrg, secondaryOrg, longOrg]
+    });
     const latestRecentFiles = await assertLatestRecentFiles(page);
     const lightTheme = await themeColorState(page);
     const lightPaneSurfaces = await paneSurfaceState(page);
@@ -139,20 +171,28 @@ async function run() {
     ) {
       throw new Error(`Expected the embedded dataset org to populate the selector: ${JSON.stringify(embeddedOrgState)}`);
     }
-    await setSalesforceOrgSelection(page, { alias: customOrgAlias, instanceUrl: customOrgInstanceUrl });
+    if (!embeddedOrgState.aliasOptions.every((option) => option.label === option.alias && !option.label.includes("·") && !option.label.includes("https://"))) {
+      throw new Error(`Expected recent org dropdown entries to show alias only: ${JSON.stringify(embeddedOrgState.aliasOptions)}`);
+    }
+    if (embeddedOrgState.aliasInputPresent || embeddedOrgState.instanceUrlInputPresent) {
+      throw new Error(`Expected the inline alias and URL inputs to be removed: ${JSON.stringify(embeddedOrgState)}`);
+    }
+    if (!embeddedOrgState.instanceUrlReadonly || embeddedOrgState.instanceUrlTagName !== "DIV") {
+      throw new Error(`Expected the instance URL surface to render as read-only display content: ${JSON.stringify(embeddedOrgState)}`);
+    }
+    await setSalesforceOrgSelection(page, secondaryOrg);
     const mismatchOrgState = await orgSelectorState(page);
     if (
       !mismatchOrgState.warningVisible ||
-      !mismatchOrgState.warningText.includes(customOrgAlias) ||
+      !mismatchOrgState.warningText.includes(secondaryOrg.orgAlias) ||
       !mismatchOrgState.warningText.includes(latestJsonLoad.sourceOrgAlias)
     ) {
       throw new Error(`Expected a visible org mismatch warning after changing the target org: ${JSON.stringify(mismatchOrgState)}`);
     }
     const sourceRailReflowState = await assertSourceRailReflow(page, {
-      longAlias: "qa-smoke-org-with-an-extremely-long-name-that-should-truncate",
-      longInstanceUrl: "https://qa-smoke-org-with-an-extremely-long-instance-url.example.invalid",
-      restoreAlias: customOrgAlias,
-      restoreInstanceUrl: customOrgInstanceUrl
+      longAlias: longOrg.orgAlias,
+      longInstanceUrl: longOrg.instanceUrl,
+      restoreOrg: primaryOrg
     });
     if (!sourceRailReflowState.ok) {
       throw new Error(`Expected the Source rail to stay contained, scroll, and keep toggles reachable: ${JSON.stringify(sourceRailReflowState)}`);
@@ -203,8 +243,8 @@ async function run() {
     await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
     const fallbackOrgState = await orgSelectorState(page);
     if (
-      fallbackOrgState.alias !== customOrgAlias ||
-      fallbackOrgState.instanceUrl !== customOrgInstanceUrl ||
+      fallbackOrgState.alias !== primaryOrg.orgAlias ||
+      fallbackOrgState.instanceUrl !== primaryOrg.instanceUrl ||
       fallbackOrgState.warningVisible
     ) {
       throw new Error(`Expected manual upload to retain the most recently selected org: ${JSON.stringify(fallbackOrgState)}`);
@@ -288,8 +328,8 @@ async function run() {
       throw new Error(`Expected workspace export metadata to mark the file as a workspace record: ${JSON.stringify(workspaceExportState)}`);
     }
     if (
-      workspaceExportState.sourceDataset?.orgAlias !== customOrgAlias ||
-      workspaceExportState.sourceDataset?.instanceUrl !== customOrgInstanceUrl
+      workspaceExportState.sourceDataset?.orgAlias !== primaryOrg.orgAlias ||
+      workspaceExportState.sourceDataset?.instanceUrl !== primaryOrg.instanceUrl
     ) {
       throw new Error(`Expected workspace export to preserve the selected Salesforce org metadata: ${JSON.stringify(workspaceExportState)}`);
     }
@@ -669,10 +709,10 @@ async function run() {
       throw new Error(`Expected local Contacts without IDs to offer loading Latest Contacts: ${JSON.stringify(missingContactIdFallbackRefreshState)}`);
     }
     if (
-      mergePayload.preMergePayload?.orgAlias !== customOrgAlias ||
-      mergePayload.preMergePayload?.instanceUrl !== customOrgInstanceUrl ||
-      mergePayload.orgAlias !== customOrgAlias ||
-      mergePayload.instanceUrl !== customOrgInstanceUrl
+      mergePayload.preMergePayload?.orgAlias !== primaryOrg.orgAlias ||
+      mergePayload.preMergePayload?.instanceUrl !== primaryOrg.instanceUrl ||
+      mergePayload.orgAlias !== primaryOrg.orgAlias ||
+      mergePayload.instanceUrl !== primaryOrg.instanceUrl
     ) {
       throw new Error(`Expected Salesforce merge requests to honor the selected org: ${JSON.stringify({ preMergePayload: mergePayload.preMergePayload, mergePayload })}`);
     }
@@ -826,9 +866,6 @@ async function run() {
     }
     throw error;
   } finally {
-    if (prodContactsPage) {
-      await prodContactsPage.close().catch(() => {});
-    }
     if (context) {
       await context.close();
     }
@@ -2082,33 +2119,101 @@ async function captureDatasetExport(page, exportPath) {
   return state;
 }
 
-async function setSalesforceOrgSelection(page, { alias, instanceUrl }) {
-  await page.locator("#orgAliasInput").fill(alias);
-  await page.locator("#orgInstanceUrlInput").fill(instanceUrl);
+async function setSalesforceOrgSelection(page, org = {}) {
+  const alias = org.alias || org.orgAlias || "";
+  const instanceUrl = org.instanceUrl || org.url || org.orgInstanceUrl || "";
+  const value = orgProfileKey({ alias, instanceUrl });
+  await page.evaluate(({ targetAlias }) => {
+    const select = document.querySelector("#orgRecentSelect");
+    const option = [...(select?.options || [])].find((entry) => (entry.textContent || "").trim() === targetAlias);
+    if (!select || !option) {
+      throw new Error(`Recent org option not found for ${targetAlias}`);
+    }
+    select.value = option.value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }, { targetAlias: alias });
+  await page.waitForFunction(
+    () => !document.querySelector("#orgApplyButton")?.disabled,
+    null,
+    { timeout: 5000 }
+  );
   await page.locator("#orgApplyButton").click();
   await page.waitForFunction(
-    ([expectedAlias, expectedInstanceUrl]) => {
+    ([expectedAlias, expectedInstanceUrl, expectedValue]) => {
       const label = document.querySelector("#orgSelectionLabel")?.textContent || "";
-      const aliasValue = document.querySelector("#orgAliasInput")?.value || "";
-      const instanceValue = document.querySelector("#orgInstanceUrlInput")?.value || "";
-      return label.includes(expectedAlias) && aliasValue === expectedAlias && instanceValue === expectedInstanceUrl;
+      const recentValue = document.querySelector("#orgRecentSelect")?.value || "";
+      const instanceValue = document.querySelector("#orgInstanceUrlValue")?.textContent || "";
+      const status = document.querySelector("#orgStatus")?.textContent || "";
+      return label.includes(expectedAlias) &&
+        recentValue === expectedValue &&
+        instanceValue === expectedInstanceUrl &&
+        status.includes(expectedAlias);
     },
-    [alias, instanceUrl],
+    [alias, instanceUrl, value],
     { timeout: 5000 }
   );
 }
 
 async function orgSelectorState(page) {
-  return page.evaluate(() => ({
-    label: document.querySelector("#orgSelectionLabel")?.textContent?.trim() || "",
-    pill: document.querySelector("#orgSelectionPill")?.textContent?.trim() || "",
-    recentValue: document.querySelector("#orgRecentSelect")?.value || "",
-    alias: document.querySelector("#orgAliasInput")?.value || "",
-    instanceUrl: document.querySelector("#orgInstanceUrlInput")?.value || "",
-    status: document.querySelector("#orgStatus")?.textContent?.trim() || "",
-    warningVisible: !document.querySelector("#orgMismatchWarning")?.hidden,
-    warningText: document.querySelector("#orgMismatchWarning")?.textContent?.trim() || ""
-  }));
+  return page.evaluate(() => {
+    const recentSelect = document.querySelector("#orgRecentSelect");
+    const recentOptions = [...(recentSelect?.options || [])].map((option) => ({
+      value: option.value,
+      label: option.textContent || "",
+      title: option.title || ""
+    }));
+    return {
+      label: document.querySelector("#orgSelectionLabel")?.textContent?.trim() || "",
+      pill: document.querySelector("#orgSelectionPill")?.textContent?.trim() || "",
+      recentValue: recentSelect?.value || "",
+      alias: document.querySelector("#orgSelectionLabel")?.textContent?.trim() || "",
+      instanceUrl: document.querySelector("#orgInstanceUrlValue")?.textContent?.trim() || "",
+      instanceUrlTagName: document.querySelector("#orgInstanceUrlValue")?.tagName || "",
+      instanceUrlReadonly: document.querySelector("#orgInstanceUrlValue")?.tagName === "DIV",
+      aliasInputPresent: Boolean(document.querySelector("#orgAliasInput")),
+      instanceUrlInputPresent: Boolean(document.querySelector("#orgInstanceUrlInput")),
+      status: document.querySelector("#orgStatus")?.textContent?.trim() || "",
+      applyDisabled: Boolean(document.querySelector("#orgApplyButton")?.disabled),
+      warningVisible: !document.querySelector("#orgMismatchWarning")?.hidden,
+      warningText: document.querySelector("#orgMismatchWarning")?.textContent?.trim() || "",
+      aliasOptions: recentOptions.slice(1).map((option) => ({
+        value: option.value,
+        alias: option.label,
+        label: option.label,
+        title: option.title
+      }))
+    };
+  });
+}
+
+function orgProfileKey({ alias, instanceUrl }) {
+  return `${normalizeText(alias)}|${normalizeText(normalizeInstanceUrl(instanceUrl))}`;
+}
+
+function normalizeInstanceUrl(value = "") {
+  try {
+    const url = new URL(String(value || "").trim());
+    if (url.hostname.endsWith(".lightning.force.com")) {
+      url.hostname = url.hostname.replace(".lightning.force.com", ".my.salesforce.com");
+    }
+    url.pathname = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return "";
+  }
+}
+
+function normalizeText(value = "") {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
 }
 
 async function importWorkspaceThroughMenu(page, filePath) {
@@ -3161,7 +3266,7 @@ async function assertHumeRegionLayout(page) {
   });
 }
 
-async function assertSourceRailReflow(page, { longAlias, longInstanceUrl, restoreAlias, restoreInstanceUrl }) {
+async function assertSourceRailReflow(page, { longAlias, longInstanceUrl, restoreOrg }) {
   const widths = [1440, 390];
   const viewportStates = [];
 
@@ -3261,6 +3366,14 @@ async function assertSourceRailReflow(page, { longAlias, longInstanceUrl, restor
     label: document.querySelector("#orgSelectionLabel")?.textContent?.trim() || "",
     labelTitle: document.querySelector("#orgSelectionLabel")?.title || "",
     status: document.querySelector("#orgStatus")?.textContent?.trim() || "",
+    aliasInputPresent: Boolean(document.querySelector("#orgAliasInput")),
+    instanceUrlInputPresent: Boolean(document.querySelector("#orgInstanceUrlInput")),
+    instanceUrlTagName: document.querySelector("#orgInstanceUrlValue")?.tagName || "",
+    instanceUrlReadonly: document.querySelector("#orgInstanceUrlValue")?.tagName === "DIV",
+    recentOptions: [...document.querySelectorAll("#orgRecentSelect option")].slice(1).map((option) => ({
+      label: option.textContent || "",
+      title: option.title || ""
+    })),
     controlPane: document.querySelector(".control-pane")?.getBoundingClientRect()
       ? (() => {
           const rect = document.querySelector(".control-pane").getBoundingClientRect();
@@ -3286,7 +3399,7 @@ async function assertSourceRailReflow(page, { longAlias, longInstanceUrl, restor
     })()
   }));
 
-  await setSalesforceOrgSelection(page, { alias: restoreAlias, instanceUrl: restoreInstanceUrl });
+  await setSalesforceOrgSelection(page, restoreOrg);
   await page.setViewportSize({ width: 1440, height: 960 });
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(100);
@@ -3306,10 +3419,14 @@ async function assertSourceRailReflow(page, { longAlias, longInstanceUrl, restor
       Boolean(matchGroupsHit?.text?.includes("Match Groups")) &&
       matchGroupsBefore === "true" &&
       matchGroupsCollapsed === "false" &&
-      orgState.label.includes("qa-smoke-org-with-an-extremely-long-name-that-should-truncate") &&
-      orgState.label.includes("qa-smoke-org-with-an-extremely-long-instance-url.example.invalid") &&
+      orgState.label === "qa-smoke-org-with-an-extremely-long-name-that-should-truncate" &&
       orgState.labelTitle === orgState.label &&
       orgState.status.includes("Target org:") &&
+      !orgState.aliasInputPresent &&
+      !orgState.instanceUrlInputPresent &&
+      orgState.instanceUrlTagName === "DIV" &&
+      orgState.instanceUrlReadonly &&
+      orgState.recentOptions.every((option) => option.label === option.label.trim() && !option.label.includes("·") && !option.label.includes("https://")) &&
       Boolean(orgState.rail),
     viewportStates,
     sourceHit,

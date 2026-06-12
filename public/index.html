@@ -109,14 +109,10 @@
                     <span>Recent orgs</span>
                     <select id="orgRecentSelect"></select>
                   </label>
-                  <label class="org-field" for="orgAliasInput">
-                    <span>Alias</span>
-                    <input id="orgAliasInput" type="text" autocomplete="off" spellcheck="false" />
-                  </label>
-                  <label class="org-field" for="orgInstanceUrlInput">
+                  <div class="org-field org-field-readonly">
                     <span>Instance URL</span>
-                    <input id="orgInstanceUrlInput" type="url" autocomplete="off" spellcheck="false" />
-                  </label>
+                    <div class="org-field-value" id="orgInstanceUrlValue" aria-live="polite"></div>
+                  </div>
                 </div>
                 <div class="org-panel-actions">
                   <button class="mini-button" type="button" id="orgApplyButton">Use org</button>

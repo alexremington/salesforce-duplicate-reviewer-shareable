@@ -808,6 +808,8 @@ const state = {
   datasetMetadata: {},
   selectedOrgAlias: "",
   selectedInstanceUrl: "",
+  pendingOrgAlias: "",
+  pendingInstanceUrl: "",
   recentOrgProfiles: [],
   datasetKey: "",
   reviewStateStatus: "",
@@ -891,8 +893,7 @@ const els = {
   orgSelectionLabel: document.getElementById("orgSelectionLabel"),
   orgSelectionPill: document.getElementById("orgSelectionPill"),
   orgRecentSelect: document.getElementById("orgRecentSelect"),
-  orgAliasInput: document.getElementById("orgAliasInput"),
-  orgInstanceUrlInput: document.getElementById("orgInstanceUrlInput"),
+  orgInstanceUrlValue: document.getElementById("orgInstanceUrlValue"),
   orgApplyButton: document.getElementById("orgApplyButton"),
   orgStatus: document.getElementById("orgStatus"),
   orgMismatchWarning: document.getElementById("orgMismatchWarning"),
@@ -1037,11 +1038,9 @@ els.groupFilterBuilder.addEventListener("click", handleGroupFilterClick);
 els.groupFilterBuilder.addEventListener("change", handleGroupFilterChange);
 els.groupFilterBuilder.addEventListener("input", handleGroupFilterInput);
 els.orgRecentSelect.addEventListener("change", (event) => {
-  applyRecentOrgSelection(event.target.value);
+  queueRecentOrgSelection(event.target.value);
 });
-els.orgAliasInput.addEventListener("input", syncOrgEditorControls);
-els.orgInstanceUrlInput.addEventListener("input", syncOrgEditorControls);
-els.orgApplyButton.addEventListener("click", applySelectedOrgFromControls);
+els.orgApplyButton.addEventListener("click", applyQueuedOrgSelection);
 
 els.rerunButton.addEventListener("click", () => {
   state.mapping = readMappingFromControls();
@@ -1343,8 +1342,7 @@ function salesforceOrgProfileLabel(profile = {}) {
   const normalized = normalizeSalesforceOrgProfile(profile);
   if (!normalized.orgAlias && !normalized.instanceUrl) return "No org selected";
   if (!normalized.orgAlias) return normalized.instanceUrl;
-  if (!normalized.instanceUrl) return normalized.orgAlias;
-  return `${normalized.orgAlias} · ${salesforceOrgInstanceUrlHost(normalized.instanceUrl)}`;
+  return normalized.orgAlias;
 }
 
 function salesforceOrgInstanceUrlHost(instanceUrl = "") {
@@ -1353,6 +1351,32 @@ function salesforceOrgInstanceUrlHost(instanceUrl = "") {
   } catch {
     return String(instanceUrl || "");
   }
+}
+
+function salesforceOrgProfileSummary(profile = {}) {
+  const normalized = normalizeSalesforceOrgProfile(profile);
+  if (!normalized.orgAlias && !normalized.instanceUrl) return "No org selected";
+  if (!normalized.orgAlias) return normalized.instanceUrl;
+  if (!normalized.instanceUrl) return normalized.orgAlias;
+  return `${normalized.orgAlias} · ${salesforceOrgInstanceUrlHost(normalized.instanceUrl)}`;
+}
+
+function getQueuedSalesforceOrgProfile() {
+  return normalizeSalesforceOrgProfile({
+    orgAlias: state.pendingOrgAlias,
+    instanceUrl: state.pendingInstanceUrl
+  });
+}
+
+function getSelectedOrQueuedSalesforceOrgProfile() {
+  const queued = getQueuedSalesforceOrgProfile();
+  if (isCompleteSalesforceOrgProfile(queued)) return queued;
+  return getSelectedSalesforceOrgProfile();
+}
+
+function hasQueuedSalesforceOrgProfile() {
+  const queued = getQueuedSalesforceOrgProfile();
+  return isCompleteSalesforceOrgProfile(queued) && salesforceOrgProfileKey(queued) !== salesforceOrgProfileKey(getSelectedSalesforceOrgProfile());
 }
 
 function isCompleteSalesforceOrgProfile(profile = {}) {
@@ -1405,6 +1429,8 @@ function loadSalesforceOrgPreferences() {
       state.selectedOrgAlias = state.recentOrgProfiles[0].orgAlias;
       state.selectedInstanceUrl = state.recentOrgProfiles[0].instanceUrl;
     }
+    state.pendingOrgAlias = "";
+    state.pendingInstanceUrl = "";
   } catch (error) {
     console.warn("Salesforce org preferences could not be loaded", error);
   }
@@ -1462,10 +1488,19 @@ function setSelectedSalesforceOrgProfile(profile = {}, { persist = true } = {}) 
   const normalized = normalizeSalesforceOrgProfile(profile);
   state.selectedOrgAlias = normalized.orgAlias;
   state.selectedInstanceUrl = normalized.instanceUrl;
+  state.pendingOrgAlias = "";
+  state.pendingInstanceUrl = "";
   if (isCompleteSalesforceOrgProfile(normalized)) {
     upsertSalesforceOrgProfile(normalized);
   }
   if (persist) persistSalesforceOrgPreferences();
+  renderOrgSelector();
+}
+
+function setQueuedSalesforceOrgProfile(profile = {}) {
+  const normalized = normalizeSalesforceOrgProfile(profile);
+  state.pendingOrgAlias = normalized.orgAlias;
+  state.pendingInstanceUrl = normalized.instanceUrl;
   renderOrgSelector();
 }
 
@@ -1477,48 +1512,49 @@ function selectedSalesforceOrgMatchesLoadedDataset() {
 }
 
 function renderOrgSelector() {
-  const selected = getSelectedSalesforceOrgProfile();
+  const preview = getSelectedOrQueuedSalesforceOrgProfile();
   const source = getLoadedDatasetSalesforceOrgProfile();
-  const hasSelected = isCompleteSalesforceOrgProfile(selected);
   const hasSource = isCompleteSalesforceOrgProfile(source);
-  const hasMismatch = hasSelected && hasSource && salesforceOrgProfileKey(selected) !== salesforceOrgProfileKey(source);
+  const hasPreview = isCompleteSalesforceOrgProfile(preview);
+  const hasQueued = hasQueuedSalesforceOrgProfile();
+  const hasMismatch = hasPreview && hasSource && salesforceOrgProfileKey(preview) !== salesforceOrgProfileKey(source);
 
   if (els.orgSelectionLabel) {
-    const selectionLabel = hasSelected ? salesforceOrgProfileLabel(selected) : "No org selected";
+    const selectionLabel = hasPreview ? salesforceOrgProfileLabel(preview) : "No org selected";
     els.orgSelectionLabel.textContent = selectionLabel;
     els.orgSelectionLabel.title = selectionLabel;
   }
   if (els.orgSelectionPill) {
-    els.orgSelectionPill.textContent = hasSelected ? "Selected" : "Unselected";
-    els.orgSelectionPill.classList.toggle("is-loaded", hasSelected);
+    els.orgSelectionPill.textContent = hasPreview ? (hasQueued ? "Ready" : "Selected") : "Unselected";
+    els.orgSelectionPill.classList.toggle("is-loaded", hasPreview);
   }
   if (els.orgRecentSelect) {
     const recentProfiles = dedupeSalesforceOrgProfiles(state.recentOrgProfiles).slice(0, MAX_RECENT_ORG_PROFILES);
-    const selectedKey = hasSelected ? salesforceOrgProfileKey(selected) : "";
+    const selectedKey = hasPreview ? salesforceOrgProfileKey(preview) : "";
     const options = [];
     options.push('<option value="">Recent orgs</option>');
     recentProfiles.forEach((profile) => {
       const key = salesforceOrgProfileKey(profile);
       const label = escapeHtml(salesforceOrgProfileLabel(profile));
       const active = key === selectedKey ? "selected" : "";
-      options.push(`<option value="${escapeHtml(key)}" ${active}>${label}</option>`);
+      options.push(`<option value="${escapeHtml(key)}" title="${escapeHtml(salesforceOrgProfileSummary(profile))}" ${active}>${label}</option>`);
     });
     els.orgRecentSelect.innerHTML = options.join("");
     els.orgRecentSelect.value = selectedKey;
   }
-  if (els.orgAliasInput) {
-    els.orgAliasInput.value = selected.orgAlias;
+  if (els.orgInstanceUrlValue) {
+    const instanceValue = hasPreview ? preview.instanceUrl : "";
+    const valueText = instanceValue || "No instance URL selected";
+    els.orgInstanceUrlValue.textContent = valueText;
+    els.orgInstanceUrlValue.title = valueText;
+    els.orgInstanceUrlValue.classList.toggle("is-empty", !instanceValue);
   }
-  if (els.orgInstanceUrlInput) {
-    els.orgInstanceUrlInput.value = selected.instanceUrl;
-  }
-  syncOrgEditorControls();
   if (els.orgStatus) {
     let statusText;
-    if (hasSelected) {
-      statusText = hasSource
-        ? `Target org: ${salesforceOrgProfileLabel(selected)}`
-        : `Target org: ${salesforceOrgProfileLabel(selected)}.`;
+    if (hasPreview) {
+      statusText = hasQueued
+        ? `Ready to use: ${salesforceOrgProfileSummary(preview)}`
+        : `Target org: ${salesforceOrgProfileSummary(preview)}`;
     } else {
       statusText = "Choose a Salesforce org before refreshing or merging.";
     }
@@ -1528,36 +1564,30 @@ function renderOrgSelector() {
   if (els.orgMismatchWarning) {
     els.orgMismatchWarning.hidden = !hasMismatch;
     if (hasMismatch) {
-      const warningText = `Target org ${salesforceOrgProfileLabel(selected)} differs from the loaded dataset source ${salesforceOrgProfileLabel(source)}. Salesforce requests will use the target org.`;
+      const warningText = `Target org ${salesforceOrgProfileSummary(preview)} differs from the loaded dataset source ${salesforceOrgProfileSummary(source)}. Salesforce requests will use the target org.`;
       els.orgMismatchWarning.textContent = warningText;
       els.orgMismatchWarning.title = warningText;
     }
   }
-}
-
-function syncOrgEditorControls() {
   if (!els.orgApplyButton) return;
-  els.orgApplyButton.disabled = !isCompleteSalesforceOrgProfile({
-    orgAlias: els.orgAliasInput?.value,
-    instanceUrl: els.orgInstanceUrlInput?.value
-  });
+  els.orgApplyButton.disabled = !hasQueued;
 }
 
-function applySelectedOrgFromControls() {
-  setSelectedSalesforceOrgProfile({
-    orgAlias: els.orgAliasInput?.value || "",
-    instanceUrl: els.orgInstanceUrlInput?.value || ""
-  });
-}
-
-function applyRecentOrgSelection(value) {
+function queueRecentOrgSelection(value) {
   const recent = dedupeSalesforceOrgProfiles(state.recentOrgProfiles).slice(0, MAX_RECENT_ORG_PROFILES);
   const selected = recent.find((profile) => salesforceOrgProfileKey(profile) === String(value || ""));
   if (!selected) {
-    renderOrgSelector();
+    setQueuedSalesforceOrgProfile({});
     return;
   }
-  setSelectedSalesforceOrgProfile(selected);
+  setQueuedSalesforceOrgProfile(selected);
+}
+
+function applyQueuedOrgSelection() {
+  const queued = getQueuedSalesforceOrgProfile();
+  if (!isCompleteSalesforceOrgProfile(queued)) return;
+  if (salesforceOrgProfileKey(queued) === salesforceOrgProfileKey(getSelectedSalesforceOrgProfile())) return;
+  setSelectedSalesforceOrgProfile(queued);
 }
 
 async function loadDatasetText(datasetText, {

@@ -299,8 +299,41 @@ p {
   white-space: nowrap;
 }
 
+.org-field-readonly {
+  min-width: 0;
+}
+
+.org-field-value {
+  display: flex;
+  align-items: center;
+  min-height: 38px;
+  width: 100%;
+  min-width: 0;
+  padding: 0 12px;
+  border: 1px solid var(--line-muted);
+  border-radius: 12px;
+  background: linear-gradient(180deg, var(--surface-muted), var(--surface-input));
+  color: var(--ink);
+  box-shadow: 0 1px 0 var(--inset-highlight) inset;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: anywhere;
+}
+
+.org-field-value.is-empty {
+  color: var(--muted);
+}
+
 .org-field input:focus,
 .org-field select:focus {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+}
+
+.org-field-value:focus-visible {
   border-color: var(--accent);
   outline: 2px solid var(--accent-soft);
   outline-offset: 1px;
@@ -2977,6 +3010,10 @@ select:focus {
   .merge-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .org-field-value {
+    white-space: normal;
   }
 
   .topbar-actions {

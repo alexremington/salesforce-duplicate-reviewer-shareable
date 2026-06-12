@@ -45,6 +45,13 @@ Every Duplicate Reviewer feature request should include a Hume pass before code 
 - The workspace import path should restore the current review state for the matching dataset without changing the page layout or introducing a separate restore screen.
 - The topbar menu layout and scroll model must stay intact on desktop and mobile, with no new overlap between menu items or controls.
 
+### Salesforce Org Selector Simplification
+
+- This follow-on feature stays in the existing `Source` rail and should simplify the selector without changing the import or merge workflow.
+- The recent org dropdown should show alias only, with the selected instance URL rendered read-only and clearly labeled beneath it.
+- The selector must remain compact, truncation-safe, and hit-testable, with no extra settings panel or secondary workflow branch.
+- The read-only org surface should still preserve mismatch warnings, clear spacing, and the rail scroll path on desktop and mobile.
+
 ### Salesforce Org Selector Reflow
 
 - This feature belongs in the existing `Source` rail and should preserve the current file import workflow instead of adding a new settings surface.
