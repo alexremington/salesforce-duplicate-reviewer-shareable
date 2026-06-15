@@ -1,7 +1,7 @@
 (() => {
   const DEFAULT_SERVER_ORIGIN = "http://127.0.0.1:5180";
   const APP_ID = "salesforce-duplicate-reviewer";
-  const HEALTH_TIMEOUT_MS = 900;
+  const HEALTH_TIMEOUT_MS = 4000;
 
   if (window.location.protocol !== "file:") return;
 

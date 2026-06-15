@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const childProcess = require("node:child_process");
+const crypto = require("node:crypto");
 const fsSync = require("node:fs");
 const fs = require("node:fs/promises");
 const http = require("node:http");
@@ -38,6 +39,13 @@ const salesforceOrgListCache = new Map();
 const SALESFORCE_AUTH_CACHE_TTL_MS = 5 * 60 * 1000;
 const SALESFORCE_ORG_LIST_CACHE_TTL_MS = 5 * 60 * 1000;
 const ENDPOINT_RESPONSE_CACHE_LIMIT = 8;
+const HEALTH_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+let healthState = {
+  salesforceAuthFresh: false,
+  salesforceAuthFreshCheckedAt: "",
+  runtimeAligned: false,
+  runtimeAlignedCheckedAt: ""
+};
 const endpointResponseCache = new Map();
 const MERGE_AUDIT_LOG = path.join(OUTPUT_DIR, "salesforce-merge-log.jsonl");
 const MERGE_REPORT_LATEST_CSV = path.join(OUTPUT_DIR, "salesforce-merge-report-latest.csv");
@@ -104,6 +112,13 @@ const MERGE_REPORT_RECORD_HEADERS = [
   "System Modstamp",
   "Is Deleted"
 ];
+const RUNTIME_ALIGNMENT_FILES = [
+  "index.html",
+  "redirect-file-mode.js",
+  "app.js",
+  "matching-worker.js",
+  "styles.css"
+];
 
 const CSV_ENDPOINTS = new Map([
   [
@@ -167,6 +182,8 @@ function loadDotEnv(filePath) {
 }
 
 async function main() {
+  await primeHealthState();
+
   const server = http.createServer((request, response) => {
     handleRequest(request, response).catch((error) => {
       sendError(response, error);
@@ -176,6 +193,12 @@ async function main() {
   server.listen(PORT, HOST, () => {
     console.log(`Salesforce Duplicate Reviewer running at http://${HOST}:${PORT}`);
   });
+
+  setInterval(() => {
+    primeHealthState().catch((error) => {
+      console.warn("Salesforce Duplicate Reviewer health state could not be refreshed", error);
+    });
+  }, HEALTH_REFRESH_INTERVAL_MS).unref();
 }
 
 async function handleRequest(request, response) {
@@ -195,6 +218,10 @@ async function handleRequest(request, response) {
       brandHeaderVersion: "shared-logo-contact-v1",
       featureVersion: FEATURE_VERSION,
       apiContractVersion: API_CONTRACT_VERSION,
+      salesforceAuthFresh: healthState.salesforceAuthFresh,
+      salesforceAuthFreshCheckedAt: healthState.salesforceAuthFreshCheckedAt,
+      runtimeAligned: healthState.runtimeAligned,
+      runtimeAlignedCheckedAt: healthState.runtimeAlignedCheckedAt,
       sharedBrandLogo: true,
       headerContact: true,
       salesforceMerge: true,
@@ -785,6 +812,38 @@ async function checkSalesforcePreMergeFreshness(body) {
     mergeIds: mergeRequest.mergeIds,
     loadedRecords: mergeRequest.loadedRecords
   }), mergeRequest);
+}
+
+async function checkSalesforceAuthFreshness(options = {}) {
+  try {
+    const auth = await getSalesforceAuth({ ...options, forceRefresh: true });
+    return {
+      ok: Boolean(auth?.accessToken && auth?.instanceUrl && auth?.orgAlias),
+      checkedAt: new Date().toISOString(),
+      orgAlias: auth.orgAlias,
+      instanceUrl: auth.instanceUrl,
+      apiVersion: auth.apiVersion
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      checkedAt: new Date().toISOString(),
+      error: error.message || "Salesforce authentication is stale."
+    };
+  }
+}
+
+async function primeHealthState() {
+  const [authFresh, runtimeAligned] = await Promise.all([
+    checkSalesforceAuthFreshness(),
+    isRuntimeAligned()
+  ]);
+  healthState = {
+    salesforceAuthFresh: authFresh.ok,
+    salesforceAuthFreshCheckedAt: authFresh.checkedAt,
+    runtimeAligned,
+    runtimeAlignedCheckedAt: new Date().toISOString()
+  };
 }
 
 async function mergeSalesforceRecords(body) {
@@ -1662,6 +1721,27 @@ function canonicalSalesforceOrgAlias(value, instanceUrl = "") {
   if (!alias) return "";
   if (alias.toLowerCase() !== "staging") return alias;
   return isCanonicalStagingSandboxInstanceUrl(instanceUrl) ? "politico-staging" : alias;
+}
+
+async function isRuntimeAligned() {
+  if (!process.env.DUPLICATE_REVIEWER_STATIC_DIR) return true;
+
+  try {
+    for (const relativePath of RUNTIME_ALIGNMENT_FILES) {
+      const sourcePath = path.join(ROOT_DIR, "public", relativePath);
+      const runtimePath = path.join(STATIC_ROOT_DIR, relativePath);
+      const [source, runtime] = await Promise.all([
+        fs.readFile(sourcePath),
+        fs.readFile(runtimePath)
+      ]);
+      if (!source.equals(runtime)) {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isCanonicalStagingSandboxInstanceUrl(value) {

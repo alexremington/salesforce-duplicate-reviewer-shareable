@@ -2,6 +2,7 @@
 
 const childProcess = require("node:child_process");
 const fs = require("node:fs/promises");
+const fsSync = require("node:fs");
 const http = require("node:http");
 const net = require("node:net");
 const os = require("node:os");
@@ -51,6 +52,7 @@ const REQUEST_TIMEOUT_MS = Number(process.env.DUPLICATE_REVIEWER_CONTRACT_TIMEOU
 
 let serverProcess = null;
 let fakeSalesforceServer = null;
+let fakeSalesforceCli = "";
 let tempDir = "";
 
 main().catch((error) => {
@@ -63,7 +65,7 @@ async function main() {
   const baseUrl = `http://127.0.0.1:${port}`;
   tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "duplicate-reviewer-contracts-"));
   fakeSalesforceServer = await startFakeSalesforceServer();
-  const fakeSalesforceCli = await writeFakeSalesforceCli(tempDir, fakeSalesforceServer.baseUrl);
+  fakeSalesforceCli = await writeFakeSalesforceCli(tempDir, fakeSalesforceServer.baseUrl);
   const contactsCsvPath = path.join(tempDir, "contacts-latest.csv");
   const accountsCsvPath = path.join(tempDir, "accounts-latest.csv");
   await writeSmokeDataset(contactsCsvPath, "003T00000090001", "003T00000090002");
@@ -98,12 +100,17 @@ async function main() {
     assertEqual(health.salesforceCliApiVersionEnvIsolated, true, "health salesforceCliApiVersionEnvIsolated");
     assertEqual(health.latestStagingFiles, true, "health latestStagingFiles");
     assertEqual(health.jsonDatasets, true, "health jsonDatasets");
+    assertEqual(health.salesforceAuthFresh, true, "health salesforceAuthFresh");
+    assertEqual(health.runtimeAligned, true, "health runtimeAligned");
 
     await assertContactMirrorProvenanceGap();
     await assertRetiredMergeGateAbsent();
     await assertStaticApp(baseUrl);
     await assertLatestEndpointCaching(baseUrl);
     await assertSalesforceOrgCatalogRoute(baseUrl);
+    await assertSalesforcePullReuseRegression();
+    await assertSalesforcePullAuthPreflightRegression();
+    await assertLauncherRuntimeAlignmentRegression();
     await assertCodexTrainingLaunchCommand(baseUrl);
     await assertSalesforceExportSchemaUpgradeRegression();
     await assertAccountScopeDivergenceRegression();
@@ -1296,12 +1303,55 @@ function assertErrorCode(response, expectedCode, label) {
 function startFakeSalesforceServer() {
   return new Promise((resolve, reject) => {
     const requests = [];
+    const queryJobId = "750SMOKEQUERY000";
     const server = http.createServer((request, response) => {
       const url = new URL(request.url, "http://127.0.0.1");
       requests.push({ method: request.method, path: url.pathname });
 
       if (request.method === "GET" && url.pathname === "/services/data/v67.0/queryAll") {
         sendFakeJson(response, { totalSize: 2, done: true, records: fakeSalesforceContactRecords() });
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/services/data/v67.0/jobs/query") {
+        readRequestBody(request).then(() => {
+          sendFakeJson(response, {
+            id: queryJobId,
+            operation: "query",
+            object: "Contact",
+            state: "UploadComplete",
+            contentType: "CSV",
+            apiVersion: "v67.0"
+          });
+        }).catch((error) => {
+          response.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+          response.end(error.message || "fake Salesforce bulk query read failed");
+        });
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === `/services/data/v67.0/jobs/query/${queryJobId}`) {
+        sendFakeJson(response, {
+          id: queryJobId,
+          operation: "query",
+          object: "Contact",
+          state: "JobComplete",
+          numberRecordsProcessed: 2,
+          apiVersion: "v67.0"
+        });
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === `/services/data/v67.0/jobs/query/${queryJobId}/results`) {
+        const rows = fakeSalesforceContactRecords();
+        const header = "Id,Name,Email";
+        const csv = [header, ...rows.map((record) => [record.Id, record.Name, record.Email].join(","))].join("\n");
+        response.writeHead(200, {
+          "Content-Type": "text/csv; charset=utf-8",
+          "sforce-numberofrecords": String(rows.length),
+          "sforce-locator": "null"
+        });
+        response.end(csv);
         return;
       }
 
@@ -1460,6 +1510,164 @@ async function assertSalesforceOrgCatalogRoute(baseUrl) {
   if (aliases.includes("staging")) {
     throw new Error(`Expected the legacy staging alias to be canonicalized away: ${JSON.stringify(response.orgs)}`);
   }
+}
+
+async function assertSalesforcePullReuseRegression() {
+  const queryFile = path.join(tempDir, "salesforce-pull-reuse.soql");
+  const outDir = path.join(tempDir, "salesforce-pull-reuse");
+  await fs.writeFile(queryFile, "SELECT Id, Name FROM Contact");
+
+  const env = {
+    ...process.env,
+    SF_CLI_BIN: fakeSalesforceCli,
+    OUT_DIR: outDir,
+    SF_ORG_ALIAS: "smoke-org",
+    SF_INSTANCE_URL: fakeSalesforceServer.baseUrl,
+    SF_API_VERSION: "v67.0",
+    SF_SOQL_FILE: queryFile,
+    BULK_POLL_MS: "1",
+    DUPLICATE_REVIEWER_SKIP_BULK_QUERY: "1",
+    LATEST_CSV_NAME: "salesforce-report-latest.csv",
+    LATEST_JSON_NAME: "salesforce-report-latest.json"
+  };
+
+  const helperPath = path.join(PROJECT_DIR, "scripts", "run-salesforce-bulk-query.js");
+  const first = await runNodeScriptCapture(helperPath, env, []);
+  if (first.status !== 0 || !/Resolved canonical org smoke-org/.test(first.stdout)) {
+    throw new Error(`Expected the Salesforce pull helper to resolve the canonical org on the first run: ${JSON.stringify(first)}`);
+  }
+
+  const second = await runNodeScriptCapture(helperPath, env, []);
+  if (second.status !== 0 || !/Reusing recent Salesforce pull/.test(second.stdout)) {
+    throw new Error(`Expected a repeated Salesforce pull request to reuse the cached result: ${JSON.stringify(second)}`);
+  }
+}
+
+async function assertSalesforcePullAuthPreflightRegression() {
+  const queryFile = path.join(tempDir, "salesforce-pull-auth-preflight.soql");
+  const outDir = path.join(tempDir, "salesforce-pull-auth-preflight");
+  const staleCli = await writeStaleAuthSalesforceCli(tempDir);
+  await fs.writeFile(queryFile, "SELECT Id, Name FROM Contact");
+
+  const env = {
+    ...process.env,
+    SF_CLI_BIN: staleCli,
+    OUT_DIR: outDir,
+    SF_ORG_ALIAS: "smoke-org",
+    SF_INSTANCE_URL: fakeSalesforceServer.baseUrl,
+    SF_API_VERSION: "v67.0",
+    SF_SOQL_FILE: queryFile,
+    BULK_POLL_MS: "1",
+    DUPLICATE_REVIEWER_SKIP_BULK_QUERY: "1",
+    LATEST_CSV_NAME: "salesforce-report-latest.csv",
+    LATEST_JSON_NAME: "salesforce-report-latest.json"
+  };
+
+  const helperPath = path.join(PROJECT_DIR, "scripts", "run-salesforce-bulk-query.js");
+  const result = await runNodeScriptCapture(helperPath, env, []);
+  if (result.status === 0) {
+    throw new Error(`Expected stale Salesforce auth to fail before bulk query execution: ${JSON.stringify(result)}`);
+  }
+  if (!/show-access-token|authentication|stale auth/i.test(result.stderr + result.stdout)) {
+    throw new Error(`Expected the stale auth failure to come from the auth preflight: ${JSON.stringify(result)}`);
+  }
+  if (fsSync.existsSync(path.join(outDir, "salesforce-report-latest.csv")) || fsSync.existsSync(path.join(outDir, "salesforce-report-latest.json"))) {
+    throw new Error(`Expected stale auth preflight to stop before writing pull outputs: ${outDir}`);
+  }
+}
+
+async function assertLauncherRuntimeAlignmentRegression() {
+  const launchLocal = await fs.readFile(path.join(PROJECT_DIR, "scripts", "launch-local-app.js"), "utf8");
+  const startServer = await fs.readFile(path.join(PROJECT_DIR, "scripts", "start-reviewer-server.sh"), "utf8");
+  if (!launchLocal.includes("runtimeAligned") || !startServer.includes('"runtimeAligned":true')) {
+    throw new Error("Expected launcher/runtime checks to require runtime alignment before reusing a visible server.");
+  }
+}
+
+function runNodeScriptCapture(scriptPath, env, args) {
+  return new Promise((resolve) => {
+    const result = childProcess.spawnSync(process.execPath, [scriptPath, ...args], {
+      cwd: PROJECT_DIR,
+      env,
+      encoding: "utf8"
+    });
+    resolve({
+      status: result.status ?? 0,
+      stdout: String(result.stdout || ""),
+      stderr: String(result.stderr || "")
+    });
+  });
+}
+
+async function writeStaleAuthSalesforceCli(directory) {
+  const listPayload = JSON.stringify({
+    result: {
+      nonScratchOrgs: [
+        {
+          alias: "smoke-org",
+          username: "smoke@example.com",
+          orgId: "00DSMOKE0000001",
+          instanceUrl: fakeSalesforceServer.baseUrl,
+          loginUrl: "https://login.salesforce.com",
+          connectedStatus: "Connected"
+        }
+      ]
+    }
+  });
+  const authPayload = JSON.stringify({
+    result: {
+      alias: "smoke-org",
+      instanceUrl: fakeSalesforceServer.baseUrl,
+      accessToken: "00DSTALE"
+    }
+  });
+  const cliPath = path.join(directory, process.platform === "win32" ? "sf-stale.cmd" : "sf-stale");
+  const scriptLines = process.platform === "win32"
+    ? [
+        "@echo off",
+        "if \"%1 %2 %3\"==\"org list --json\" (",
+        `  echo ${listPayload}`,
+        "  exit /b 0",
+        ")",
+        "if \"%1 %2 %3 %4 %5\"==\"org display --target-org smoke-org --json\" (",
+        `  echo ${authPayload}`,
+        "  exit /b 0",
+        ")",
+        "if \"%1 %2 %3 %4 %5 %6\"==\"org auth show-access-token --target-org smoke-org --json\" (",
+        "  echo stale auth 1>&2",
+        "  exit /b 1",
+        ")",
+        "echo stale auth 1>&2",
+        "exit /b 1",
+        ""
+      ]
+    : [
+        "#!/bin/sh",
+        "case \"$1 $2 $3\" in",
+        "  \"org list --json\")",
+        `    printf '%s\\n' '${listPayload}'`,
+        "    exit 0",
+        "    ;;",
+        "esac",
+        "case \"$1 $2 $3 $4 $5\" in",
+        "  \"org display --target-org smoke-org --json\")",
+        `    printf '%s\\n' '${authPayload}'`,
+        "    exit 0",
+        "    ;;",
+        "esac",
+        "case \"$1 $2 $3 $4 $5 $6\" in",
+        "  \"org auth show-access-token --target-org smoke-org --json\")",
+        "    printf '%s\\n' 'stale auth' >&2",
+        "    exit 1",
+        "    ;;",
+        "esac",
+        "printf '%s\\n' 'stale auth' >&2",
+        "exit 1",
+        ""
+      ];
+  await fs.writeFile(cliPath, scriptLines.join(process.platform === "win32" ? "\r\n" : "\n"));
+  if (process.platform !== "win32") await fs.chmod(cliPath, 0o755);
+  return cliPath;
 }
 
 function canonicalSalesforceOrgAlias(alias, instanceUrl = "") {

@@ -20,6 +20,7 @@ const REQUIRED_HEALTH = {
   apiContractVersion: "duplicate-reviewer-api-contract-v2",
   latestStagingFiles: true,
   jsonDatasets: true,
+  runtimeAligned: true,
   salesforceMerge: true,
   salesforcePreMergeCheck: true,
   salesforceCliWarningSafe: true,
@@ -165,6 +166,7 @@ async function reviewerReady(port) {
     health.apiContractVersion === REQUIRED_HEALTH.apiContractVersion &&
     health.latestStagingFiles === REQUIRED_HEALTH.latestStagingFiles &&
     health.jsonDatasets === REQUIRED_HEALTH.jsonDatasets &&
+    health.runtimeAligned === REQUIRED_HEALTH.runtimeAligned &&
     health.salesforceMerge === REQUIRED_HEALTH.salesforceMerge &&
     health.salesforcePreMergeCheck === REQUIRED_HEALTH.salesforcePreMergeCheck &&
     health.salesforceCliWarningSafe === REQUIRED_HEALTH.salesforceCliWarningSafe &&

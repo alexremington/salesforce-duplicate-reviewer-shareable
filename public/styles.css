@@ -356,6 +356,14 @@ p {
   overflow-wrap: anywhere;
 }
 
+.org-status.is-ready {
+  color: var(--green, #16794c);
+}
+
+.org-status.is-blocked {
+  color: var(--red, #a61d24);
+}
+
 .org-warning {
   padding: 10px 12px;
   border-radius: 12px;

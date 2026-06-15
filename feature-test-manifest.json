@@ -1,51 +1,53 @@
 {
   "version": 1,
   "app": "salesforce-duplicate-reviewer",
-  "updatedAt": "2026-06-12T19:32:14Z",
+  "updatedAt": "2026-06-15T18:55:04.994Z",
   "features": [
     {
-      "id": "salesforce-staging-alias-canonicalization",
-      "title": "Salesforce Staging Alias Canonicalization",
+      "id": "dataset-export-with-scores",
+      "title": "Dataset Export With Scores",
       "app": "salesforce-duplicate-reviewer",
       "status": "complete",
       "visibleUi": true,
-      "brief": "docs/features/salesforce-staging-alias-canonicalization.md",
+      "brief": "docs/features/dataset-export-with-scores.md",
       "requirements": [
-        "Treat politico-staging as the canonical alias for the staging sandbox.",
-        "Collapse any legacy staging org references onto politico-staging before the selector renders.",
-        "Keep the existing instance URL, org ID, and username attached to the canonical profile.",
-        "Normalize persisted preferences, imported job metadata, and source-derived metadata to the canonical alias.",
-        "Keep the dropdown alias-only and preserve the read-only instance URL display."
+        "Keep the export shape aligned with the imported dataset rather than exporting only group summaries.",
+        "Add group and score as appended columns for each original record.",
+        "Preserve the source column order and values exactly as loaded.",
+        "Use the current computed group assignment and group score from the duplicate matching run.",
+        "Keep the export in the existing Export menu so the workflow stays familiar."
       ],
       "acceptanceCriteria": [
-        "The org catalog returns one staging entry labeled politico-staging instead of a separate legacy staging option.",
-        "The org selector never renders staging as a distinct dropdown choice.",
-        "Existing saved or imported staging references are rewritten to politico-staging when loaded by the app.",
-        "The active staging sandbox still resolves to the same instance URL and auth target.",
-        "The mismatch warning and apply flow continue to work after canonicalization."
+        "The Export menu includes a Dataset + Scores action.",
+        "The exported CSV contains one row per original record.",
+        "The exported CSV preserves the original imported columns and appends group and score.",
+        "The group value reflects the current duplicate group identifier for each row, or blank when the record is not in a duplicate group.",
+        "The score value reflects the current duplicate group score for each row, or blank when the record is not in a duplicate group.",
+        "The exported CSV can be re-imported by the existing loader without schema loss."
       ],
       "fixtures": [
-        "A loaded dataset or saved preference that still contains a legacy staging alias.",
-        "A shared org catalog entry for the same sandbox using the canonical politico-staging alias."
+        "At least one loaded Contacts and one loaded Accounts dataset with duplicate groups and non-duplicate rows so group assignment and blank-group cases can be checked.",
+        "Demo data should also produce a valid dataset export with appended group and score columns.",
+        "No Salesforce write action is required; this is a local export of the current in-memory dataset state."
       ],
       "tests": [
         {
           "name": "Fast checks",
           "command": "npm run check",
           "status": "passed",
-          "evidence": "npm run check passed on 2026-06-12."
-        },
-        {
-          "name": "Cross-platform check",
-          "command": "npm run check:windows",
-          "status": "passed",
-          "evidence": "npm run check:windows passed on 2026-06-12."
+          "evidence": "npm run check passed on 2026-06-09."
         },
         {
           "name": "Targeted Playwright smoke",
           "command": "npm run smoke:ui:local",
           "status": "passed",
-          "evidence": "npm run smoke:ui:local passed on 2026-06-12."
+          "evidence": "npm run smoke:ui:local passed on 2026-06-09."
+        },
+        {
+          "name": "Release pipeline",
+          "command": "npm run verify:release",
+          "status": "not-applicable",
+          "evidence": "Repo closeout now owns release-pipeline verification."
         }
       ],
       "crossPlatform": {
@@ -55,10 +57,191 @@
       "risks": [],
       "humeDesign": {
         "reviewed": true,
-        "notes": "This change reuses the existing selector design; no new UI direction was introduced."
+        "notes": "Reviewed in docs/HUME-DESIGN-REVIEW.md under the existing Export workflow. Keep the new Dataset + Scores action inside the current export menu, preserve the minimalist layout, and avoid adding a new panel or workflow branch."
       },
-      "createdAt": "2026-06-12T19:15:35Z",
-      "updatedAt": "2026-06-12T19:15:35Z"
+      "createdAt": "2026-06-04T18:54:01.327Z",
+      "updatedAt": "2026-06-09T16:00:00Z"
+    },
+    {
+      "id": "duplicate-reviewer-pull-efficiency-path",
+      "title": "Duplicate Reviewer Pull Efficiency Path",
+      "app": "salesforce-duplicate-reviewer",
+      "status": "in-progress",
+      "visibleUi": true,
+      "brief": "docs/features/duplicate-reviewer-pull-efficiency-path.md",
+      "requirements": [
+        "Fail fast before expensive Salesforce pull work when auth freshness or runtime alignment is not usable.",
+        "Expose auth freshness and runtime alignment in /api/health.",
+        "Resolve the requested org through the canonical shared catalog at the pull boundary.",
+        "Reuse an in-flight pull for the same canonical org plus source signature.",
+        "Reuse a recently completed pull for the same canonical org plus source signature for a short time window.",
+        "Keep the read-only instance URL display and existing apply flow intact.",
+        "Surface compact blocked or ready feedback in the existing workflow surface instead of adding a new admin view."
+      ],
+      "acceptanceCriteria": [
+        "/api/health reports both auth freshness and runtime alignment.",
+        "A stale auth state blocks the pull path before the Salesforce job starts.",
+        "A matching in-flight pull request reuses the first request instead of starting a duplicate query.",
+        "A matching recent pull request reuses the latest cached result when the short-lived reuse window is still valid.",
+        "Canonical org resolution prefers the shared catalog alias and does not regress the existing read-only instance URL display or apply flow.",
+        "The compact status summary is visible in the normal workflow surface and clearly explains blocked versus ready state."
+      ],
+      "humeDesign": {
+        "reviewed": true,
+        "notes": "Use the existing Source rail and status affordances. Keep the new feedback compact, accessible, and inline with the current org selector surface."
+      },
+      "fixtures": [
+        "A canonical staging org, a legacy staging alias that resolves to the canonical alias, and a synthetic repeated pull signature.",
+        "Fake Salesforce CLI and fake org catalog fixtures for contract tests.",
+        "Live pull wrappers should still resolve orgs through Salesforce CLI and reuse the same output when the signature matches."
+      ],
+      "tests": [
+        {
+          "name": "Fast checks",
+          "command": "npm run check",
+          "status": "todo",
+          "evidence": ""
+        },
+        {
+          "name": "Cross-platform check",
+          "command": "npm run check:windows",
+          "status": "todo",
+          "evidence": ""
+        },
+        {
+          "name": "Targeted Playwright smoke",
+          "command": "npm run smoke:ui:local",
+          "status": "todo",
+          "evidence": ""
+        },
+        {
+          "name": "Release pipeline",
+          "command": "npm run verify:release",
+          "status": "todo",
+          "evidence": ""
+        }
+      ],
+      "crossPlatform": {
+        "mac": "todo",
+        "windows": "todo"
+      },
+      "risks": [],
+      "createdAt": "2026-06-15T18:55:04.987Z",
+      "updatedAt": "2026-06-15T18:55:04.987Z"
+    },
+    {
+      "id": "merge-preview-confirmation",
+      "title": "Multi-Group Merge Preview Confirmation",
+      "app": "salesforce-duplicate-reviewer",
+      "status": "complete",
+      "visibleUi": true,
+      "brief": "docs/features/merge-preview-confirmation.md",
+      "requirements": [
+        "Replace the editable Contact Merge section with a read-only Review before confirming surface once the queued merge set is ready for confirmation.",
+        "Support reviewing multiple merge groups in sequence, using the same left-rail group navigation model as Evaluate plus inline Previous and Next controls.",
+        "Do not require the operator to individually confirm each group; provide one overall onscreen Confirm or Cancel decision for the queued merge set.",
+        "Keep the current pre-merge freshness check as the gate before any final confirmation UI is shown for the queued set.",
+        "Show a concise onscreen preview of the resulting surviving Contact for the current group in view, including the selected master Contact, duplicate Contacts that will be merged into it, and the effective retained field values for the merge-relevant Contact fields shown in the matrix."
+      ],
+      "acceptanceCriteria": [
+        "After the merge workflow enters confirmation mode and the queued groups are fresh, the merge workspace shows a Review before confirming surface instead of the editable Contact Merge controls.",
+        "The left rail and inline Previous / Next controls move between queued merge-group previews without leaving the merge workflow.",
+        "No Salesforce merge request is sent until the user clicks the overall onscreen confirmation button for the queued set.",
+        "Clicking the overall Cancel action exits confirmation mode without sending any queued merge request.",
+        "Playwright smoke coverage proves the multi-group review surface appears, supports navigation, remains read-only, and blocks merge submission until overall confirmation."
+      ],
+      "humeDesign": {
+        "reviewed": true,
+        "notes": "Reviewed in docs/HUME-DESIGN-REVIEW.md under Multi-Group Merge Preview Confirmation. Preserve the Evaluate-style left-rail navigation, use a read-only Review before confirming surface, and keep one overall confirm/cancel decision for the queued merge set."
+      },
+      "fixtures": [
+        "At least three Contact duplicate groups with differing Lead Source, company, phone, and mobile values so multi-group preview navigation is meaningful."
+      ],
+      "tests": [
+        {
+          "name": "Fast checks",
+          "command": "npm run check",
+          "status": "passed",
+          "evidence": "npm run check passed on 2026-06-09."
+        },
+        {
+          "name": "Targeted Playwright smoke",
+          "command": "npm run smoke:ui:local",
+          "status": "passed",
+          "evidence": "npm run smoke:ui:local passed on 2026-06-09."
+        },
+        {
+          "name": "Release pipeline",
+          "command": "npm run verify:release",
+          "status": "not-applicable",
+          "evidence": "Repo closeout now owns release-pipeline verification."
+        }
+      ],
+      "crossPlatform": {
+        "mac": "passed",
+        "windows": "passed"
+      },
+      "risks": [],
+      "createdAt": "2026-06-03T21:15:03.021Z",
+      "updatedAt": "2026-06-09T16:00:00Z"
+    },
+    {
+      "id": "salesforce-org-selector-reflow",
+      "title": "Salesforce Org Selector Reflow",
+      "app": "salesforce-duplicate-reviewer",
+      "status": "complete",
+      "visibleUi": true,
+      "brief": "docs/features/salesforce-org-selector-reflow.md",
+      "requirements": [
+        "Keep the Salesforce org selector inside the existing Source rail.",
+        "Keep the rail as a contained column so long org labels and URLs do not widen into the workspace pane.",
+        "Preserve the existing file import workflow, recent files list, and collapse toggles.",
+        "Provide a clear scroll path when the left rail contents exceed the viewport.",
+        "Keep the org selector compact and truncation-safe on desktop, with readable stacking behavior on narrow screens."
+      ],
+      "acceptanceCriteria": [
+        "The Source rail no longer overlaps the workspace column at supported desktop and mobile widths.",
+        "The Source, Match Controls, and Match Groups collapse toggles remain visible and clickable after the org selector renders.",
+        "The left rail scrolls when its contents exceed the viewport instead of pushing controls offscreen without a scroll path.",
+        "Long org labels, aliases, and instance URLs remain usable without widening the rail.",
+        "Existing import, match, and merge behavior remains unchanged."
+      ],
+      "fixtures": [
+        "At least one loaded dataset with a selected Salesforce org and at least one long org label or URL value to exercise the truncation-safe layout.",
+        "No demo-only fallback should alter the org selector layout.",
+        "The org selector must continue to drive the same Salesforce org-scoped requests as before."
+      ],
+      "tests": [
+        {
+          "name": "Fast checks",
+          "command": "npm run check",
+          "status": "passed",
+          "evidence": "npm run check passed on 2026-06-12."
+        },
+        {
+          "name": "Targeted Playwright smoke",
+          "command": "npm run smoke:ui:local",
+          "status": "passed",
+          "evidence": "npm run smoke:ui:local passed on 2026-06-12."
+        },
+        {
+          "name": "Cross-platform smoke",
+          "command": "npm run check:windows",
+          "status": "passed",
+          "evidence": "npm run check:windows passed on 2026-06-12."
+        }
+      ],
+      "crossPlatform": {
+        "mac": "passed",
+        "windows": "passed"
+      },
+      "risks": [],
+      "humeDesign": {
+        "reviewed": true,
+        "notes": "Reviewed in docs/HUME-DESIGN-REVIEW.md under Salesforce Org Selector Reflow. Keep the selector inline in Source, make the rail scrollable instead of expanding, and keep collapse toggles reachable."
+      },
+      "createdAt": "2026-06-12T13:00:00Z",
+      "updatedAt": "2026-06-12T17:38:00Z"
     },
     {
       "id": "salesforce-org-selector-simplification",
@@ -121,89 +304,29 @@
       "updatedAt": "2026-06-12T00:00:00Z"
     },
     {
-      "id": "dataset-export-with-scores",
-      "title": "Dataset Export With Scores",
+      "id": "salesforce-staging-alias-canonicalization",
+      "title": "Salesforce Staging Alias Canonicalization",
       "app": "salesforce-duplicate-reviewer",
       "status": "complete",
       "visibleUi": true,
-      "brief": "docs/features/dataset-export-with-scores.md",
+      "brief": "docs/features/salesforce-staging-alias-canonicalization.md",
       "requirements": [
-        "Keep the export shape aligned with the imported dataset rather than exporting only group summaries.",
-        "Add group and score as appended columns for each original record.",
-        "Preserve the source column order and values exactly as loaded.",
-        "Use the current computed group assignment and group score from the duplicate matching run.",
-        "Keep the export in the existing Export menu so the workflow stays familiar."
+        "Treat politico-staging as the canonical alias for the staging sandbox.",
+        "Collapse any legacy staging org references onto politico-staging before the selector renders.",
+        "Keep the existing instance URL, org ID, and username attached to the canonical profile.",
+        "Normalize persisted preferences, imported job metadata, and source-derived metadata to the canonical alias.",
+        "Keep the dropdown alias-only and preserve the read-only instance URL display."
       ],
       "acceptanceCriteria": [
-        "The Export menu includes a Dataset + Scores action.",
-        "The exported CSV contains one row per original record.",
-        "The exported CSV preserves the original imported columns and appends group and score.",
-        "The group value reflects the current duplicate group identifier for each row, or blank when the record is not in a duplicate group.",
-        "The score value reflects the current duplicate group score for each row, or blank when the record is not in a duplicate group.",
-        "The exported CSV can be re-imported by the existing loader without schema loss."
+        "The org catalog returns one staging entry labeled politico-staging instead of a separate legacy staging option.",
+        "The org selector never renders staging as a distinct dropdown choice.",
+        "Existing saved or imported staging references are rewritten to politico-staging when loaded by the app.",
+        "The active staging sandbox still resolves to the same instance URL and auth target.",
+        "The mismatch warning and apply flow continue to work after canonicalization."
       ],
       "fixtures": [
-        "At least one loaded Contacts and one loaded Accounts dataset with duplicate groups and non-duplicate rows so group assignment and blank-group cases can be checked.",
-        "Demo data should also produce a valid dataset export with appended group and score columns.",
-        "No Salesforce write action is required; this is a local export of the current in-memory dataset state."
-      ],
-      "tests": [
-        {
-          "name": "Fast checks",
-          "command": "npm run check",
-          "status": "passed",
-          "evidence": "npm run check passed on 2026-06-09."
-        },
-        {
-          "name": "Targeted Playwright smoke",
-          "command": "npm run smoke:ui:local",
-          "status": "passed",
-          "evidence": "npm run smoke:ui:local passed on 2026-06-09."
-        },
-        {
-          "name": "Release pipeline",
-          "command": "npm run verify:release",
-          "status": "not-applicable",
-          "evidence": "Repo closeout now owns release-pipeline verification."
-        }
-      ],
-      "crossPlatform": {
-        "mac": "passed",
-        "windows": "passed"
-      },
-      "risks": [],
-      "humeDesign": {
-        "reviewed": true,
-        "notes": "Reviewed in docs/HUME-DESIGN-REVIEW.md under the existing Export workflow. Keep the new Dataset + Scores action inside the current export menu, preserve the minimalist layout, and avoid adding a new panel or workflow branch."
-      },
-      "createdAt": "2026-06-04T18:54:01.327Z",
-      "updatedAt": "2026-06-09T16:00:00Z"
-    },
-    {
-      "id": "salesforce-org-selector-reflow",
-      "title": "Salesforce Org Selector Reflow",
-      "app": "salesforce-duplicate-reviewer",
-      "status": "complete",
-      "visibleUi": true,
-      "brief": "docs/features/salesforce-org-selector-reflow.md",
-      "requirements": [
-        "Keep the Salesforce org selector inside the existing Source rail.",
-        "Keep the rail as a contained column so long org labels and URLs do not widen into the workspace pane.",
-        "Preserve the existing file import workflow, recent files list, and collapse toggles.",
-        "Provide a clear scroll path when the left rail contents exceed the viewport.",
-        "Keep the org selector compact and truncation-safe on desktop, with readable stacking behavior on narrow screens."
-      ],
-      "acceptanceCriteria": [
-        "The Source rail no longer overlaps the workspace column at supported desktop and mobile widths.",
-        "The Source, Match Controls, and Match Groups collapse toggles remain visible and clickable after the org selector renders.",
-        "The left rail scrolls when its contents exceed the viewport instead of pushing controls offscreen without a scroll path.",
-        "Long org labels, aliases, and instance URLs remain usable without widening the rail.",
-        "Existing import, match, and merge behavior remains unchanged."
-      ],
-      "fixtures": [
-        "At least one loaded dataset with a selected Salesforce org and at least one long org label or URL value to exercise the truncation-safe layout.",
-        "No demo-only fallback should alter the org selector layout.",
-        "The org selector must continue to drive the same Salesforce org-scoped requests as before."
+        "A loaded dataset or saved preference that still contains a legacy staging alias.",
+        "A shared org catalog entry for the same sandbox using the canonical politico-staging alias."
       ],
       "tests": [
         {
@@ -213,16 +336,16 @@
           "evidence": "npm run check passed on 2026-06-12."
         },
         {
+          "name": "Cross-platform check",
+          "command": "npm run check:windows",
+          "status": "passed",
+          "evidence": "npm run check:windows passed on 2026-06-12."
+        },
+        {
           "name": "Targeted Playwright smoke",
           "command": "npm run smoke:ui:local",
           "status": "passed",
           "evidence": "npm run smoke:ui:local passed on 2026-06-12."
-        },
-        {
-          "name": "Cross-platform smoke",
-          "command": "npm run check:windows",
-          "status": "passed",
-          "evidence": "npm run check:windows passed on 2026-06-12."
         }
       ],
       "crossPlatform": {
@@ -232,66 +355,10 @@
       "risks": [],
       "humeDesign": {
         "reviewed": true,
-        "notes": "Reviewed in docs/HUME-DESIGN-REVIEW.md under Salesforce Org Selector Reflow. Keep the selector inline in Source, make the rail scrollable instead of expanding, and keep collapse toggles reachable."
+        "notes": "This change reuses the existing selector design; no new UI direction was introduced."
       },
-      "createdAt": "2026-06-12T13:00:00Z",
-      "updatedAt": "2026-06-12T17:38:00Z"
-    },
-    {
-      "id": "merge-preview-confirmation",
-      "title": "Multi-Group Merge Preview Confirmation",
-      "app": "salesforce-duplicate-reviewer",
-      "status": "complete",
-      "visibleUi": true,
-      "brief": "docs/features/merge-preview-confirmation.md",
-      "requirements": [
-        "Replace the editable Contact Merge section with a read-only Review before confirming surface once the queued merge set is ready for confirmation.",
-        "Support reviewing multiple merge groups in sequence, using the same left-rail group navigation model as Evaluate plus inline Previous and Next controls.",
-        "Do not require the operator to individually confirm each group; provide one overall onscreen Confirm or Cancel decision for the queued merge set.",
-        "Keep the current pre-merge freshness check as the gate before any final confirmation UI is shown for the queued set.",
-        "Show a concise onscreen preview of the resulting surviving Contact for the current group in view, including the selected master Contact, duplicate Contacts that will be merged into it, and the effective retained field values for the merge-relevant Contact fields shown in the matrix."
-      ],
-      "acceptanceCriteria": [
-        "After the merge workflow enters confirmation mode and the queued groups are fresh, the merge workspace shows a Review before confirming surface instead of the editable Contact Merge controls.",
-        "The left rail and inline Previous / Next controls move between queued merge-group previews without leaving the merge workflow.",
-        "No Salesforce merge request is sent until the user clicks the overall onscreen confirmation button for the queued set.",
-        "Clicking the overall Cancel action exits confirmation mode without sending any queued merge request.",
-        "Playwright smoke coverage proves the multi-group review surface appears, supports navigation, remains read-only, and blocks merge submission until overall confirmation."
-      ],
-      "humeDesign": {
-        "reviewed": true,
-        "notes": "Reviewed in docs/HUME-DESIGN-REVIEW.md under Multi-Group Merge Preview Confirmation. Preserve the Evaluate-style left-rail navigation, use a read-only Review before confirming surface, and keep one overall confirm/cancel decision for the queued merge set."
-      },
-      "fixtures": [
-        "At least three Contact duplicate groups with differing Lead Source, company, phone, and mobile values so multi-group preview navigation is meaningful."
-      ],
-      "tests": [
-        {
-          "name": "Fast checks",
-          "command": "npm run check",
-          "status": "passed",
-          "evidence": "npm run check passed on 2026-06-09."
-        },
-        {
-          "name": "Targeted Playwright smoke",
-          "command": "npm run smoke:ui:local",
-          "status": "passed",
-          "evidence": "npm run smoke:ui:local passed on 2026-06-09."
-        },
-        {
-          "name": "Release pipeline",
-          "command": "npm run verify:release",
-          "status": "not-applicable",
-          "evidence": "Repo closeout now owns release-pipeline verification."
-        }
-      ],
-      "crossPlatform": {
-        "mac": "passed",
-        "windows": "passed"
-      },
-      "risks": [],
-      "createdAt": "2026-06-03T21:15:03.021Z",
-      "updatedAt": "2026-06-09T16:00:00Z"
+      "createdAt": "2026-06-12T19:15:35Z",
+      "updatedAt": "2026-06-12T19:15:35Z"
     },
     {
       "id": "workspace-export-restore",

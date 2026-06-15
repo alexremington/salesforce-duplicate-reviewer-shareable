@@ -837,6 +837,7 @@ const state = {
   orgCatalog: [],
   orgCatalogLoading: false,
   orgCatalogWarning: "",
+  serverHealth: null,
   datasetKey: "",
   reviewStateStatus: "",
   loadError: "",
@@ -1216,6 +1217,7 @@ els.dropZone.addEventListener("drop", (event) => {
 
 setupCollapsiblePanels();
 loadSalesforceOrgPreferences();
+refreshServerHealth();
 refreshSalesforceOrgCatalog();
 initializeFileHistory().finally(() => {
   loadFromUrlIfRequested();
@@ -1548,6 +1550,21 @@ async function refreshSalesforceOrgCatalog() {
   }
 }
 
+async function refreshServerHealth() {
+  if (!isServerBackedApp()) return;
+
+  try {
+    const response = await fetch("/api/health", { cache: "no-store" });
+    if (!response.ok) throw new Error(`Health check failed: HTTP ${response.status}`);
+    state.serverHealth = await response.json();
+  } catch (error) {
+    console.warn("Salesforce Duplicate Reviewer health could not be loaded", error);
+    state.serverHealth = null;
+  } finally {
+    renderOrgSelector();
+  }
+}
+
 function renderOrgSelector() {
   const preview = getSelectedOrQueuedSalesforceOrgProfile();
   const source = getLoadedDatasetSalesforceOrgProfile();
@@ -1560,6 +1577,9 @@ function renderOrgSelector() {
   const optionsProfiles = hasPreview && !catalogProfiles.some((profile) => salesforceOrgProfileKey(profile) === selectedKey)
     ? [preview, ...catalogProfiles]
     : catalogProfiles;
+  const healthSummary = salesforceHealthSummary(state.serverHealth);
+  const healthBlocked = salesforceHealthBlockedReason(state.serverHealth);
+  const healthSupport = salesforceHealthSupportSummary(state.serverHealth);
 
   if (els.orgSelectionLabel) {
     const selectionLabel = hasPreview ? salesforceOrgProfileLabel(preview) : "No org selected";
@@ -1600,9 +1620,6 @@ function renderOrgSelector() {
       statusText = hasQueued
         ? `Ready to use: ${salesforceOrgProfileSummary(preview)}`
         : `Target org: ${salesforceOrgProfileSummary(preview)}`;
-      if (state.orgCatalogWarning) {
-        statusText += ` · ${state.orgCatalogWarning}`;
-      }
     } else if (state.orgCatalogLoading) {
       statusText = "Loading Salesforce org catalog...";
     } else if (state.orgCatalogWarning) {
@@ -1610,8 +1627,18 @@ function renderOrgSelector() {
     } else {
       statusText = "Choose a Salesforce org before refreshing or merging.";
     }
+    if (healthBlocked) {
+      statusText = `Blocked: ${healthBlocked}${healthSupport ? ` · ${healthSupport}` : ""}`;
+    } else if (healthSummary) {
+      statusText = `${statusText} · ${healthSummary}`;
+    }
+    if (state.orgCatalogWarning && !healthBlocked) {
+      statusText += ` · ${state.orgCatalogWarning}`;
+    }
     els.orgStatus.textContent = statusText;
     els.orgStatus.title = statusText;
+    els.orgStatus.classList.toggle("is-blocked", Boolean(healthBlocked));
+    els.orgStatus.classList.toggle("is-ready", Boolean(healthSummary && !healthBlocked));
   }
   if (els.orgMismatchWarning) {
     els.orgMismatchWarning.hidden = !hasMismatch;
@@ -1623,6 +1650,25 @@ function renderOrgSelector() {
   }
   if (!els.orgApplyButton) return;
   els.orgApplyButton.disabled = !hasQueued;
+}
+
+function salesforceHealthSummary(health = null) {
+  return salesforceHealthSupportSummary(health);
+}
+
+function salesforceHealthSupportSummary(health = null) {
+  if (!health) return "";
+  const parts = [];
+  if (health.salesforceAuthFresh === true) parts.push("Auth ready");
+  if (health.runtimeAligned === true) parts.push("Runtime aligned");
+  return parts.join(" · ");
+}
+
+function salesforceHealthBlockedReason(health = null) {
+  if (!health) return "";
+  if (health.runtimeAligned === false) return "Runtime stale";
+  if (health.salesforceAuthFresh === false) return "Auth blocked";
+  return "";
 }
 
 function queueRecentOrgSelection(value) {

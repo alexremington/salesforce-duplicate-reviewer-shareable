@@ -154,6 +154,10 @@ async function run() {
     });
     await page.reload({ waitUntil: "networkidle" });
     await page.waitForFunction(() => (document.querySelector("#orgRecentSelect")?.options?.length || 0) > 1, null, { timeout: 10000 });
+    await page.waitForFunction(() => {
+      const status = document.querySelector("#orgStatus")?.textContent || "";
+      return status.includes("Auth ready") && status.includes("Runtime aligned");
+    }, null, { timeout: 10000 });
     const latestRecentFiles = await assertLatestRecentFiles(page);
     const lightTheme = await themeColorState(page);
     const lightPaneSurfaces = await paneSurfaceState(page);
@@ -214,6 +218,9 @@ async function run() {
     }
     if (!embeddedOrgState.instanceUrlReadonly || embeddedOrgState.instanceUrlTagName !== "DIV") {
       throw new Error(`Expected the instance URL surface to render as read-only display content: ${JSON.stringify(embeddedOrgState)}`);
+    }
+    if (!embeddedOrgState.status.includes("Auth ready") || !embeddedOrgState.status.includes("Runtime aligned")) {
+      throw new Error(`Expected the compact org status summary to report auth and runtime readiness: ${JSON.stringify(embeddedOrgState)}`);
     }
     await setSalesforceOrgSelection(page, secondaryOrg);
     const mismatchOrgState = await orgSelectorState(page);
