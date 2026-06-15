@@ -895,6 +895,7 @@ select:focus {
   stroke-width: 2;
 }
 
+.group-status-filter,
 .label-status-filter {
   display: grid;
   gap: 6px;
@@ -907,6 +908,7 @@ select:focus {
   align-content: start;
 }
 
+.group-status-filter legend,
 .label-status-filter legend {
   padding: 0 4px;
   color: var(--ink);
@@ -914,6 +916,7 @@ select:focus {
   font-weight: 900;
 }
 
+.group-status-option,
 .label-status-option {
   display: flex;
   align-items: center;
@@ -924,16 +927,19 @@ select:focus {
   font-weight: 500;
 }
 
+.group-status-option input,
 .label-status-option input {
   flex: 0 0 auto;
   width: 16px;
   height: 16px;
 }
 
+.group-status-option span,
 .label-status-option span {
   min-width: 0;
 }
 
+.group-status-filter-footer,
 .label-status-filter-footer {
   display: flex;
   justify-content: flex-end;
@@ -1075,7 +1081,9 @@ select:focus {
 }
 
 .group-filter-toolbar {
-  display: block;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
   margin-bottom: 12px;
 }
 
@@ -1148,6 +1156,12 @@ select:focus {
 .group-item.is-label-partial {
   --group-label-border: var(--amber);
   --group-label-outline: var(--amber-soft);
+}
+
+.group-item.is-excluded {
+  --group-label-border: var(--red);
+  --group-label-outline: color-mix(in srgb, var(--red) 20%, transparent);
+  background: color-mix(in srgb, var(--red-soft) 34%, var(--surface-panel));
 }
 
 .group-item:hover,
@@ -1247,6 +1261,12 @@ select:focus {
 .match-pill.near {
   background: var(--amber-soft);
   color: var(--amber);
+}
+
+.match-pill.excluded,
+.group-status-pill.excluded {
+  background: var(--red-soft);
+  color: var(--red);
 }
 
 .decision-pill.duplicate {
@@ -2372,6 +2392,11 @@ select:focus {
 
 .merge-repair-notice .button {
   flex: 0 0 auto;
+}
+
+.excluded-merge-notice {
+  border-color: color-mix(in srgb, var(--red) 22%, var(--line));
+  background: color-mix(in srgb, var(--red-soft) 55%, var(--surface-panel));
 }
 
 .merge-result {

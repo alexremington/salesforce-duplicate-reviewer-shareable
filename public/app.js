@@ -250,6 +250,13 @@ const GROUP_LABEL_STATUS_FILTERS = [
   ["full", "Fully labeled"]
 ];
 const GROUP_LABEL_STATUS_FILTER_VALUES = new Set(GROUP_LABEL_STATUS_FILTERS.map(([value]) => value));
+const DUPLICATE_GROUP_STATUS = "duplicate";
+const EXCLUDED_GROUP_STATUS = "excluded";
+const GROUP_STATUS_FILTERS = [
+  [DUPLICATE_GROUP_STATUS, "Duplicate"],
+  [EXCLUDED_GROUP_STATUS, "Excluded"]
+];
+const GROUP_STATUS_FILTER_VALUES = new Set(GROUP_STATUS_FILTERS.map(([value]) => value));
 
 const CONTACT_NAME_PREFIXES = new Set([
   "mr",
@@ -442,6 +449,7 @@ const CONTACT_SHARED_COMPANY_EXACT_PHONE_NAME_CONFLICT_CAP = 78;
 const CONTACT_SHARED_COMPANY_EXACT_PHONE_NAME_CONFLICT_REASON = "Shared company and exact phone with conflicting names";
 const CONTACT_EMAIL_CONTEXT_CORROBORATION_MIN = 0.5;
 const CONTACT_MIRROR_RELATIONSHIP_REASON = "Entitled Contact mirror";
+const CONTACT_EXCLUDED_MERGE_BLOCK_MESSAGE = "This Contact pair is excluded by the Entitled Contact mirror rule and cannot enter the Salesforce merge queue.";
 const TRAINING_LABELS = {
   match: "Match",
   not_match: "Not Match",
@@ -787,6 +795,8 @@ const state = {
   filters: [],
   filterLogicMode: "and",
   filterLogic: "",
+  groupStatusFilters: new Set(),
+  pendingGroupStatusFilters: new Set(),
   labelStatusFilters: new Set(),
   pendingLabelStatusFilters: new Set(),
   lastMatchingStats: null,
@@ -834,6 +844,7 @@ const els = {
   thresholdMaxNumber: document.getElementById("thresholdMaxNumber"),
   thresholdValue: document.getElementById("thresholdValue"),
   highRecallMode: document.getElementById("highRecallMode"),
+  groupStatusFilter: document.getElementById("groupStatusFilter"),
   labelStatusFilter: document.getElementById("labelStatusFilter"),
   groupFilterBuilder: document.getElementById("groupFilterBuilder"),
   groupSortToggle: document.getElementById("groupSortToggle"),
@@ -954,6 +965,8 @@ els.thresholdMaxNumber.addEventListener("blur", () => syncThresholdInputs("max-n
 
 els.groupSortToggle.addEventListener("click", toggleGroupSortDirection);
 els.applyControlsButton.addEventListener("click", applyMatchControls);
+els.groupStatusFilter.addEventListener("click", handleGroupStatusFilterClick);
+els.groupStatusFilter.addEventListener("change", handleGroupStatusFilterChange);
 els.labelStatusFilter.addEventListener("click", handleLabelStatusFilterClick);
 els.labelStatusFilter.addEventListener("change", handleLabelStatusFilterChange);
 els.groupFilterBuilder.addEventListener("click", handleGroupFilterClick);
@@ -1381,6 +1394,8 @@ function clearLoadedDatasetForPendingLoad() {
   state.filters = [];
   state.filterLogic = "";
   state.filterLogicMode = "and";
+  state.groupStatusFilters.clear();
+  state.pendingGroupStatusFilters.clear();
   state.labelStatusFilters.clear();
   state.pendingLabelStatusFilters.clear();
   state.decisions.clear();
@@ -2973,9 +2988,14 @@ async function buildGroupsAsync(
   const groupsByRoot = collectPairGroups(currentPairs, rows.length, mirrorConflicts);
   await yieldToBrowser();
 
-  const groups = [...groupsByRoot.values()]
+  const duplicateGroups = [...groupsByRoot.values()]
     .map((group) => summarizeGroup(group, preparedRows, scorer))
     .filter((group) => group.score >= threshold)
+    .sort(compareGroups);
+  const excludedGroups = objectType === "contact"
+    ? buildExplicitExcludedGroups(pairs.excludedPairs || [])
+    : [];
+  const groups = [...duplicateGroups, ...excludedGroups]
     .sort(compareGroups)
     .map((group, index) => ({ ...group, id: index + 1 }));
 
@@ -3009,6 +3029,7 @@ async function buildGroupsAsync(
             preparedRows,
             fieldStats,
             pairScores: pairs.map(serializePairScore),
+            excludedPairScores: (pairs.excludedPairs || []).map(serializePairScore),
             matchingStats: {
               objectType,
               rowCount: rows.length,
@@ -3115,8 +3136,10 @@ function serializePairScore(pair) {
 }
 
 function inflatePairScore(pairScore, preparedRows) {
-  const left = preparedRows[pairScore.leftIndex];
-  const right = preparedRows[pairScore.rightIndex];
+  const leftPrepared = preparedRows[pairScore.leftIndex];
+  const rightPrepared = preparedRows[pairScore.rightIndex];
+  const left = leftPrepared?.row;
+  const right = rightPrepared?.row;
   if (!left || !right) return null;
   return {
     key: pairScore.key,
@@ -3133,13 +3156,18 @@ function inflatePairScore(pairScore, preparedRows) {
 async function scoreCandidatePairsAsync(pairKeys, preparedRows, scorer, threshold, progress = async () => {}) {
   const keys = [...pairKeys];
   const pairs = [];
+  const excludedPairs = [];
   const total = Math.max(keys.length, 1);
   let lastYield = performance.now();
 
   for (let index = 0; index < keys.length; index += 1) {
     const [leftIndex, rightIndex] = keys[index].split("|").map(Number);
     const score = scorePreparedPair(preparedRows[leftIndex], preparedRows[rightIndex], scorer);
-    if (score.value >= threshold) pairs.push(score);
+    if (score.value >= threshold) {
+      pairs.push(score);
+    } else if (isExplicitExcludedPair(score, state.objectType)) {
+      excludedPairs.push(score);
+    }
 
     const shouldYield = (index + 1) % SCORING_CHUNK_SIZE === 0 || performance.now() - lastYield >= MATCHING_YIELD_INTERVAL_MS;
     if (shouldYield) {
@@ -3155,7 +3183,54 @@ async function scoreCandidatePairsAsync(pairKeys, preparedRows, scorer, threshol
     scoredPairs: keys.length,
     retainedPairs: pairs.length
   };
+  pairs.excludedPairs = excludedPairs;
   return pairs;
+}
+
+function isExplicitExcludedPair(score, objectType = state.objectType) {
+  return objectType === "contact"
+    && Number(score?.value) === 0
+    && Array.isArray(score?.reasons)
+    && score.reasons.includes(CONTACT_MIRROR_RELATIONSHIP_REASON);
+}
+
+function buildExplicitExcludedGroups(pairs) {
+  const groups = new Map();
+  pairs.forEach((pair) => {
+    const records = [pair.left, pair.right].sort((left, right) => (left.__rowIndex ?? 0) - (right.__rowIndex ?? 0));
+    const exclusionReason = excludedReasonForPair(pair);
+    const key = explicitExcludedGroupKey(records, exclusionReason);
+    if (groups.has(key)) return;
+    groups.set(key, {
+      id: 0,
+      key,
+      records,
+      pairs: [pair],
+      bestPair: pair,
+      score: 0,
+      minPairScore: 0,
+      matchedFieldPercent: Math.round((pair.fieldMatchRatio || matchedFieldRatio(pair.fieldScores)) * 100),
+      type: EXCLUDED_GROUP_STATUS,
+      status: EXCLUDED_GROUP_STATUS,
+      reasons: [exclusionReason],
+      exclusionReason,
+      isMergeBlocked: true,
+      mergeBlockedReason: mergeBlockedReasonForExcludedGroup(exclusionReason)
+    });
+  });
+  return [...groups.values()];
+}
+
+function excludedReasonForPair(pair) {
+  return pair?.reasons?.find(Boolean) || "Excluded";
+}
+
+function explicitExcludedGroupKey(records, reason) {
+  return [
+    EXCLUDED_GROUP_STATUS,
+    normalizeText(reason),
+    records.map(recordKey).sort().join("|")
+  ].join(":");
 }
 
 function isMatchingArtifactsCacheValid(cache, rows, objectType, mapping, highRecallMode) {
@@ -3188,6 +3263,9 @@ async function rebuildGroupsFromMatchingArtifacts(cache, threshold, progress = a
   const pairs = cache.pairScores
     .map((pairScore) => inflatePairScore(pairScore, preparedRows))
     .filter(Boolean);
+  const excludedPairs = (cache.excludedPairScores || [])
+    .map((pairScore) => inflatePairScore(pairScore, preparedRows))
+    .filter(Boolean);
   const currentPairs = pairs.filter((pair) => pair.value >= threshold);
 
   await progress("Building match groups.", 82);
@@ -3195,21 +3273,20 @@ async function rebuildGroupsFromMatchingArtifacts(cache, threshold, progress = a
   const groupsByRoot = collectPairGroups(currentPairs, state.rows.length, mirrorConflicts);
   await yieldToBrowser();
 
-  const groups = [...groupsByRoot.values()]
+  const duplicateGroups = [...groupsByRoot.values()]
     .map((group) => summarizeGroup(group, preparedRows, scorer))
     .filter((group) => group.score >= threshold)
+    .sort(compareGroups);
+  const excludedGroups = cache.objectType === "contact"
+    ? buildExplicitExcludedGroups(excludedPairs)
+    : [];
+  const groups = [...duplicateGroups, ...excludedGroups]
     .sort(compareGroups)
     .map((group, index) => ({ ...group, id: index + 1 }));
 
-  const visibleGroups = groups.length || !Array.isArray(cache.groups) || !cache.groups.length
-    ? groups
-    : cache.groups
-        .filter((group) => group.score >= threshold && group.score <= state.maxThreshold)
-        .map((group, index) => ({ ...group, id: index + 1 }));
-
   await progress("Rendering duplicate groups.", 96);
   return {
-    groups: visibleGroups,
+    groups,
     matchingStats: {
       ...(cache.matchingStats || {}),
       objectType: state.objectType,
@@ -3219,7 +3296,7 @@ async function rebuildGroupsFromMatchingArtifacts(cache, threshold, progress = a
       highRecallMode: state.highRecallMode,
       elapsedMs: Math.round(performance.now() - startedAt),
       retainedPairs: currentPairs.length,
-      resultGroups: visibleGroups.length
+      resultGroups: groups.length
     },
     processingMode: "cache"
   };
@@ -3337,6 +3414,7 @@ function summarizeGroup(group, preparedRows, scorer) {
     minPairScore: Math.round(pairStats.minScore),
     matchedFieldPercent: Math.round(pairStats.averageFieldMatchRatio * 100),
     type: exact ? "exact" : "near",
+    status: DUPLICATE_GROUP_STATUS,
     reasons
   };
 }
@@ -5599,6 +5677,7 @@ function renderSource() {
   ].forEach((control) => {
     control.disabled = !datasetLoaded;
   });
+  renderGroupStatusFilterHost();
   renderLabelStatusFilterHost();
   renderFilterBuilder();
   els.fileName.textContent = state.loadingFileName || state.fileName || "Dataset import";
@@ -5822,6 +5901,7 @@ function groupRenderStateSignature(groups) {
     const decision = state.decisions.get(group.key) || "";
     return [
       group.key,
+      group.status || DUPLICATE_GROUP_STATUS,
       group.score,
       group.minPairScore,
       group.matchedFieldPercent,
@@ -5859,6 +5939,19 @@ function renderGroupSortToggle() {
   els.groupSortToggle.setAttribute("title", label);
 }
 
+function isExcludedGroup(group) {
+  return group?.status === EXCLUDED_GROUP_STATUS;
+}
+
+function groupStatusLabel(group) {
+  return isExcludedGroup(group) ? "Excluded" : "Duplicate";
+}
+
+function renderGroupStatusPill(group) {
+  if (!isExcludedGroup(group)) return "";
+  return `<span class="pill group-status-pill excluded">${escapeHtml(groupStatusLabel(group))}</span>`;
+}
+
 function renderGroupItem(group) {
   const activeRecords = getActiveGroupRecords(group);
   const separatedRecords = getSeparatedGroupRecords(group);
@@ -5866,19 +5959,26 @@ function renderGroupItem(group) {
   const labelStatus = groupTrainingLabelStatus(group);
   const groupClasses = [
     "group-item",
+    isExcludedGroup(group) ? "is-excluded" : "",
     group.key === state.selectedGroupKey ? "is-selected" : "",
     labelStatus.className
   ]
     .filter(Boolean)
     .join(" ");
   const secondaryTitle = activeRecords.slice(1).map(displayName).join(" / ") || `${formatNumber(activeRecords.length)} active records`;
-  const reason = `${group.matchedFieldPercent}% fields matched · min pair ${group.minPairScore} · ${
-    separatedRecords.length ? `${separatedRecords.length} separated` : group.reasons[0] || "Potential duplicate"
-  }`;
+  const reason = isExcludedGroup(group)
+    ? `Excluded · ${group.exclusionReason || group.reasons[0] || "Hard-zero business rule"}`
+    : `${group.matchedFieldPercent}% fields matched · min pair ${group.minPairScore} · ${
+      separatedRecords.length ? `${separatedRecords.length} separated` : group.reasons[0] || "Potential duplicate"
+    }`;
+  const fallbackPill = isExcludedGroup(group)
+    ? `<span class="pill group-status-pill excluded">${escapeHtml(groupStatusLabel(group))}</span>`
+    : `<span class="match-pill ${group.type}">${group.type}</span>`;
 
   return `
     <article
       class="${groupClasses}"
+      data-group-status="${escapeHtml(group.status || DUPLICATE_GROUP_STATUS)}"
       data-group-key="${escapeHtml(group.key)}"
       data-label-status="${escapeHtml(labelStatus.status)}"
       title="${escapeHtml(labelStatus.label)}"
@@ -5891,12 +5991,13 @@ function renderGroupItem(group) {
           </div>
           <span class="group-status-cluster">
             ${renderGroupLabelIndicator(labelStatus)}
+            ${renderGroupStatusPill(group)}
             <span class="match-pill ${group.type}">${group.score}</span>
           </span>
         </div>
         <div class="group-item-bottom">
           <span class="group-reason">${escapeHtml(reason)}</span>
-          ${decision ? `<span class="decision-pill ${decision}">${decisionLabel(decision)}</span>` : `<span class="match-pill ${group.type}">${group.type}</span>`}
+          ${decision ? `<span class="decision-pill ${decision}">${decisionLabel(decision)}</span>` : fallbackPill}
         </div>
       </button>
     </article>
@@ -5987,6 +6088,37 @@ function renderFilterBuilder() {
       });
     }).join("")}</div>
     ${filterLogicError ? `<p class="filter-error">${escapeHtml(filterLogicError)}</p>` : ""}
+  `;
+}
+
+function renderGroupStatusFilterHost() {
+  if (!els.groupStatusFilter) return;
+  els.groupStatusFilter.innerHTML = renderGroupStatusFilter(!canUseMatchFilters());
+}
+
+function renderGroupStatusFilter(disabled = false) {
+  const disabledAttribute = disabled ? "disabled" : "";
+  const applyDisabled = disabled || !groupStatusFiltersChanged() ? "disabled" : "";
+  return `
+    <fieldset class="group-status-filter" ${disabled ? "disabled" : ""}>
+      <legend>Group status</legend>
+      ${GROUP_STATUS_FILTERS
+        .map(([value, label]) => `
+          <label class="group-status-option">
+            <input
+              type="checkbox"
+              value="${escapeHtml(value)}"
+              data-group-status-filter
+              ${state.pendingGroupStatusFilters.has(value) ? "checked" : ""}
+            />
+            <span>${escapeHtml(label)}</span>
+          </label>
+        `)
+        .join("")}
+      <div class="group-status-filter-footer">
+        <button class="mini-button" type="button" data-group-status-apply ${disabledAttribute || applyDisabled}>Apply</button>
+      </div>
+    </fieldset>
   `;
 }
 
@@ -6189,6 +6321,17 @@ function handleGroupFilterClick(event) {
   renderFilterBuilder();
 }
 
+function handleGroupStatusFilterClick(event) {
+  if (!event.target.closest?.("[data-group-status-apply]") || !canUseMatchFilters()) return;
+  applyGroupStatusFilters();
+}
+
+function handleGroupStatusFilterChange(event) {
+  const groupStatusControl = event.target.closest?.("[data-group-status-filter]");
+  if (!groupStatusControl || !canUseMatchFilters()) return;
+  updatePendingGroupStatusFilter(groupStatusControl);
+}
+
 function handleLabelStatusFilterClick(event) {
   if (!event.target.closest?.("[data-label-status-apply]") || !canUseMatchFilters()) return;
   applyLabelStatusFilters();
@@ -6226,6 +6369,37 @@ function handleGroupFilterInput(event) {
   const control = event.target.closest?.("[data-filter-control]");
   if (!control) return;
   updateGroupFilterFromControl(control, { rerender: false });
+}
+
+function updatePendingGroupStatusFilter(control) {
+  const value = control.value;
+  if (!GROUP_STATUS_FILTER_VALUES.has(value)) return;
+  if (control.checked) {
+    state.pendingGroupStatusFilters.add(value);
+  } else {
+    state.pendingGroupStatusFilters.delete(value);
+  }
+  updateGroupStatusApplyButton();
+}
+
+function updateGroupStatusApplyButton() {
+  const applyButton = els.groupStatusFilter?.querySelector("[data-group-status-apply]");
+  if (!applyButton) return;
+  applyButton.disabled = !canUseMatchFilters() || !groupStatusFiltersChanged();
+}
+
+function applyGroupStatusFilters() {
+  if (!canUseMatchFilters()) return;
+  state.groupStatusFilters = new Set([...state.pendingGroupStatusFilters]);
+  visibleGroupsCache = null;
+  ensureSelectedGroupVisible();
+  renderGroups();
+  renderDetail();
+  renderGroupStatusFilterHost();
+}
+
+function groupStatusFiltersChanged() {
+  return !setsEqual(state.groupStatusFilters, state.pendingGroupStatusFilters);
 }
 
 function updatePendingLabelStatusFilter(control) {
@@ -6472,6 +6646,7 @@ function groupFiltersSignature() {
     filters: state.filters.map((filter) => normalizeGroupFilter(filter)),
     logicMode: groupFilterLogicMode(),
     logic: state.filterLogic,
+    groupStatus: [...state.groupStatusFilters].sort(),
     labelStatus: [...state.labelStatusFilters].sort()
   });
 }
@@ -6518,6 +6693,11 @@ function filterLogicExpressionForMode(entries = activeGroupFilterEntries()) {
 function activeLabelStatusFilters() {
   const selected = new Set([...state.labelStatusFilters].filter((value) => GROUP_LABEL_STATUS_FILTER_VALUES.has(value)));
   return selected.size && selected.size < GROUP_LABEL_STATUS_FILTERS.length ? selected : new Set();
+}
+
+function activeGroupStatusFilters() {
+  const selected = new Set([...state.groupStatusFilters].filter((value) => GROUP_STATUS_FILTER_VALUES.has(value)));
+  return selected.size && selected.size < GROUP_STATUS_FILTERS.length ? selected : new Set();
 }
 
 function compileGroupFilterLogic(logicText, filterCount, defaultNumbers = []) {
@@ -6890,9 +7070,11 @@ function filteredGroups() {
 function getFilteredGroups() {
   const activeEntries = activeGroupFilterEntries();
   const filterLogic = compileGroupFilterLogic(filterLogicExpressionForMode(activeEntries), state.filters.length);
+  const groupStatusFilters = activeGroupStatusFilters();
   const labelStatusFilters = activeLabelStatusFilters();
   const filtered = state.groups.filter((group) => {
     if (group.score > state.maxThreshold) return false;
+    if (groupStatusFilters.size && !groupStatusFilters.has(group.status || DUPLICATE_GROUP_STATUS)) return false;
     if (labelStatusFilters.size && !labelStatusFilters.has(groupTrainingLabelStatus(group).status)) return false;
     if (!activeEntries.length) return true;
     if (filterLogic.error) return false;
@@ -7030,6 +7212,8 @@ function detailRenderSignature({ group, activeRecords, separatedRecords, current
     mode: state.reviewMode,
     objectType: state.objectType,
     groupKey,
+    groupStatus: group.status || DUPLICATE_GROUP_STATUS,
+    exclusionReason: group.exclusionReason || "",
     decision: currentDecision,
     activeRecordKeys: activeRecords.map(recordKey),
     separatedRecordKeys: separatedRecords.map(recordKey),
@@ -7079,18 +7263,23 @@ function updateReviewModeControls() {
 }
 
 function renderPairSummary(group, currentDecision) {
+  const excluded = isExcludedGroup(group);
   return `
     <div class="pair-summary">
       <div>
-        <strong>${group.score} match score</strong>
-        <div class="match-meta">${group.matchedFieldPercent}% fields matched · min pair ${group.minPairScore}</div>
+        <strong>${excluded ? "Excluded from duplicate cluster" : `${group.score} match score`}</strong>
+        <div class="match-meta">${excluded
+          ? `0 match score · ${escapeHtml(group.exclusionReason || group.reasons[0] || "Hard-zero business rule")}`
+          : `${group.matchedFieldPercent}% fields matched · min pair ${group.minPairScore}`}</div>
         <div class="reason-list">
           ${group.reasons.map((reason) => `<span>${escapeHtml(reason)}</span>`).join("")}
         </div>
       </div>
       <div class="pair-summary-pills">
         ${renderDecisionBadge(currentDecision, "detail-decision-pill")}
-        <span class="match-pill ${group.type}">${group.type}</span>
+        ${excluded
+          ? `<span class="pill group-status-pill excluded">${escapeHtml(groupStatusLabel(group))}</span>`
+          : `<span class="match-pill ${group.type}">${group.type}</span>`}
       </div>
     </div>
   `;
@@ -7229,9 +7418,11 @@ function renderSalesforceMergePanel(group, activeRecords, currentDecision) {
       ? "1 merge group is ready for read-only review."
       : `${formatNumber(queueReadyCount)} merge groups are ready for read-only review.`
     : "Mark duplicate groups ready before starting the read-only review step.";
-  const reviewButtonLabel = queueReadyCount > 1
-    ? `Review ${formatNumber(queueReadyCount)} groups before confirming`
-    : "Review before confirming";
+  const reviewButtonLabel = mergeState.isExcludedBlocked
+    ? "Blocked from merge review"
+    : queueReadyCount > 1
+      ? `Review ${formatNumber(queueReadyCount)} groups before confirming`
+      : "Review before confirming";
 
   return `
     <section class="salesforce-merge-panel ${escapeHtml(mergeState.statusClass)}" aria-label="Salesforce merge">
@@ -7260,6 +7451,7 @@ function renderSalesforceMergePanel(group, activeRecords, currentDecision) {
           <em>will merge into the master</em>
         </div>
       </div>
+      ${mergeState.isExcludedBlocked ? renderExcludedMergeNotice(mergeState) : ""}
       ${renderMergeMatrix(group, activeRecords, mergeState, resolutionContext)}
       <div class="merge-preview">
         <span>Duplicate Contacts to merge into master</span>
@@ -7510,6 +7702,7 @@ function getMergeState(group, activeRecords, currentDecision) {
   const inFlight = mergeInFlightGroupKeys.has(group.key);
   const alreadyMerged = result?.status === "success";
   const blockedReason = mergeBlockedReason({
+    group,
     activeRecords,
     currentDecision,
     selectedId,
@@ -7527,6 +7720,8 @@ function getMergeState(group, activeRecords, currentDecision) {
     selectedRecord,
     mergeRecords,
     invalidRecords,
+    isExcludedBlocked: Boolean(group?.isMergeBlocked),
+    excludedReason: group?.exclusionReason || "",
     canRefreshMissingContactIds,
     missingContactIdRefreshUsesFallback: Boolean(missingContactIdRefreshSource?.isLatestContactsFallback),
     inFlight,
@@ -7535,16 +7730,19 @@ function getMergeState(group, activeRecords, currentDecision) {
     buttonLabel: inFlight ? "Merging..." : alreadyMerged ? "Merged" : "Merge in Salesforce",
     title: alreadyMerged
       ? `Merged into ${result.masterId || selectedId}`
-      : `${formatNumber(activeRecords.length)} ${activeRecords.length === 1 ? "Contact" : "Contacts"}: 1 master, ${formatNumber(mergeRecords.length)} ${mergeRecords.length === 1 ? "duplicate" : "duplicates"}`,
+      : group?.isMergeBlocked
+        ? "Blocked by hard-zero exclusion"
+        : `${formatNumber(activeRecords.length)} ${activeRecords.length === 1 ? "Contact" : "Contacts"}: 1 master, ${formatNumber(mergeRecords.length)} ${mergeRecords.length === 1 ? "duplicate" : "duplicates"}`,
     description: blockedReason || "Mark this group Duplicate, choose a master Contact, review field overrides, then review before confirming.",
     statusClass: mergeStatusClass(result, blockedReason, inFlight),
     statusLabel: mergeStatusLabel(result, blockedReason, inFlight)
   };
 }
 
-function mergeBlockedReason({ activeRecords, currentDecision, selectedId, invalidRecords, mergeRecords, alreadyMerged }) {
+function mergeBlockedReason({ group, activeRecords, currentDecision, selectedId, invalidRecords, mergeRecords, alreadyMerged }) {
   if (alreadyMerged) return "";
   if (state.objectType !== "contact") return "Only Contact merge is available in this app.";
+  if (group?.isMergeBlocked) return mergeBlockedReasonForExcludedGroup(group.exclusionReason);
   if (activeRecords.length < 2) return "At least two active records are required.";
   if (currentDecision !== "duplicate") return "Mark this group Duplicate before merging.";
   if (invalidRecords.length) return missingContactIdMergeMessage(invalidRecords.length);
@@ -7552,6 +7750,22 @@ function mergeBlockedReason({ activeRecords, currentDecision, selectedId, invali
   if (!mergeRecords.length) return "There are no duplicate Contacts to merge into the master.";
   if (mergeRecords.length > 20) return "Split this group first; one merge action supports up to 20 duplicate records.";
   return "";
+}
+
+function mergeBlockedReasonForExcludedGroup(reason = CONTACT_MIRROR_RELATIONSHIP_REASON) {
+  return `${CONTACT_EXCLUDED_MERGE_BLOCK_MESSAGE} Reason: ${reason}.`;
+}
+
+function renderExcludedMergeNotice(mergeState) {
+  return `
+    <div class="merge-repair-notice excluded-merge-notice">
+      <div>
+        <strong>Salesforce merge blocked</strong>
+        <span>${escapeHtml(mergeState.description)}</span>
+        <em>Review decisions and calibration labels still work for this excluded Contact pair, but the queued Salesforce merge flow is intentionally disabled.</em>
+      </div>
+    </div>
+  `;
 }
 
 function missingContactIdMergeMessage(missingCount = 0) {
@@ -9154,16 +9368,18 @@ function buildScoredDatasetRows() {
   if (!exportHeaders.includes("group")) exportHeaders.push("group");
   if (!exportHeaders.includes("score")) exportHeaders.push("score");
 
-  const groupByRowIndex = new Map();
+  const normalGroupByRowIndex = new Map();
+  const excludedGroupByRowIndex = new Map();
   state.groups.forEach((group) => {
     group.records.forEach((record) => {
-      groupByRowIndex.set(record.__rowIndex, group);
+      const target = isExcludedGroup(group) ? excludedGroupByRowIndex : normalGroupByRowIndex;
+      if (!target.has(record.__rowIndex)) target.set(record.__rowIndex, group);
     });
   });
 
   const rows = [exportHeaders];
   state.rows.forEach((record) => {
-    const group = groupByRowIndex.get(record.__rowIndex) || null;
+    const group = normalGroupByRowIndex.get(record.__rowIndex) || excludedGroupByRowIndex.get(record.__rowIndex) || null;
     rows.push(
       exportHeaders.map((header) => {
         if (header === "group") return group ? group.id : "";
