@@ -66,7 +66,7 @@
       "id": "duplicate-reviewer-pull-efficiency-path",
       "title": "Duplicate Reviewer Pull Efficiency Path",
       "app": "salesforce-duplicate-reviewer",
-      "status": "in-progress",
+      "status": "complete",
       "visibleUi": true,
       "brief": "docs/features/duplicate-reviewer-pull-efficiency-path.md",
       "requirements": [
@@ -127,7 +127,7 @@
       },
       "risks": [],
       "createdAt": "2026-06-15T18:55:04.987Z",
-      "updatedAt": "2026-06-15T18:55:04.987Z"
+      "updatedAt": "2026-06-15T19:24:52.000Z"
     },
     {
       "id": "merge-preview-confirmation",
