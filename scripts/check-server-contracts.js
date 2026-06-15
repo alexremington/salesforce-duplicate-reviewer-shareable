@@ -104,6 +104,7 @@ async function main() {
     await assertStaticApp(baseUrl);
     await assertLatestEndpointCaching(baseUrl);
     await assertCodexTrainingLaunchCommand(baseUrl);
+    await assertSalesforceExportSchemaUpgradeRegression();
     await assertAccountScopeDivergenceRegression();
     await assertAccountExactWebsiteCorroborationRegression();
     await assertContactSparseExactNameFloorRegression();
@@ -357,6 +358,154 @@ async function assertStaticApp(baseUrl) {
     !response.body.includes('app.js?v=duplicate-reviewer-cli-warning-safe-v3')
   ) {
     throw new Error(`Static app contract failed: HTTP ${response.statusCode}`);
+  }
+}
+
+async function assertSalesforceExportSchemaUpgradeRegression() {
+  const contactQueryPath = path.join(PROJECT_DIR, "queries", "report-00OVZ000003DjaH2AS.soql");
+  const accountQueryPath = path.join(PROJECT_DIR, "queries", "report-00OVZ000003Dm572AC.soql");
+  const contactQuery = await fs.readFile(contactQueryPath, "utf8");
+  const accountQuery = await fs.readFile(accountQueryPath, "utf8");
+
+  assertQueryContainsAll(contactQueryPath, contactQuery, [
+    "Id",
+    "Name",
+    "FirstName",
+    "LastName",
+    "Email",
+    "Phone",
+    "MobilePhone",
+    "OtherPhone",
+    "HomePhone",
+    "AssistantPhone",
+    "Account.Name",
+    "AccountId",
+    "MailingStreet",
+    "MailingCity",
+    "MailingState",
+    "MailingPostalCode",
+    "MailingCountry",
+    "Title",
+    "Department",
+    "LeadSource",
+    "CreatedDate"
+  ]);
+  assertQueryContainsAll(accountQueryPath, accountQuery, [
+    "Id",
+    "Name",
+    "Website",
+    "Phone",
+    "BillingStreet",
+    "BillingCity",
+    "BillingState",
+    "BillingPostalCode",
+    "BillingCountry",
+    "CurrencyIsoCode",
+    "Parent.Name",
+    "Industry",
+    "Type",
+    "NumberOfEmployees",
+    "AnnualRevenue",
+    "DUNSNumber",
+    "Ultimate_Parent_Account__c"
+  ]);
+
+  const api = loadAppApi();
+
+  const contactHeaders = [
+    "Id",
+    "Name",
+    "FirstName",
+    "LastName",
+    "Email",
+    "Phone",
+    "MobilePhone",
+    "OtherPhone",
+    "HomePhone",
+    "AssistantPhone",
+    "Account.Name",
+    "AccountId",
+    "MailingStreet",
+    "MailingCity",
+    "MailingState",
+    "MailingPostalCode",
+    "MailingCountry",
+    "Title",
+    "Department",
+    "LeadSource",
+    "CreatedDate"
+  ];
+  const contactParsed = api.parseCsv([
+    contactHeaders.join(","),
+    "003E00000000001,Taylor Mason,Taylor,Mason,taylor.mason@example.com,555-010-1000,555-010-1001,555-010-1002,555-010-1003,555-010-1004,Northstar Analytics,001E00000000001,1 Main St,Dallas,TX,75201,United States,Director,Sales,Web,2026-04-01T00:00:00.000+0000",
+    "003E00000000002,Taylor Mason,Taylor,Mason,taylor.mason@example.com,555-010-1000,555-010-1001,555-010-1002,555-010-1003,555-010-1004,Northstar Analytics,001E00000000001,9 Other St,Austin,TX,73301,United States,Director,Sales,Web,2026-04-01T00:00:00.000+0000"
+  ].join("\n"));
+  const contactRows = contactParsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
+  const contactMapping = api.autoMapHeaders(contactParsed.headers, api.OBJECT_CONFIG.contact.fields);
+  const contactPrepared = api.prepareRows(contactRows, "contact", contactMapping);
+  if (
+    contactMapping.accountId !== "AccountId" ||
+    contactMapping.otherPhone !== "OtherPhone" ||
+    contactMapping.mailingStreet !== "MailingStreet" ||
+    contactMapping.mailingPostalCode !== "MailingPostalCode"
+  ) {
+    throw new Error(`Contact export schema upgrade auto-mapping failed: ${JSON.stringify(contactMapping)}`);
+  }
+  const contactAligned = api.scoreContactPair(contactPrepared[0], contactPrepared[0]);
+  const contactConflict = api.scoreContactPair(contactPrepared[0], contactPrepared[1]);
+  if (!(contactAligned.value > contactConflict.value) || contactConflict.fieldScores.mailingStreet == null) {
+    throw new Error(
+      `Contact mailing-address regression failed: aligned=${contactAligned.value}, conflict=${contactConflict.value}, fields=${JSON.stringify(contactConflict.fieldScores)}`
+    );
+  }
+
+  const accountHeaders = [
+    "Id",
+    "Name",
+    "Website",
+    "Phone",
+    "BillingStreet",
+    "BillingCity",
+    "BillingState",
+    "BillingPostalCode",
+    "BillingCountry",
+    "CurrencyIsoCode",
+    "Parent.Name",
+    "Industry",
+    "Type",
+    "NumberOfEmployees",
+    "AnnualRevenue",
+    "DUNSNumber",
+    "Ultimate_Parent_Account__c"
+  ];
+  const accountParsed = api.parseCsv([
+    accountHeaders.join(","),
+    "001E00000000001,Northstar Analytics,northstar.example,555-020-1000,1 Main St,Dallas,TX,75201,United States,USD,Northstar Holdings,Media,Company,45,1200000,123456789,Northstar Holdings",
+    "001E00000000002,Northstar Analytics,northstar.example,555-020-1999,1 Main St,Dallas,TX,75201,United States,USD,Northstar Holdings,Media,Company,45,1200000,123456789,Northstar Holdings"
+  ].join("\n"));
+  const accountRows = accountParsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
+  const accountMapping = api.autoMapHeaders(accountParsed.headers, api.OBJECT_CONFIG.account.fields);
+  const accountPrepared = api.prepareRows(accountRows, "account", accountMapping);
+  if (
+    accountMapping.phone !== "Phone" ||
+    accountMapping.ultimateParentAccount !== "Parent.Name" ||
+    accountMapping.accountCurrency !== "CurrencyIsoCode"
+  ) {
+    throw new Error(`Account export schema upgrade auto-mapping failed: ${JSON.stringify(accountMapping)}`);
+  }
+  const accountAligned = api.scoreAccountPair(accountPrepared[0], accountPrepared[0], api.buildFieldStats(accountPrepared, "account"));
+  const accountConflict = api.scoreAccountPair(accountPrepared[0], accountPrepared[1], api.buildFieldStats(accountPrepared, "account"));
+  if (!(accountAligned.value > accountConflict.value) || accountConflict.fieldScores.phone == null) {
+    throw new Error(
+      `Account phone regression failed: aligned=${accountAligned.value}, conflict=${accountConflict.value}, fields=${JSON.stringify(accountConflict.fieldScores)}`
+    );
+  }
+}
+
+function assertQueryContainsAll(queryPath, queryText, fields) {
+  const missing = fields.filter((field) => !queryText.includes(field));
+  if (missing.length) {
+    throw new Error(`Query schema regression failed for ${queryPath}: missing ${missing.join(", ")}`);
   }
 }
 

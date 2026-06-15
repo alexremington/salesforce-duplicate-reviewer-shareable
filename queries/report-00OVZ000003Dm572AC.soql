@@ -2,11 +2,18 @@ SELECT
   Id,
   Name,
   Website,
+  Phone,
   BillingStreet,
   BillingCity,
   BillingState,
   BillingPostalCode,
   BillingCountry,
   CurrencyIsoCode,
+  Parent.Name,
+  Industry,
+  Type,
+  NumberOfEmployees,
+  AnnualRevenue,
+  DUNSNumber,
   Ultimate_Parent_Account__c
 FROM Account

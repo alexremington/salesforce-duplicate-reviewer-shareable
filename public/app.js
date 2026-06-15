@@ -21,12 +21,21 @@ const OBJECT_CONFIG = {
       "firstName",
       "lastName",
       "company",
+      "accountId",
       "email",
       "leadSource",
       "ziPersonLinkedInUrl",
       "phone",
       "ziPhone",
-      "mobile"
+      "mobile",
+      "otherPhone",
+      "homePhone",
+      "assistantPhone",
+      "mailingStreet",
+      "mailingCity",
+      "mailingState",
+      "mailingPostalCode",
+      "mailingCountry"
     ],
     fields: {
       recordId: ["id", "contact id", "salesforce id", "sf id"],
@@ -34,9 +43,30 @@ const OBJECT_CONFIG = {
       firstName: ["first name", "firstname", "first_name", "given name"],
       lastName: ["last name", "lastname", "last_name", "surname", "family name"],
       company: ["company", "account name", "account", "organization", "org"],
+      accountId: ["account id", "accountid"],
       email: ["email", "email address", "emailaddress", "e-mail"],
+      phone: ["phone", "phone number", "business phone", "work phone"],
+      mobile: ["mobile", "mobile phone", "mobile number", "cell", "cell phone"],
+      otherPhone: ["other phone", "otherphone"],
+      homePhone: ["home phone", "homephone"],
+      assistantPhone: ["assistant phone", "assistantphone"],
+      mailingStreet: ["mailing street", "mailingstreet", "mailing address", "street"],
+      mailingCity: ["mailing city", "mailingcity", "city"],
+      mailingState: ["mailing state/province", "mailing state", "mailingstate", "state", "province"],
+      mailingPostalCode: [
+        "mailing zip/postal code",
+        "mailing postal code",
+        "mailingpostalcode",
+        "mailing zip",
+        "postal code",
+        "zip",
+        "zip code"
+      ],
+      mailingCountry: ["mailing country", "mailingcountry", "country"],
       leadSource: ["lead source", "leadsource", "lead_source", "source"],
       createdDate: ["created date", "createddate", "created", "created at", "created on", "create date"],
+      title: ["title", "job title", "role"],
+      department: ["department", "dept"],
       ziPersonLinkedInUrl: [
         "zi person linkedin url",
         "zi person linkedin",
@@ -46,7 +76,6 @@ const OBJECT_CONFIG = {
         "linkedin url",
         "linkedin"
       ],
-      phone: ["phone", "phone number", "business phone", "work phone"],
       ziPhone: [
         "zi phone",
         "zoominfo phone",
@@ -73,6 +102,7 @@ const OBJECT_CONFIG = {
     displayFields: [
       "name",
       "website",
+      "phone",
       "billingStreet",
       "billingCity",
       "billingState",
@@ -85,6 +115,7 @@ const OBJECT_CONFIG = {
       recordId: ["id", "account id", "salesforce id", "sf id"],
       name: ["name", "account", "account name", "accountname", "company", "organization"],
       website: ["website", "web site", "url", "domain"],
+      phone: ["phone", "business phone", "main phone", "office phone"],
       billingStreet: ["billing street", "billingstreet", "billing address", "street"],
       billingCity: ["billing city", "billingcity", "city"],
       billingState: ["billing state/province", "billing state", "billingstate", "state", "province"],
@@ -108,6 +139,9 @@ const OBJECT_CONFIG = {
         "polcurrencyfieldc"
       ],
       ultimateParentAccount: [
+        "parent name",
+        "parent.name",
+        "parent",
         "ultimate parent account",
         "ultimate parent",
         "ultimate parent account name",
@@ -116,7 +150,12 @@ const OBJECT_CONFIG = {
         "ultimate_parent_account__c",
         "ultimateparentaccount",
         "ultimateparentaccountc"
-      ]
+      ],
+      industry: ["industry"],
+      type: ["type"],
+      numberOfEmployees: ["number of employees", "numberofemployees", "employees"],
+      annualRevenue: ["annual revenue", "annualrevenue", "revenue"],
+      dunsNumber: ["duns number", "dunsnumber"]
     }
   }
 };
@@ -127,13 +166,24 @@ const FIELD_LABELS = {
   firstName: "First Name",
   lastName: "Last Name",
   company: "Company",
+  accountId: "Account ID",
   email: "Email",
   leadSource: "Lead Source",
   createdDate: "Created Date",
+  title: "Title",
+  department: "Department",
   ziPersonLinkedInUrl: "ZI Person LinkedIn URL",
   phone: "Phone",
   ziPhone: "ZI Phone",
   mobile: "Mobile",
+  otherPhone: "Other Phone",
+  homePhone: "Home Phone",
+  assistantPhone: "Assistant Phone",
+  mailingStreet: "Mailing Street",
+  mailingCity: "Mailing City",
+  mailingState: "Mailing State",
+  mailingPostalCode: "Mailing Postal Code",
+  mailingCountry: "Mailing Country",
   mirrorOf: "Mirror of",
   name: "Name",
   website: "Website",
@@ -143,7 +193,12 @@ const FIELD_LABELS = {
   billingPostalCode: "Billing Postal Code",
   billingCountry: "Billing Country",
   accountCurrency: "Account Currency",
-  ultimateParentAccount: "Ultimate Parent Account"
+  ultimateParentAccount: "Ultimate Parent Account",
+  industry: "Industry",
+  type: "Type",
+  numberOfEmployees: "Number of Employees",
+  annualRevenue: "Annual Revenue",
+  dunsNumber: "DUNS Number"
 };
 const CONTACT_LEAD_SOURCE_FIELD = "leadSource";
 const CONTACT_CREATED_DATE_FIELD = "createdDate";
@@ -407,6 +462,7 @@ const EXACT_HEADER_ONLY_ALIASES = new Set([
 const ACCOUNT_FIELD_WEIGHTS = {
   accountCurrency: 35,
   website: 25,
+  phone: 10,
   billingStreet: 8,
   billingCity: 3,
   billingState: 2,
@@ -420,6 +476,7 @@ const ACCOUNT_COMMON_POSITIVE_MIN_FACTORS = {
   billingCountry: 0.2,
   billingState: 0.25,
   billingCity: 0.45,
+  phone: 0.45,
   ultimateParentAccount: 0.35,
   website: 0.45,
   billingPostalCode: 0.75,
@@ -427,11 +484,16 @@ const ACCOUNT_COMMON_POSITIVE_MIN_FACTORS = {
 };
 const ACCOUNT_PARENT_BRANCH_DIVERGENCE_CAP = 78;
 const CONTACT_FIELD_WEIGHTS = {
-  nameSequence: 40,
-  ziPersonLinkedInUrl: 25,
+  nameSequence: 36,
+  ziPersonLinkedInUrl: 8,
   phone: 18,
-  email: 12,
-  company: 10
+  email: 24,
+  company: 32,
+  mailingStreet: 6,
+  mailingCity: 4,
+  mailingState: 3,
+  mailingPostalCode: 5,
+  mailingCountry: 2
 };
 const CONTACT_COMPANY_DIVERGENCE_THRESHOLD = 0.5;
 const CONTACT_COMPANY_DIVERGENCE_CAP = 80;
@@ -3547,10 +3609,19 @@ function prepareContactRow(row, mapping, index, cache) {
   const phone = cachedTransform(cache.phones, getValue(row, mapping.phone), normalizePhone);
   const ziPhone = cachedTransform(cache.phones, getValue(row, mapping.ziPhone), normalizePhone);
   const mobile = cachedTransform(cache.phones, getValue(row, mapping.mobile), normalizePhone);
+  const otherPhone = cachedTransform(cache.phones, getValue(row, mapping.otherPhone), normalizePhone);
+  const homePhone = cachedTransform(cache.phones, getValue(row, mapping.homePhone), normalizePhone);
+  const assistantPhone = cachedTransform(cache.phones, getValue(row, mapping.assistantPhone), normalizePhone);
+  const mailingStreet = cachedTransform(cache.addresses, getValue(row, mapping.mailingStreet), normalizeAddress);
+  const mailingCity = cachedTransform(cache.text, getValue(row, mapping.mailingCity), normalizeText);
+  const mailingState = cachedTransform(cache.states, getValue(row, mapping.mailingState), normalizeState);
+  const mailingPostalCode = cachedTransform(cache.postalCodes, getValue(row, mapping.mailingPostalCode), normalizePostalCode);
+  const mailingPostalPrefix = mailingPostalCode.slice(0, 5);
+  const mailingCountry = cachedTransform(cache.countries, getValue(row, mapping.mailingCountry), normalizeCountry);
   const recordIdKey = normalizeContactReferenceKey(getValue(row, mapping.recordId));
   const recordNameKey = normalizeContactReferenceKey(name.fullName || [name.firstName, name.lastName].filter(Boolean).join(" "));
   const mirrorOfKey = normalizeContactReferenceKey(getValue(row, mapping.mirrorOf));
-  const phones = [phone, ziPhone, mobile].filter((value, phoneIndex, values) => {
+  const phones = [phone, ziPhone, mobile, otherPhone, homePhone, assistantPhone].filter((value, phoneIndex, values) => {
     return value && values.indexOf(value) === phoneIndex;
   });
 
@@ -3567,12 +3638,22 @@ function prepareContactRow(row, mapping, index, cache) {
     recordNameKey,
     mirrorOfKey,
     company: cachedTransform(cache.companies, getValue(row, mapping.company), normalizeCompany),
+    accountId: getValue(row, mapping.accountId),
     email,
     domain: emailDomain(email),
     linkedIn: cachedTransform(cache.linkedIn, getValue(row, mapping.ziPersonLinkedInUrl), normalizeLinkedInUrl),
     phone,
     ziPhone,
     mobile,
+    otherPhone,
+    homePhone,
+    assistantPhone,
+    mailingStreet,
+    mailingCity,
+    mailingState,
+    mailingPostalCode,
+    mailingPostalPrefix,
+    mailingCountry,
     phones
   };
 }
@@ -3587,6 +3668,7 @@ function normalizeContactReferenceKey(value) {
 function prepareAccountRow(row, mapping, index, cache) {
   const rawName = getValue(row, mapping.name);
   const name = cachedTransform(cache.companies, rawName, normalizeCompany);
+  const phone = cachedTransform(cache.phones, getValue(row, mapping.phone), normalizePhone);
   const billingStreet = cachedTransform(cache.addresses, getValue(row, mapping.billingStreet), normalizeAddress);
   const billingCity = cachedTransform(cache.text, getValue(row, mapping.billingCity), normalizeText);
   const billingState = cachedTransform(cache.states, getValue(row, mapping.billingState), normalizeState);
@@ -3606,6 +3688,7 @@ function prepareAccountRow(row, mapping, index, cache) {
     hasStatusMarker: hasCompanyStatusMarker(rawName),
     nameTokens: significantBucketTokens(name),
     website: cachedTransform(cache.websites, getValue(row, mapping.website), normalizeWebsite),
+    phone,
     billingStreet,
     billingCity,
     billingState,
@@ -3657,7 +3740,7 @@ async function getContactCandidatePairsAsync(
 
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
     const row = rows[rowIndex];
-    const { index, firstName, lastName, company, email, domain, linkedIn, phones } = row;
+    const { index, firstName, lastName, company, email, domain, linkedIn, phones, mailingPostalPrefix, mailingCity } = row;
 
     addBucket(buckets, `email:${email}`, index, email);
     addBucket(buckets, `linkedin:${linkedIn}`, index, linkedIn);
@@ -3666,6 +3749,8 @@ async function getContactCandidatePairsAsync(
     addBucket(buckets, `last-first:${lastName}|${firstName.slice(0, 1)}`, index, lastName && firstName);
     addBucket(buckets, `company-last:${company}|${lastName}`, index, company && lastName);
     addBucket(buckets, `domain-last:${domain}|${lastName}`, index, domain && lastName);
+    addBucket(buckets, `mailing-postal:${mailingPostalPrefix}|${lastName}`, index, mailingPostalPrefix && lastName);
+    addBucket(buckets, `mailing-city:${mailingCity}|${lastName}`, index, mailingCity && lastName);
     if (rowIndex % SCORING_CHUNK_SIZE === 0 || performance.now() - lastYield >= MATCHING_YIELD_INTERVAL_MS) {
       const percent = 22 + ((rowIndex + 1) / total) * 5;
       await progress(`Building candidate buckets (${formatNumber(rowIndex + 1)} of ${formatNumber(rows.length)}).`, percent);
@@ -3701,6 +3786,7 @@ async function getAccountCandidatePairsAsync(
     const {
       index,
       name,
+      phone,
       website,
       address,
       billingCity,
@@ -3711,6 +3797,7 @@ async function getAccountCandidatePairsAsync(
     } = row;
 
     addBucket(buckets, `website:${website}`, index, website);
+    addBucket(buckets, `phone:${phone}`, index, phone);
     addBucket(buckets, `name-prefix:${name.slice(0, 8)}`, index, name.length >= 4);
     addBucket(buckets, `postal-token:${billingPostalPrefix}|${firstToken}`, index, billingPostalPrefix && firstToken);
     addBucket(buckets, `city-state-token:${billingCity}|${billingState}|${firstToken}`, index, billingCity && billingState && firstToken);
@@ -3798,6 +3885,7 @@ function accountCandidateUpperBoundScore(left, right) {
   const fieldScores = {
     name: candidateEntityNameUpperBoundScore(left.name, right.name),
     website: candidateComparableScore(left.website, right.website, websiteScore),
+    phone: candidateComparableScore(left.phone, right.phone, phoneScore),
     billingStreet: candidateOptimisticScore(left.billingStreet, right.billingStreet),
     billingCity: candidateOptimisticScore(left.billingCity, right.billingCity),
     billingState: candidateComparableScore(left.billingState, right.billingState, exactValueScore),
@@ -4072,7 +4160,15 @@ function scoreContactPair(left, right, cache = null) {
         ziPersonLinkedInUrl: null,
         phone: null,
         ziPhone: null,
-        mobile: null
+        mobile: null,
+        otherPhone: null,
+        homePhone: null,
+        assistantPhone: null,
+        mailingStreet: null,
+        mailingCity: null,
+        mailingState: null,
+        mailingPostalCode: null,
+        mailingCountry: null
       }
     };
   }
@@ -4093,11 +4189,47 @@ function scoreContactPair(left, right, cache = null) {
   const phoneSimilarity = comparableScore(left.phone, right.phone, phoneScore);
   const ziPhoneSimilarity = comparableScore(left.ziPhone, right.ziPhone, phoneScore);
   const mobileSimilarity = comparableScore(left.mobile, right.mobile, phoneScore);
+  const otherPhoneSimilarity = comparableScore(left.otherPhone, right.otherPhone, phoneScore);
+  const homePhoneSimilarity = comparableScore(left.homePhone, right.homePhone, phoneScore);
+  const assistantPhoneSimilarity = comparableScore(left.assistantPhone, right.assistantPhone, phoneScore);
+  const mailingStreetSimilarity = comparableScore(left.mailingStreet, right.mailingStreet, stringSimilarity);
+  const mailingCitySimilarity = comparableScore(left.mailingCity, right.mailingCity, stringSimilarity);
+  const mailingStateSimilarity = comparableScore(left.mailingState, right.mailingState, exactValueScore);
+  const mailingPostalCodeSimilarity = comparableScore(left.mailingPostalCode, right.mailingPostalCode, exactValueScore);
+  const mailingCountrySimilarity = comparableScore(left.mailingCountry, right.mailingCountry, exactValueScore);
   const bestPhoneSimilarity = bestContactPhoneScore(left, right);
   const exactLinkedIn = Boolean(left.linkedIn && right.linkedIn && left.linkedIn === right.linkedIn);
   const exactAnyPhone = bestPhoneSimilarity === 1;
   const exactFullName = fullNameSimilarity === 1;
   const companyConflict = hasContactCompanyConflict(left, right, companySimilarity);
+  if (companyConflict) {
+    return {
+      left: left.row,
+      right: right.row,
+      value: 0,
+      type: "near",
+      reasons: ["Different company"],
+      fieldScores: {
+        fullName: fullNameSimilarity,
+        firstName: firstSimilarity,
+        lastName: lastSimilarity,
+        company: companySimilarity,
+        email: emailSimilarity,
+        ziPersonLinkedInUrl: linkedInSimilarity,
+        phone: phoneSimilarity,
+        ziPhone: ziPhoneSimilarity,
+        mobile: mobileSimilarity,
+        otherPhone: otherPhoneSimilarity,
+        homePhone: homePhoneSimilarity,
+        assistantPhone: assistantPhoneSimilarity,
+        mailingStreet: mailingStreetSimilarity,
+        mailingCity: mailingCitySimilarity,
+        mailingState: mailingStateSimilarity,
+        mailingPostalCode: mailingPostalCodeSimilarity,
+        mailingCountry: mailingCountrySimilarity
+      }
+    };
+  }
   const strongIdentityCorroboration = hasStrongContactIdentityCorroboration(
     exactEmail,
     exactLinkedIn,
@@ -4156,7 +4288,12 @@ function scoreContactPair(left, right, cache = null) {
       ziPersonLinkedInUrl: linkedInSimilarity,
       phone: bestPhoneSimilarity,
       email: emailSimilarity,
-      company: companySimilarity
+      company: companySimilarity,
+      mailingStreet: mailingStreetSimilarity,
+      mailingCity: mailingCitySimilarity,
+      mailingState: mailingStateSimilarity,
+      mailingPostalCode: mailingPostalCodeSimilarity,
+      mailingCountry: mailingCountrySimilarity
     },
     CONTACT_FIELD_WEIGHTS,
     CONTACT_CONTRADICTION_THRESHOLD
@@ -4243,7 +4380,15 @@ function scoreContactPair(left, right, cache = null) {
       ziPersonLinkedInUrl: linkedInSimilarity,
       phone: phoneSimilarity,
       ziPhone: ziPhoneSimilarity,
-      mobile: mobileSimilarity
+      mobile: mobileSimilarity,
+      otherPhone: otherPhoneSimilarity,
+      homePhone: homePhoneSimilarity,
+      assistantPhone: assistantPhoneSimilarity,
+      mailingStreet: mailingStreetSimilarity,
+      mailingCity: mailingCitySimilarity,
+      mailingState: mailingStateSimilarity,
+      mailingPostalCode: mailingPostalCodeSimilarity,
+      mailingCountry: mailingCountrySimilarity
     }
   };
 }
@@ -4400,6 +4545,7 @@ function scoreAccountPair(left, right, fieldStats = null) {
   const fieldScores = {
     name: comparableScore(left.name, right.name, entityNameSimilarity),
     website: comparableScore(left.website, right.website, websiteScore),
+    phone: comparableScore(left.phone, right.phone, phoneScore),
     billingStreet: comparableScore(left.billingStreet, right.billingStreet, stringSimilarity),
     billingCity: comparableScore(left.billingCity, right.billingCity, stringSimilarity),
     billingState: comparableScore(left.billingState, right.billingState, exactValueScore),
@@ -4411,6 +4557,7 @@ function scoreAccountPair(left, right, fieldStats = null) {
   const scoreResult = scoreAccountFields(fieldScores, left, right, fieldStats);
   const value = scoreResult.value;
   const exactWebsite = fieldScores.website === 1;
+  const exactPhone = fieldScores.phone === 1;
   const exactName = fieldScores.name === 1;
   const exactBillingAddress = comparableBillingAddressFields().some((field) => fieldScores[field] != null)
     ? comparableBillingAddressFields().every((field) => fieldScores[field] == null || fieldScores[field] === 1)
@@ -4420,6 +4567,7 @@ function scoreAccountPair(left, right, fieldStats = null) {
 
   const reasons = [];
   if (exactWebsite) reasons.push("Exact website");
+  if (exactPhone) reasons.push("Exact phone");
   if (exactName) reasons.push("Exact account name");
   if (exactName && exactBillingAddress) reasons.push("Exact name + billing address");
   if (exactUltimateParent) reasons.push("Same ultimate parent account");
@@ -4639,6 +4787,7 @@ function hasAccountScopeDivergence(fieldScores, left, right) {
 
 function hasStrongAccountIdentityCorroboration(fieldScores, left, right) {
   if (fieldScores.website === 1 && !hasAccountScopeDivergenceSignal(left, right)) return true;
+  if (fieldScores.phone === 1) return true;
   return fieldScores.ultimateParentAccount === 1 && hasDifferentUltimateParent(left) && hasDifferentUltimateParent(right);
 }
 
@@ -4663,6 +4812,7 @@ function hasStrongExactNameCorroboration(fieldScores, left, right) {
 function hasStrongAccountCorroboration(fieldScores, left, right) {
   if (left.hasStatusMarker || right.hasStatusMarker) return true;
   if ((fieldScores.website || 0) >= MATCHED_FIELD_THRESHOLD) return true;
+  if (fieldScores.phone === 1) return true;
   if (fieldScores.billingPostalCode === 1 && fieldScores.billingCountry === 1) return true;
   if (fieldScores.billingCity === 1 && fieldScores.billingCountry === 1) return true;
   if (fieldScores.billingStreet === 1 && (fieldScores.billingCity === 1 || fieldScores.billingPostalCode === 1)) return true;

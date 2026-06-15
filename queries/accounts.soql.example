@@ -1,4 +1,20 @@
-SELECT Id, Name, Website, BillingStreet, BillingCity, BillingState, BillingPostalCode, BillingCountry
+SELECT
+  Id,
+  Name,
+  Website,
+  Phone,
+  BillingStreet,
+  BillingCity,
+  BillingState,
+  BillingPostalCode,
+  BillingCountry,
+  CurrencyIsoCode,
+  Parent.Name,
+  Industry,
+  Type,
+  NumberOfEmployees,
+  AnnualRevenue,
+  DUNSNumber
 FROM Account
 WHERE Name != null
 LIMIT 1000

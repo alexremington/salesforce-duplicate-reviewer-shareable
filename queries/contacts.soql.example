@@ -1,4 +1,25 @@
-SELECT Id, Name, Account.Name, Email, Phone, MobilePhone
+SELECT
+  Id,
+  Name,
+  FirstName,
+  LastName,
+  Email,
+  Phone,
+  MobilePhone,
+  OtherPhone,
+  HomePhone,
+  AssistantPhone,
+  Account.Name,
+  AccountId,
+  MailingStreet,
+  MailingCity,
+  MailingState,
+  MailingPostalCode,
+  MailingCountry,
+  Title,
+  Department,
+  LeadSource,
+  CreatedDate
 FROM Contact
 WHERE Name != null
 LIMIT 1000
