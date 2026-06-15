@@ -114,6 +114,8 @@ async function main() {
     await assertContactExactPhoneLinkedInDivergenceRegression();
     await assertContactSharedCompanyExactPhoneNameConflictRegression();
     await assertContactMirrorRelationshipRegression();
+    await assertVisibleExcludedMirrorGroupRegression();
+    await assertExcludedGroupDatasetExportRegression();
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/premerge-check");
     await assertUnsupportedMergeRoute(baseUrl, "/api/salesforce/merge");
     await assertSalesforcePreMergeWithWarningCli(baseUrl);
@@ -926,6 +928,117 @@ async function assertContactMirrorRelationshipRegression() {
   if (groupMemberships.some((ids) => ids.includes("003M00000000001") && ids.includes("003M00000000002"))) {
     throw new Error(`Contact mirror clustering regression failed: mirrored contacts ended up in the same group: ${JSON.stringify(groupMemberships)}`);
   }
+}
+
+async function assertVisibleExcludedMirrorGroupRegression() {
+  const api = loadAppApi();
+  const csv = [
+    "Id,First Name,Last Name,Company,Email,Mirror of",
+    "003X00000000001,Taylor,Mason,Northstar Analytics,taylor.mason@northstar.example,003X00000000002",
+    "003X00000000002,Taylor,Mason,Northstar Analytics,taylor.mason@northstar.example,",
+    "003X00000000003,Taylor,Mason,Northstar Analytics,taylor.mason@northstar.example,"
+  ].join("\n");
+  const parsed = api.parseCsv(csv);
+  const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
+  const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
+  const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.contact.fields);
+
+  api.state.objectType = "contact";
+  api.state.rows = rows;
+  api.state.headers = headers;
+  api.state.mapping = mapping;
+
+  const result = await api.buildGroupsAsync(rows, "contact", mapping, 86, true);
+  const excludedGroup = result.groups.find((group) => group.status === "excluded");
+  const normalGroups = result.groups.filter((group) => group.status !== "excluded");
+  const normalMemberships = normalGroups.map((group) => group.records.map((record) => record.Id));
+
+  if (!excludedGroup) {
+    throw new Error(`Visible excluded-group regression failed: expected a visible excluded mirror group, got ${JSON.stringify(result.groups)}`);
+  }
+  if (excludedGroup.score !== 0 || excludedGroup.minPairScore !== 0 || !excludedGroup.isMergeBlocked || excludedGroup.exclusionReason !== "Entitled Contact mirror") {
+    throw new Error(`Visible excluded-group regression failed: excluded group metadata was wrong: ${JSON.stringify(excludedGroup)}`);
+  }
+  if (!excludedGroup.records.some((record) => record.Id === "003X00000000001") || !excludedGroup.records.some((record) => record.Id === "003X00000000002")) {
+    throw new Error(`Visible excluded-group regression failed: excluded pair records were wrong: ${JSON.stringify(excludedGroup.records)}`);
+  }
+  if (normalMemberships.some((ids) => ids.includes("003X00000000001") && ids.includes("003X00000000002"))) {
+    throw new Error(`Visible excluded-group regression failed: mirrored contacts still landed in a normal group: ${JSON.stringify(normalMemberships)}`);
+  }
+  if (!normalGroups.some((group) => group.records.length >= 2)) {
+    throw new Error(`Visible excluded-group regression failed: expected a surviving positive duplicate group, got ${JSON.stringify(result.groups)}`);
+  }
+}
+
+async function assertExcludedGroupDatasetExportRegression() {
+  const api = loadAppApi();
+
+  const excludedOnlyCsv = [
+    "Id,First Name,Last Name,Company,Email,Mirror of",
+    "003Y00000000001,Taylor,Mason,Northstar Analytics,taylor.mason@northstar.example,003Y00000000002",
+    "003Y00000000002,Taylor,Mason,Northstar Analytics,taylor.mason@northstar.example,"
+  ].join("\n");
+  const excludedOnlyExport = await buildExportRowsForCsv(api, excludedOnlyCsv);
+  const excludedOnlyScores = excludedOnlyExport.rowsById;
+  ["003Y00000000001", "003Y00000000002"].forEach((id) => {
+    const row = excludedOnlyScores.get(id);
+    if (!row || String(row.score) !== "0" || !row.group) {
+      throw new Error(`Excluded-only export regression failed for ${id}: ${JSON.stringify(row)}`);
+    }
+  });
+
+  const overlapCsv = [
+    "Id,First Name,Last Name,Company,Email,Mirror of",
+    "003Z00000000001,Taylor,Mason,Northstar Analytics,taylor.mason@northstar.example,003Z00000000002",
+    "003Z00000000002,Taylor,Mason,Northstar Analytics,taylor.mason@northstar.example,",
+    "003Z00000000003,Taylor,Mason,Northstar Analytics,taylor.mason@northstar.example,",
+    "003Z00000000004,Robin,Quill,Civic Harbor,robin.quill@civic.example,"
+  ].join("\n");
+  const overlapExport = await buildExportRowsForCsv(api, overlapCsv);
+  ["003Z00000000001", "003Z00000000002"].forEach((id) => {
+    const row = overlapExport.rowsById.get(id);
+    if (!row || !row.group || String(row.score) === "0" || row.score === "") {
+      throw new Error(`Excluded-overlap export regression failed for ${id}: ${JSON.stringify(row)}`);
+    }
+  });
+  const unrelatedRow = overlapExport.rowsById.get("003Z00000000004");
+  if (!unrelatedRow || unrelatedRow.group || unrelatedRow.score) {
+    throw new Error(`Excluded-overlap export regression failed for unrelated row: ${JSON.stringify(unrelatedRow)}`);
+  }
+}
+
+async function buildExportRowsForCsv(api, csv) {
+  const parsed = api.parseCsv(csv);
+  const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
+  const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
+  const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.contact.fields);
+
+  api.state.objectType = "contact";
+  api.state.rows = rows;
+  api.state.headers = headers;
+  api.state.mapping = mapping;
+
+  const result = await api.buildGroupsAsync(rows, "contact", mapping, 86, true);
+  api.state.groups = result.groups;
+  const exportRows = api.buildScoredDatasetRows();
+  const header = exportRows[0];
+  const idIndex = header.indexOf("Id");
+  const groupIndex = header.indexOf("group");
+  const scoreIndex = header.indexOf("score");
+  const rowsById = new Map(
+    exportRows.slice(1).map((row) => [
+      row[idIndex],
+      {
+        group: row[groupIndex],
+        score: row[scoreIndex]
+      }
+    ])
+  );
+
+  return {
+    exportRows,
+    rowsById
+  };
 }
 
 function loadAppApi() {

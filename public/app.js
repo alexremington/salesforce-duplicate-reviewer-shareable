@@ -490,6 +490,7 @@ const CONTACT_SHARED_COMPANY_EXACT_PHONE_NAME_CONFLICT_CAP = 78;
 const CONTACT_SHARED_COMPANY_EXACT_PHONE_NAME_CONFLICT_REASON = "Shared company and exact phone with conflicting names";
 const CONTACT_EMAIL_CONTEXT_CORROBORATION_MIN = 0.5;
 const CONTACT_MIRROR_RELATIONSHIP_REASON = "Entitled Contact mirror";
+const CONTACT_EXCLUDED_MERGE_BLOCK_MESSAGE = "This Contact pair is excluded by the Entitled Contact mirror rule and cannot enter the Salesforce merge queue.";
 const TRAINING_LABELS = {
   match: "Match",
   not_match: "Not Match",
@@ -1842,6 +1843,8 @@ function clearLoadedDatasetForPendingLoad() {
   state.filters = [];
   state.filterLogic = "";
   state.filterLogicMode = "and";
+  state.groupStatusFilters.clear();
+  state.pendingGroupStatusFilters.clear();
   state.labelStatusFilters.clear();
   state.pendingLabelStatusFilters.clear();
   state.decisions.clear();
@@ -6406,9 +6409,6 @@ function renderSource() {
   ].forEach((control) => {
     control.disabled = !datasetLoaded;
   });
-  if (els.applyControlsButton) {
-    els.applyControlsButton.textContent = state.matchingDeferred && datasetLoaded && !state.groups.length ? "Match now" : "Apply";
-  }
   renderGroupStatusFilterHost();
   renderLabelStatusFilterHost();
   renderFilterBuilder();
@@ -8545,15 +8545,6 @@ function renderExcludedMergeNotice(mergeState) {
   `;
 }
 
-function renderMergeAuthBlockedNotice(authSupport = "", context = "before starting merge review") {
-  if (state.serverHealth?.salesforceAuthFresh !== false) return "";
-  return `
-    <p class="merge-warning merge-auth-warning">
-      Salesforce auth is blocked. Refresh the Salesforce session ${context}${authSupport ? ` (${escapeHtml(authSupport)}).` : "."}
-    </p>
-  `;
-}
-
 function missingContactIdMergeMessage(missingCount = 0) {
   const count = Number(missingCount) || 0;
   const prefix = count
@@ -10173,16 +10164,18 @@ function buildScoredDatasetRows() {
   if (!exportHeaders.includes("group")) exportHeaders.push("group");
   if (!exportHeaders.includes("score")) exportHeaders.push("score");
 
-  const groupByRowIndex = new Map();
+  const normalGroupByRowIndex = new Map();
+  const excludedGroupByRowIndex = new Map();
   state.groups.forEach((group) => {
     group.records.forEach((record) => {
-      groupByRowIndex.set(record.__rowIndex, group);
+      const target = isExcludedGroup(group) ? excludedGroupByRowIndex : normalGroupByRowIndex;
+      if (!target.has(record.__rowIndex)) target.set(record.__rowIndex, group);
     });
   });
 
   const rows = [exportHeaders];
   state.rows.forEach((record) => {
-    const group = groupByRowIndex.get(record.__rowIndex) || null;
+    const group = normalGroupByRowIndex.get(record.__rowIndex) || excludedGroupByRowIndex.get(record.__rowIndex) || null;
     rows.push(
       exportHeaders.map((header) => {
         if (header === "group") return group ? group.id : "";
