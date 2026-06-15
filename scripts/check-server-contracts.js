@@ -362,12 +362,20 @@ async function assertStaticApp(baseUrl) {
 }
 
 async function assertSalesforceExportSchemaUpgradeRegression() {
-  const contactQueryPath = path.join(PROJECT_DIR, "queries", "report-00OVZ000003DjaH2AS.soql");
-  const accountQueryPath = path.join(PROJECT_DIR, "queries", "report-00OVZ000003Dm572AC.soql");
-  const contactQuery = await fs.readFile(contactQueryPath, "utf8");
-  const accountQuery = await fs.readFile(accountQueryPath, "utf8");
+  const contactQuery = await readQueryByMarkers([
+    "MailingStreet",
+    "MailingPostalCode",
+    "AssistantPhone",
+    "AccountId"
+  ]);
+  const accountQuery = await readQueryByMarkers([
+    "BillingStreet",
+    "BillingPostalCode",
+    "CurrencyIsoCode",
+    "Ultimate_Parent_Account__c"
+  ]);
 
-  assertQueryContainsAll(contactQueryPath, contactQuery, [
+  assertQueryContainsAll(contactQuery.path, contactQuery.text, [
     "Id",
     "Name",
     "FirstName",
@@ -390,7 +398,7 @@ async function assertSalesforceExportSchemaUpgradeRegression() {
     "LeadSource",
     "CreatedDate"
   ]);
-  assertQueryContainsAll(accountQueryPath, accountQuery, [
+  assertQueryContainsAll(accountQuery.path, accountQuery.text, [
     "Id",
     "Name",
     "Website",
@@ -500,6 +508,25 @@ async function assertSalesforceExportSchemaUpgradeRegression() {
       `Account phone regression failed: aligned=${accountAligned.value}, conflict=${accountConflict.value}, fields=${JSON.stringify(accountConflict.fieldScores)}`
     );
   }
+}
+
+async function readQueryByMarkers(markers) {
+  const queryDir = path.join(PROJECT_DIR, "queries");
+  const entries = await fs.readdir(queryDir, { withFileTypes: true });
+  const candidates = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".soql"))
+    .map((entry) => entry.name)
+    .sort((left, right) => left.localeCompare(right));
+
+  for (const candidate of candidates) {
+    const queryPath = path.join(queryDir, candidate);
+    const queryText = await fs.readFile(queryPath, "utf8");
+    if (markers.every((marker) => queryText.includes(marker))) {
+      return { path: queryPath, text: queryText };
+    }
+  }
+
+  throw new Error(`Unable to find a query containing markers: ${markers.join(", ")}`);
 }
 
 function assertQueryContainsAll(queryPath, queryText, fields) {
