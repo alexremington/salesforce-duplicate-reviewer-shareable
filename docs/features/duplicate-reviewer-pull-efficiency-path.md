@@ -1,6 +1,6 @@
 # Duplicate Reviewer Pull Efficiency Path
 
-Status: in-progress
+Status: complete
 Manifest ID: duplicate-reviewer-pull-efficiency-path
 
 ## User Story
