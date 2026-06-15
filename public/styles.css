@@ -1704,6 +1704,12 @@ select:focus {
   letter-spacing: 0.02em;
 }
 
+.loading-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
 .has-open-modal {
   overflow: hidden;
 }

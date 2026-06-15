@@ -14,7 +14,7 @@ This app is a dependency-free browser tool. `public/index.html` loads `public/st
 ## Runtime Flow
 
 1. A JSON or CSV dataset is loaded by file input, drag/drop, recent-file reload, staging auto-load, or demo data.
-2. Server-backed loads route parsing and matching through `public/matching-worker.js`; file-only loads fall back to the same logic on the main thread.
+2. Server-backed loads route parsing and matching through `public/matching-worker.js`; file-only loads fall back to the same logic on the main thread. Large JSON imports use the worker-backed ingest path first, then defer matching until the user explicitly continues.
 3. `stageRowsForReview()` stores original row objects in `state.rows`, adds a stable `__rowIndex`, infers headers, and auto-maps fields from `OBJECT_CONFIG`.
 4. `recompute()` calls `buildGroupsAsync()` with the current object type, mapping, threshold, and High Recall mode.
 5. `buildGroupsAsync()` gets a cached scoring context, generates candidate pair keys, scores candidate pairs, unions threshold-passing pairs into connected components, summarizes each group from all pairwise scores, filters groups by the threshold, then sorts them.
@@ -149,7 +149,7 @@ The app shell is a fixed-height frame. The left control pane and the central rev
 
 `loadFile()` calls `beginFileLoad()` before reading the chosen CSV. That renders an immediate loading acknowledgment in the Source panel and review pane, then waits for the next browser paint before parsing and matching so large files do not leave the UI looking idle.
 
-`showLoadingModal()` / `hideLoadingModal()` manage the blocking loading overlay. CSV load and recent-file reload keep it visible through parsing, matching, and saved-review-state restore. Label import keeps it visible while the exported label CSV is read and matched to the current source rows.
+`showLoadingModal()` / `hideLoadingModal()` manage the blocking loading overlay. CSV load and recent-file reload keep it visible through parsing, matching, and saved-review-state restore. Large JSON ingest also uses the modal for reading/parsing progress and exposes a cancel action so the previous dataset stays available if the user stops the load before commit. Label import keeps it visible while the exported label CSV is read and matched to the current source rows.
 
 The Match Groups panel owns list-level controls: the sort icon toggles `state.sortDirection`, and the Hide labeled checkbox toggles `state.hideLabeledGroups`. Hidden labeled groups are filtered from the visible list only; their labels and duplicate decisions remain in state and still export normally.
 
@@ -198,6 +198,7 @@ Training labels are intentionally separate from duplicate decisions. Duplicate d
 - Recent files should preserve object type metadata. Use `recentRecordObjectType()` when reading records and `recentFileId()` when writing records.
 - Review-state writes are debounced through `scheduleReviewStateSave()` so rapid labeling does not write on every keystroke immediately.
 - `buildDatasetKey()` is on the CSV load path for very large files. Keep it sampled and based on raw mapped field values; do not call `displayName()`, `displaySubtitle()`, or expensive normalization for every row there.
+- Large JSON ingest stays size-gated. Small JSON files can still auto-match, but large files should commit a parsed-ready dataset first and only run matching after the explicit follow-up action.
 - If `buildDatasetKey()` changes, keep `findCompatibleReviewState()` broad enough to migrate existing browser-saved labels.
 - Contact scoring uses per-run caches from `createContactScoreCache()` for repeated name/company/domain sub-scores. Keep those caches local to `createPairScorer()` so they are reused during one recompute but discarded when rows or mapping change.
 

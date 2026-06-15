@@ -28,6 +28,9 @@ node -e 'JSON.parse(require("node:fs").readFileSync("package.json", "utf8"))'
 echo "Checking closeout Beads regression..."
 node scripts/check-closeout-beads.js
 
+echo "Checking large JSON ingest strategy..."
+node scripts/check-large-json-ingest.js
+
 echo "Checking feature manifest..."
 node ../automation-shared-resources/scripts/check-feature-manifest.js .
 

@@ -166,6 +166,43 @@ function largeContactSmokeCsv(groupCount = 300) {
   return csvRows(rows);
 }
 
+function largeContactSmokeJson(targetBytes = 52 * 1024 * 1024) {
+  const oversizedNote = "Deferred JSON parse smoke data. ".repeat(Math.ceil(targetBytes / 30));
+  const records = [
+    {
+      Id: "003J00000000001",
+      FirstName: "Taylor",
+      LastName: "Mason",
+      Company: "Northstar Analytics",
+      Email: "taylor.mason@northstar.example",
+      Phone: "(555) 010-4001",
+      MobilePhone: "",
+      Notes: oversizedNote
+    },
+    {
+      Id: "003J00000000002",
+      FirstName: "Taylor",
+      LastName: "Mason",
+      Company: "Northstar Analytics",
+      Email: "taylor.mason@northstar.example",
+      Phone: "(555) 010-4001",
+      MobilePhone: "",
+      Notes: oversizedNote
+    }
+  ];
+
+  return JSON.stringify({
+    objectType: "contact",
+    fileName: "salesforce-report-latest.json",
+    contractVersion: "salesforce-contact-rollback-v1",
+    source: {
+      orgAlias: "qa-smoke-org",
+      instanceUrl: "https://qa-smoke-org.example.invalid"
+    },
+    records
+  });
+}
+
 function csvRows(rows) {
   return rows.map((row) => row.map(csvCell).join(",")).join("\n");
 }
@@ -185,5 +222,6 @@ module.exports = {
   contactMirrorRelationshipSmokeCsv,
   contactMissingIdSmokeCsv,
   contactSmokeCsv,
-  largeContactSmokeCsv
+  largeContactSmokeCsv,
+  largeContactSmokeJson
 };

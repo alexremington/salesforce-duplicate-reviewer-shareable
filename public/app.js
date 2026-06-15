@@ -1731,15 +1731,6 @@ async function loadDatasetText(datasetText, {
     });
   }
   if (!isCurrentLoadRequest(loadRequestId)) return;
-  setLoadedDatasetSource({
-    endpoint,
-    fileName: result.fileName || fileName || datasetFileNameForFormat(format),
-    displayName,
-    objectType: normalizeObjectType(result.objectType || state.objectType),
-    format: result.format || format,
-    contractVersion: result.contractVersion || result.datasetMetadata?.contractVersion || "",
-    metadata: extractDatasetMetadata(result)
-  });
   if (saveRecent) {
     saveRecentFileInBackground({
       name: result.fileName || fileName || datasetFileNameForFormat(format),
@@ -1890,48 +1881,14 @@ function cancelActiveLoad() {
   renderDetail();
 }
 
-function clearLoadedDatasetForPendingLoad() {
-  state.fileName = "";
-  state.datasetSource = {
-    endpoint: "",
-    fileName: "",
-    displayName: "",
-    objectType: state.objectType,
-    format: "",
-    contractVersion: ""
-  };
-  state.datasetMetadata = {};
-  state.lastProcessingMode = "";
-  state.lastMatchingStats = null;
-  state.headers = [];
-  state.rows = [];
-  state.mapping = {};
-  state.groups = [];
-  groupListRenderCache = null;
-  detailRenderCache = "";
-  state.selectedGroupKey = "";
-  state.filters = [];
-  state.filterLogic = "";
-  state.filterLogicMode = "and";
-  state.groupStatusFilters.clear();
-  state.pendingGroupStatusFilters.clear();
-  state.labelStatusFilters.clear();
-  state.pendingLabelStatusFilters.clear();
-  state.decisions.clear();
-  state.mergeResults.clear();
-  state.trainingLabels.clear();
-  state.trainingPairIndexes.clear();
-  state.fieldResolutions.clear();
-  state.separatedRecords.clear();
-  mergeMasterSelections.clear();
-  mergePreviewStates.clear();
-  mergeInFlightGroupKeys.clear();
-  resetMergeReviewSession();
-  scoringContextCache = null;
-  matchingArtifactsCache = null;
-  matchingArtifactsWarmCacheJob = null;
-  groupLookupCache = null;
-  visibleGroupsCache = null;
+function isCurrentLoadRequest(loadRequestId) {
+  return Number(loadRequestId) === activeLoadRequestId;
+}
+
+function clearActiveLoadRequest(loadRequestId) {
+  if (!isCurrentLoadRequest(loadRequestId)) return;
+  activeLoadReader = null;
+  activeLoadAbortController = null;
 }
 
 function endFileLoad() {
@@ -2021,18 +1978,11 @@ async function loadRecentFile(fileId) {
     }
 
     const objectType = recentRecordObjectType(record, state.objectType);
-    const endpoint = canonicalRecentEndpoint(record) || String(record.endpoint || "");
-    const normalizedRecord = {
-      ...record,
-      endpoint
-    };
-    const fileName = canonicalRecentFileName(normalizedRecord);
-    const displayName = canonicalRecentDisplayName(normalizedRecord);
-    state.loadingFileName = fileName;
+    state.loadingFileName = record.name;
     if (!isCurrentLoadRequest(loadRequestId)) return;
-    showLoadingModal("Loading Recent Dataset", `Parsing ${fileName}.`, 0, true);
+    showLoadingModal("Loading Recent Dataset", `Parsing ${record.name}.`, 0, true);
     await nextPaint();
-    const datasetText = await recentFileDatasetText(normalizedRecord);
+    const datasetText = await recentFileDatasetText(record);
     if (!isCurrentLoadRequest(loadRequestId)) return;
     await loadDatasetText(datasetText, {
       fileName,
@@ -2040,8 +1990,8 @@ async function loadRecentFile(fileId) {
       format: record.format || datasetFormatFromFileName(fileName || endpoint),
       size: record.size || datasetText.length,
       saveRecent: false,
-      displayName,
-      endpoint,
+      displayName: record.displayName || record.name,
+      endpoint: record.endpoint || "",
       loadRequestId
     });
     saveRecentFileInBackground({
@@ -2068,9 +2018,9 @@ async function loadRecentFile(fileId) {
   }
 }
 
-async function recentFileDatasetText(record, endpoint = record.endpoint) {
-  if (endpoint) {
-    const response = await fetch(endpoint, {
+async function recentFileDatasetText(record) {
+  if (record.endpoint) {
+    const response = await fetch(record.endpoint, {
       cache: "no-store",
       signal: activeLoadAbortController?.signal
     });
@@ -2847,7 +2797,7 @@ async function applyProcessedDataset(result, { fromObjects = false, objectType =
     fromObjects,
     headers: result.headers,
     mapping: result.mapping,
-    objectType: result.objectType,
+    objectType: result.objectType || objectType,
     metadata,
     sourceOrg
   });
@@ -2858,6 +2808,45 @@ async function applyProcessedDataset(result, { fromObjects = false, objectType =
   await updateLoadingProgress("Ready.", 100);
   setSelectedSalesforceOrgProfile(sourceOrg, { persist: true });
   return fromObjects ? Promise.resolve() : restoreReviewStateForCurrentDataset();
+}
+
+async function applyParsedDataset(result, { fromObjects = false, objectType = state.objectType, loadRequestId = 0 } = {}) {
+  if (!isCurrentLoadRequest(loadRequestId)) return;
+  state.lastProcessingMode = result.processingMode || "";
+  state.lastMatchingStats = result.matchingStats || null;
+  const metadata = extractDatasetMetadata(result);
+  const extractedOrg = extractSalesforceOrgProfileFromDataset(result);
+  const sourceOrg = isCompleteSalesforceOrgProfile(extractedOrg) ? extractedOrg : getSelectedSalesforceOrgProfile();
+  setLoadedDatasetSource({
+    endpoint: result.endpoint || "",
+    fileName: result.fileName || datasetFileNameForFormat(result.format),
+    displayName: result.displayName || "",
+    objectType: result.objectType || objectType,
+    format: result.format,
+    contractVersion: result.contractVersion || metadata.contractVersion || "",
+    metadata,
+    orgAlias: sourceOrg.orgAlias,
+    instanceUrl: sourceOrg.instanceUrl
+  });
+  stageRowsForReview({
+    rows: result.rows || [],
+    fileName: result.fileName || datasetFileNameForFormat(result.format),
+    fromObjects,
+    headers: result.headers,
+    mapping: result.mapping,
+    objectType: result.objectType || objectType,
+    metadata,
+    sourceOrg
+  });
+  state.matchingDeferred = true;
+  state.loadPhase = "parsed-ready";
+  state.reviewStateStatus = state.datasetKey && isFileHistoryAvailable()
+    ? "Matching deferred until you click Match now."
+    : "Matching deferred";
+  applyComputedGroups([], null, { preserveDeferredState: true });
+  await updateLoadingProgress("Parsed dataset ready. Matching is deferred.", 100);
+  setSelectedSalesforceOrgProfile(sourceOrg, { persist: true });
+  return fromObjects ? Promise.resolve() : Promise.resolve();
 }
 
 function stageRowsForReview({ rows, fileName, fromObjects, headers, mapping, objectType, metadata = {}, sourceOrg = {} }) {
@@ -6512,6 +6501,9 @@ function renderSource() {
   ].forEach((control) => {
     control.disabled = !datasetLoaded;
   });
+  if (els.applyControlsButton) {
+    els.applyControlsButton.textContent = state.matchingDeferred && datasetLoaded && !state.groups.length ? "Match now" : "Apply";
+  }
   renderGroupStatusFilterHost();
   renderLabelStatusFilterHost();
   renderFilterBuilder();
@@ -8027,8 +8019,10 @@ function renderDetail() {
         <span>${
           state.loadError
             ? escapeHtml(state.loadError)
-            : state.rows.length
-              ? "Adjust the thresholds or mapping."
+            : state.matchingDeferred && state.rows.length
+              ? "The dataset is parsed. Use Match now or Apply to build duplicate groups."
+              : state.rows.length
+                ? "Adjust the thresholds or mapping."
               : "Use the header Import menu to choose Contacts, Accounts, or Labels, or load demo data."
         }</span>
         <div class="empty-actions">

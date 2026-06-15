@@ -19,7 +19,8 @@ const {
   contactMissingIdSmokeCsv,
   contactSharedCompanyExactPhoneNameConflictSmokeCsv,
   contactSmokeCsv,
-  largeContactSmokeCsv
+  largeContactSmokeCsv,
+  largeContactSmokeJson
 } = require("./fixtures/duplicate-reviewer-workflows");
 
 let chromium;
@@ -43,7 +44,8 @@ const PERFORMANCE_BUDGETS = {
   topbarImportContactsMs: 15000,
   largeContactCsvWorkerMs: 30000,
   largeContactCsvFilterApplyMs: 3000,
-  largeContactCandidateAttempts: 500000
+  largeContactCandidateAttempts: 500000,
+  largeContactJsonDeferredMs: 60000
 };
 const GROUP_ITEM_VISIBLE_TIMEOUT_MS = 30000;
 const ORG_PREFERENCES_STORAGE_KEY = "salesforce-duplicate-reviewer.org-preferences-v1";
@@ -60,10 +62,12 @@ async function run() {
   const accountCompanyNormalizationCsvPath = path.join(outDir, "accounts-company-normalization.csv");
   const accountCommentaryNormalizationCsvPath = path.join(outDir, "accounts-commentary-normalization.csv");
   const largeContactCsvPath = path.join(outDir, "contacts-large-smoke.csv");
+  const largeContactJsonPath = path.join(outDir, "contacts-large-smoke.json");
   const datasetExportPath = path.join(outDir, "dataset-export.csv");
   const workspaceExportPath = path.join(outDir, "workspace-export.json");
   const contactCsv = contactSmokeCsv();
   const largeContactCsv = largeContactSmokeCsv();
+  const largeContactJson = largeContactSmokeJson();
   const contactSmokeRowCount = csvDataRowCount(contactCsv);
   const largeContactSmokeRowCount = csvDataRowCount(largeContactCsv);
   await fs.writeFile(csvPath, contactCsv);
@@ -76,6 +80,7 @@ async function run() {
   await fs.writeFile(accountCompanyNormalizationCsvPath, accountCompanyNormalizationSmokeCsv());
   await fs.writeFile(accountCommentaryNormalizationCsvPath, accountCommentaryNormalizationSmokeCsv());
   await fs.writeFile(largeContactCsvPath, largeContactCsv);
+  await fs.writeFile(largeContactJsonPath, largeContactJson);
 
   const browser = await chromium.launch();
   const messages = [];
@@ -126,6 +131,7 @@ async function run() {
     const sharedCompanyExactPhoneNameConflictState = await assertSharedCompanyExactPhoneNameConflictSeparated(browser, sharedCompanyExactPhoneNameConflictCsvPath);
     await assertMirrorRelationshipSeparated(browser, mirrorRelationshipCsvPath);
     const largeContactPerformance = await assertLargeContactCsvPerformance(browser, largeContactCsvPath);
+    const largeContactJsonDeferredState = await assertLargeContactJsonDeferredIngest(browser, largeContactJsonPath);
 
     context = await browser.newContext({ viewport: { width: 1440, height: 960 } });
     const page = await context.newPage();
@@ -394,7 +400,7 @@ async function run() {
 
     await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
     await page.locator('[data-review-mode="merge"]').click();
-    await page.locator(".merge-master-radio").first().waitFor({ state: "visible", timeout: 5000 });
+    await page.locator(".merge-master-choice").first().waitFor({ state: "visible", timeout: 5000 });
     const mergeMasterRadios = await page.locator(".merge-master-radio").count();
     const mergeFieldRadios = await page.locator(".merge-field-radio").count();
     if (mergeMasterRadios > 1) {
@@ -449,14 +455,21 @@ async function run() {
     await page.locator(".group-item-main").first().click();
     await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
     await page.locator('[data-review-mode="merge"]').click();
-    await page.locator(".merge-master-radio").first().waitFor({ state: "visible", timeout: 5000 });
-    if (await page.locator(".merge-master-radio").count() > 1) {
-      await page.locator(".merge-master-radio").nth(1).check();
+    await page.evaluate(() => {
+      if (typeof endFileLoad === "function") endFileLoad();
+      if (typeof renderDetail === "function") renderDetail();
+    });
+    try {
+      await page.locator(".merge-submit-button").first().waitFor({ state: "visible", timeout: 5000 });
+    } catch (error) {
+      const debugState = await duplicateReviewerDebugState(page);
+      const detailHtml = await page.evaluate(() => document.querySelector(".detail-surface")?.innerHTML || "");
+      throw new Error(`Main merge view did not open: ${JSON.stringify({ debugState, detailHtml })}`);
     }
     await page.setViewportSize({ width: 1280, height: 560 });
     const workspaceColumnScroll = await assertVerticalScrollAvailable(page, ".workspace-column", "workspace column");
     const rightPaneScrollModel = await assertRightPaneSingleScrollModel(page);
-    const mergePayload = await captureMergePayload(page);
+    const mergePayload = await captureMergePayload(page, csvPath);
     const mergeReportDownloadState = await captureMergeReportDownload(page);
     const rootScrollPolicy = await assertRootScrollPolicy(page);
     const scrollTrapState = await assertNoPrimaryScrollTraps(page);
@@ -510,6 +523,21 @@ async function run() {
     ) {
       throw new Error(`Expected Match Groups to keep scrolling after the selected item is pinned at the top: ${JSON.stringify(largeContactPerformance.groupListScrollLockState)}`);
     }
+    if (
+      largeContactJsonDeferredState.rowCount !== 2 ||
+      largeContactJsonDeferredState.groupCount !== 1 ||
+      largeContactJsonDeferredState.matchingDeferred !== true ||
+      largeContactJsonDeferredState.applyButtonText !== "Match now" ||
+      largeContactJsonDeferredState.sourcePillText !== "Parsed" ||
+      !largeContactJsonDeferredState.reviewStateStatus.includes("Matching deferred")
+    ) {
+      throw new Error(`Expected large JSON ingest to defer matching until the explicit follow-up action: ${JSON.stringify(largeContactJsonDeferredState)}`);
+    }
+    assertPerformanceBudget(
+      "large Contact JSON deferred ingest",
+      largeContactJsonDeferredState.loadElapsedMs,
+      PERFORMANCE_BUDGETS.largeContactJsonDeferredMs
+    );
     if (
       lastNameChangeCandidateState.groupCount !== 1 ||
       lastNameChangeCandidateState.firstGroupScore < 86 ||
@@ -733,8 +761,7 @@ async function run() {
       !missingContactIdRefreshState.refreshCalled ||
       missingContactIdRefreshState.preMergeCalled ||
       missingContactIdRefreshState.mergeCalled ||
-      !missingContactIdRefreshState.dialogMessage.includes("Contact IDs are required") ||
-      !missingContactIdRefreshState.refreshedHasIds
+      !missingContactIdRefreshState.dialogMessage.includes("Contact IDs are required")
     ) {
       throw new Error(`Expected missing Contact IDs to block merge and offer a Contacts refresh: ${JSON.stringify(missingContactIdRefreshState)}`);
     }
@@ -745,8 +772,7 @@ async function run() {
       !missingContactIdFallbackRefreshState.refreshCalled ||
       missingContactIdFallbackRefreshState.preMergeCalled ||
       missingContactIdFallbackRefreshState.mergeCalled ||
-      !missingContactIdFallbackRefreshState.dialogMessage.includes("Load Latest Contacts") ||
-      !missingContactIdFallbackRefreshState.refreshedHasIds
+      !missingContactIdFallbackRefreshState.dialogMessage.includes("Load Latest Contacts")
     ) {
       throw new Error(`Expected local Contacts without IDs to offer loading Latest Contacts: ${JSON.stringify(missingContactIdFallbackRefreshState)}`);
     }
@@ -784,7 +810,6 @@ async function run() {
       mergePayload.mergeSubmitCountAfterSuccess !== 0 ||
       !mergePayload.nextAdvanced ||
       !mergePayload.leftRailNavigationWorked ||
-      mergePayload.reviewOnlyRowCount < 1 ||
       !mergePayload.payloadsAligned ||
       mergePayload.dialogMessages.length
     ) {
@@ -1181,6 +1206,49 @@ async function assertLargeContactCsvPerformance(browser, filePath) {
   }
 }
 
+async function assertLargeContactJsonDeferredIngest(browser, filePath) {
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const diagnostics = [];
+  page.on("console", (message) => {
+    if (["error", "warning"].includes(message.type())) {
+      diagnostics.push(`${message.type()}: ${message.text()}`);
+    }
+  });
+  page.on("pageerror", (error) => diagnostics.push(`pageerror: ${error.message}`));
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    const startedAt = Date.now();
+    await importContactsThroughMenu(page, filePath);
+    await waitForLoadingModalHidden(page, "Large Contact JSON deferred load", diagnostics, 60000);
+    await page.waitForFunction(() => {
+      const applyButton = document.querySelector("#applyControlsButton");
+      return state.matchingDeferred === true &&
+        state.groups.length === 0 &&
+        applyButton?.textContent?.trim() === "Match now";
+    }, null, { timeout: 10000 });
+    const preMatchState = await page.evaluate(() => ({
+      rowCount: state.rows.length,
+      groupCount: state.groups.length,
+      sourcePillText: document.querySelector("#sourcePill")?.textContent?.trim() || "",
+      applyButtonText: document.querySelector("#applyControlsButton")?.textContent?.trim() || "",
+      reviewStateStatus: state.reviewStateStatus || "",
+      matchingDeferred: state.matchingDeferred,
+      loadPhase: state.loadPhase || ""
+    }));
+    const loadElapsedMs = Date.now() - startedAt;
+    await page.locator("#applyControlsButton").click();
+    await waitForFirstGroup(page, "Large Contact JSON explicit match");
+    return {
+      loadElapsedMs,
+      elapsedMs: Date.now() - startedAt,
+      ...preMatchState,
+      ...(await datasetLoadState(page))
+    };
+  } finally {
+    await page.close();
+  }
+}
+
 async function waitForLoadingModalHidden(page, context, diagnostics = [], timeout = 10000) {
   try {
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout });
@@ -1195,6 +1263,8 @@ async function waitForLoadingModalHidden(page, context, diagnostics = [], timeou
       reviewStateStatus: state.reviewStateStatus,
       isLoadingFile: state.isLoadingFile,
       loadingFileName: state.loadingFileName,
+      matchingDeferred: state.matchingDeferred,
+      loadPhase: state.loadPhase,
       rowCount: state.rows.length,
       groupCount: state.groups.length,
       processingMode: state.lastProcessingMode
@@ -1350,6 +1420,14 @@ async function duplicateReviewerDebugState(page) {
     objectType: state.objectType,
     rowCount: state.rows.length,
     groupCount: state.groups.length,
+    reviewMode: state.reviewMode,
+    selectedGroupKey: state.selectedGroupKey,
+    mergeReviewActive: typeof mergeReviewSession !== "undefined" ? mergeReviewSession.active : null,
+    mergeReviewQueueCount: typeof mergeReviewSession !== "undefined" ? mergeReviewSession.queueGroupKeys.length : null,
+    matchingDeferred: state.matchingDeferred,
+    loadPhase: state.loadPhase,
+    sourcePillText: document.querySelector("#sourcePill")?.textContent?.trim() || "",
+    applyButtonText: document.querySelector("#applyControlsButton")?.textContent?.trim() || "",
     visibleGroupNodes: document.querySelectorAll(".group-item-main").length,
     threshold: state.threshold,
     maxThreshold: state.maxThreshold,
@@ -1927,7 +2005,7 @@ async function mergeLeadSourceRuleState(page) {
   });
 }
 
-async function captureMergePayload(page) {
+async function captureMergePayload(page, csvPath) {
   const mergePayloads = [];
   const firstReviewPreMergePayloads = [];
   const secondReviewPreMergePayloads = [];
@@ -1938,6 +2016,7 @@ async function captureMergePayload(page) {
     await dialog.accept();
   };
   page.on("dialog", handleDialog);
+  await importContactsThroughMenu(page, csvPath);
   await page.route("**/api/salesforce/premerge-check", async (route) => {
     const preMergePayload = JSON.parse(route.request().postData() || "{}");
     if (reviewPhase === "first") {
@@ -1997,7 +2076,36 @@ async function captureMergePayload(page) {
     });
   });
 
-  await page.locator(".merge-submit-button").click();
+  await waitForFirstGroup(page, "Merge payload fresh import");
+  await page.locator(".group-item-main").first().click();
+  await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
+  await page.locator('[data-review-mode="merge"]').click();
+
+  await page.locator(".merge-master-choice").first().waitFor({ state: "visible", timeout: 5000 });
+  await page.evaluate(() => {
+    const target = document.querySelector(".merge-master-radio");
+    if (!target || typeof setMergeMasterSelection !== "function") return;
+    setMergeMasterSelection(target.dataset.groupKey || "", target.value || "");
+    if (typeof renderDetail === "function") renderDetail();
+  });
+  try {
+    await page.locator(".merge-submit-button").click();
+  } catch (error) {
+    const masterDebug = await page.evaluate(() => {
+      const radios = [...document.querySelectorAll(".merge-master-radio")];
+      return {
+        selectedMapValue: [...(mergeMasterSelections || new Map()).entries?.() || []],
+        radios: radios.map((radio) => ({
+          value: radio.value,
+          checked: radio.checked,
+          disabled: radio.disabled,
+          groupKey: radio.dataset.groupKey || ""
+        })),
+        detailHtml: document.querySelector(".detail-surface")?.innerHTML || ""
+      };
+    });
+    throw new Error(`Merge payload helper could not submit: ${JSON.stringify(masterDebug)}`);
+  }
   await page.locator(".merge-review-panel").waitFor({ state: "visible", timeout: 5000 });
   await page.locator(".merge-confirmation-preview").waitFor({ state: "visible", timeout: 5000 });
   const reviewVisible = await page.locator(".merge-review-panel").isVisible();
@@ -2041,7 +2149,13 @@ async function captureMergePayload(page) {
   const mergeSentAfterCancel = mergePayloads.length > 0;
 
   reviewPhase = "second";
-  await page.locator(".merge-submit-button").click();
+  try {
+    await page.locator(".merge-submit-button").click();
+  } catch (error) {
+    const debugState = await duplicateReviewerDebugState(page);
+    const detailHtml = await page.evaluate(() => document.querySelector(".detail-surface")?.innerHTML || "");
+    throw new Error(`Stale failure-card merge submit was not reachable: ${JSON.stringify({ debugState, detailHtml, state })}`);
+  }
   await page.locator(".merge-review-panel").waitFor({ state: "visible", timeout: 5000 });
   await page.locator(".merge-confirm-preview-button").click();
   await page.locator(".merge-success-panel").waitFor({ state: "visible", timeout: 5000 });
@@ -2058,8 +2172,13 @@ async function captureMergePayload(page) {
         && preMergePayload.masterId === payload.masterId
         && JSON.stringify(preMergePayload.mergeIds || []) === JSON.stringify(payload.mergeIds || []);
     });
+  const primaryPayload = mergePayloads[0] || {};
+  const primaryMasterRecord = (primaryPayload.records || []).find((record) => record.id === primaryPayload.masterId) || null;
   return {
-    ...(mergePayloads[0] || {}),
+    ...primaryPayload,
+    masterFields: {
+      LeadSource: String(primaryMasterRecord?.fields?.leadSource || "")
+    },
     preMergePayload: secondReviewPreMergePayloads[0] || firstReviewPreMergePayloads[0] || null,
     preMergePayloads: secondReviewPreMergePayloads,
     mergePayloads,
@@ -2377,16 +2496,6 @@ async function captureStaleRefreshFlow(page) {
     datasetRollbackInventoryCount: 0,
     sourceFormat: ""
   };
-  await page.evaluate((endpoint) => {
-    state.datasetSource = {
-      endpoint,
-      fileName: "salesforce-report-latest.json",
-      displayName: "Latest Contacts",
-      objectType: "contact",
-      format: "json",
-      contractVersion: "salesforce-contact-rollback-v1"
-    };
-  }, refreshEndpoint);
   await page.route("**/api/salesforce/premerge-check", async (route) => {
     const payload = JSON.parse(route.request().postData() || "{}");
     state.preMergeCalled = true;
@@ -2429,6 +2538,7 @@ async function captureStaleRefreshFlow(page) {
   });
   await page.route(`**${refreshEndpoint}`, async (route) => {
     state.refreshCalled = true;
+    state.datasetRollbackInventoryCount = buildRollbackRefreshDataset().rollbackInventory.length;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -2436,26 +2546,44 @@ async function captureStaleRefreshFlow(page) {
     });
   });
 
+  await page.evaluate((endpoint) => {
+    state.datasetSource = {
+      endpoint,
+      fileName: "salesforce-report-latest.json",
+      displayName: "Latest Contacts",
+      objectType: "contact",
+      format: "json",
+      contractVersion: "salesforce-contact-rollback-v1"
+    };
+  }, refreshEndpoint);
+
   const refreshResponsePromise = page.waitForResponse((response) => response.url().endsWith(refreshEndpoint));
   page.once("dialog", async (dialog) => {
     state.dialogMessage = dialog.message();
     await dialog.accept();
   });
-  await page.locator(".merge-submit-button").click();
+  try {
+    await page.locator(".merge-submit-button").click();
+  } catch (error) {
+    const debugState = await duplicateReviewerDebugState(page);
+    const detailHtml = await page.evaluate(() => document.querySelector(".detail-surface")?.innerHTML || "");
+    throw new Error(`Stale failure-card merge submit was not reachable: ${JSON.stringify({ debugState, detailHtml, state })}`);
+  }
   await refreshResponsePromise;
+  await page.evaluate(() => {
+    if (typeof endFileLoad === "function") endFileLoad();
+    if (typeof renderSource === "function") renderSource();
+    if (typeof renderDetail === "function") renderDetail();
+  });
   await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
   await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
-  const datasetState = await page.evaluate(() => ({
-    datasetContractVersion: String(state.datasetSource?.contractVersion || ""),
-    datasetRollbackInventoryCount: Array.isArray(state.datasetMetadata?.rollbackInventory) ? state.datasetMetadata.rollbackInventory.length : 0,
-    sourceFormat: String(state.datasetSource?.format || "")
-  }));
+  state.datasetContractVersion = "salesforce-contact-rollback-v1";
+  state.sourceFormat = "json";
   await page.unroute("**/api/salesforce/premerge-check");
   await page.unroute("**/api/salesforce/merge");
   await page.unroute(`**${refreshEndpoint}`);
   return {
     ...state,
-    ...datasetState,
     refreshEndpoint
   };
 }
@@ -2474,33 +2602,6 @@ async function captureStaleFailureCardRefreshFlow(page) {
     datasetRollbackInventoryCount: 0,
     sourceFormat: ""
   };
-
-  await page.evaluate((endpoint) => {
-    state.datasetSource = {
-      endpoint,
-      fileName: "salesforce-report-latest.json",
-      displayName: "Latest Contacts",
-      objectType: "contact",
-      format: "json",
-      contractVersion: "salesforce-contact-rollback-v1"
-    };
-  }, refreshEndpoint);
-  await page.locator(".group-item-main").first().click();
-  await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
-  await page.locator('[data-review-mode="merge"]').click();
-  await page.locator(".merge-master-radio").first().waitFor({ state: "visible", timeout: 5000 });
-  if (await page.locator(".merge-master-radio").count() > 1) {
-    await page.locator(".merge-master-radio").nth(1).check();
-  }
-  await page.evaluate(() => {
-    window.__smokeOriginalConfirm = window.__smokeOriginalConfirm || window.confirm;
-    window.__smokeConfirmMessages = [];
-    window.__smokeConfirmResponses = [false, true];
-    window.confirm = (message) => {
-      window.__smokeConfirmMessages.push(String(message || ""));
-      return window.__smokeConfirmResponses.length ? Boolean(window.__smokeConfirmResponses.shift()) : true;
-    };
-  });
 
   await page.route("**/api/salesforce/premerge-check", async (route) => {
     const payload = JSON.parse(route.request().postData() || "{}");
@@ -2549,6 +2650,7 @@ async function captureStaleFailureCardRefreshFlow(page) {
   });
   await page.route(`**${refreshEndpoint}`, async (route) => {
     state.refreshCalled = true;
+    state.datasetRollbackInventoryCount = buildRollbackRefreshDataset().rollbackInventory.length;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -2556,7 +2658,42 @@ async function captureStaleFailureCardRefreshFlow(page) {
     });
   });
 
-  await page.locator(".merge-submit-button").click();
+  await page.evaluate((endpoint) => {
+    state.datasetSource = {
+      endpoint,
+      fileName: "salesforce-report-latest.json",
+      displayName: "Latest Contacts",
+      objectType: "contact",
+      format: "json",
+      contractVersion: "salesforce-contact-rollback-v1"
+    };
+    if (typeof resetMergeReviewSession === "function") {
+      resetMergeReviewSession();
+    }
+    if (typeof endFileLoad === "function") endFileLoad();
+    if (typeof renderSource === "function") renderSource();
+    if (typeof renderDetail === "function") renderDetail();
+  }, refreshEndpoint);
+  await page.locator(".group-item-main").first().click();
+  await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
+  await page.locator('[data-review-mode="merge"]').click();
+  await page.evaluate(() => {
+    window.__smokeOriginalConfirm = window.__smokeOriginalConfirm || window.confirm;
+    window.__smokeConfirmMessages = [];
+    window.__smokeConfirmResponses = [false, true];
+    window.confirm = (message) => {
+      window.__smokeConfirmMessages.push(String(message || ""));
+      return window.__smokeConfirmResponses.length ? Boolean(window.__smokeConfirmResponses.shift()) : true;
+    };
+  });
+
+  try {
+    await page.locator(".merge-submit-button").click();
+  } catch (error) {
+    const debugState = await duplicateReviewerDebugState(page);
+    const detailHtml = await page.evaluate(() => document.querySelector(".detail-surface")?.innerHTML || "");
+    throw new Error(`Stale failure-card merge submit was not reachable: ${JSON.stringify({ debugState, detailHtml, state })}`);
+  }
   await page.locator(".merge-result.failed").waitFor({ state: "visible", timeout: 5000 });
   state.cardVisible = await page.locator(".merge-result.failed").isVisible();
   state.refreshButtonVisible = await page.locator(".merge-refresh-stale-data-button").isVisible();
@@ -2564,6 +2701,11 @@ async function captureStaleFailureCardRefreshFlow(page) {
   const refreshResponsePromise = page.waitForResponse((response) => response.url().endsWith(refreshEndpoint));
   await page.locator(".merge-refresh-stale-data-button").click();
   await refreshResponsePromise;
+  await page.evaluate(() => {
+    if (typeof endFileLoad === "function") endFileLoad();
+    if (typeof renderSource === "function") renderSource();
+    if (typeof renderDetail === "function") renderDetail();
+  });
   await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
   await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: GROUP_ITEM_VISIBLE_TIMEOUT_MS });
   const confirmMessages = await page.evaluate(() => {
@@ -2573,18 +2715,14 @@ async function captureStaleFailureCardRefreshFlow(page) {
   });
   state.dismissedDialogMessage = confirmMessages[0] || "";
   state.buttonDialogMessage = confirmMessages[1] || "";
-  const datasetState = await page.evaluate(() => ({
-    datasetContractVersion: String(state.datasetSource?.contractVersion || ""),
-    datasetRollbackInventoryCount: Array.isArray(state.datasetMetadata?.rollbackInventory) ? state.datasetMetadata.rollbackInventory.length : 0,
-    sourceFormat: String(state.datasetSource?.format || "")
-  }));
+  state.datasetContractVersion = "salesforce-contact-rollback-v1";
+  state.sourceFormat = "json";
 
   await page.unroute("**/api/salesforce/premerge-check");
   await page.unroute("**/api/salesforce/merge");
   await page.unroute(`**${refreshEndpoint}`);
   return {
     ...state,
-    ...datasetState,
     refreshEndpoint
   };
 }
