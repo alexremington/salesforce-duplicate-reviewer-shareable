@@ -21,12 +21,16 @@ const OBJECT_CONFIG = {
       "firstName",
       "lastName",
       "company",
+      "accountId",
       "email",
       "leadSource",
       "ziPersonLinkedInUrl",
       "phone",
       "ziPhone",
       "mobile",
+      "otherPhone",
+      "homePhone",
+      "assistantPhone",
       "mailingStreet",
       "mailingCity",
       "mailingState",
@@ -39,9 +43,13 @@ const OBJECT_CONFIG = {
       firstName: ["first name", "firstname", "first_name", "given name"],
       lastName: ["last name", "lastname", "last_name", "surname", "family name"],
       company: ["company", "account name", "account", "organization", "org"],
+      accountId: ["account id", "accountid"],
       email: ["email", "email address", "emailaddress", "e-mail"],
       phone: ["phone", "phone number", "business phone", "work phone"],
       mobile: ["mobile", "mobile phone", "mobile number", "cell", "cell phone"],
+      otherPhone: ["other phone", "otherphone"],
+      homePhone: ["home phone", "homephone"],
+      assistantPhone: ["assistant phone", "assistantphone"],
       mailingStreet: ["mailing street", "mailingstreet", "mailing address", "street"],
       mailingCity: ["mailing city", "mailingcity", "city"],
       mailingState: ["mailing state/province", "mailing state", "mailingstate", "state", "province"],
@@ -158,13 +166,24 @@ const FIELD_LABELS = {
   firstName: "First Name",
   lastName: "Last Name",
   company: "Company",
+  accountId: "Account ID",
   email: "Email",
   leadSource: "Lead Source",
   createdDate: "Created Date",
+  title: "Title",
+  department: "Department",
   ziPersonLinkedInUrl: "ZI Person LinkedIn URL",
   phone: "Phone",
   ziPhone: "ZI Phone",
   mobile: "Mobile",
+  otherPhone: "Other Phone",
+  homePhone: "Home Phone",
+  assistantPhone: "Assistant Phone",
+  mailingStreet: "Mailing Street",
+  mailingCity: "Mailing City",
+  mailingState: "Mailing State",
+  mailingPostalCode: "Mailing Postal Code",
+  mailingCountry: "Mailing Country",
   mirrorOf: "Mirror of",
   name: "Name",
   website: "Website",
@@ -472,7 +491,12 @@ const CONTACT_FIELD_WEIGHTS = {
   ziPersonLinkedInUrl: 8,
   phone: 18,
   email: 24,
-  company: 32
+  company: 32,
+  mailingStreet: 6,
+  mailingCity: 4,
+  mailingState: 3,
+  mailingPostalCode: 5,
+  mailingCountry: 2
 };
 const CONTACT_COMPANY_DIVERGENCE_THRESHOLD = 1;
 const CONTACT_COMPANY_DIVERGENCE_CAP = 80;
@@ -4164,10 +4188,19 @@ function prepareContactRow(row, mapping, index, cache) {
   const phone = cachedTransform(cache.phones, getValue(row, mapping.phone), normalizePhone);
   const ziPhone = cachedTransform(cache.phones, getValue(row, mapping.ziPhone), normalizePhone);
   const mobile = cachedTransform(cache.phones, getValue(row, mapping.mobile), normalizePhone);
+  const otherPhone = cachedTransform(cache.phones, getValue(row, mapping.otherPhone), normalizePhone);
+  const homePhone = cachedTransform(cache.phones, getValue(row, mapping.homePhone), normalizePhone);
+  const assistantPhone = cachedTransform(cache.phones, getValue(row, mapping.assistantPhone), normalizePhone);
+  const mailingStreet = cachedTransform(cache.addresses, getValue(row, mapping.mailingStreet), normalizeAddress);
+  const mailingCity = cachedTransform(cache.text, getValue(row, mapping.mailingCity), normalizeText);
+  const mailingState = cachedTransform(cache.states, getValue(row, mapping.mailingState), normalizeState);
+  const mailingPostalCode = cachedTransform(cache.postalCodes, getValue(row, mapping.mailingPostalCode), normalizePostalCode);
+  const mailingPostalPrefix = mailingPostalCode.slice(0, 5);
+  const mailingCountry = cachedTransform(cache.countries, getValue(row, mapping.mailingCountry), normalizeCountry);
   const recordIdKey = normalizeContactReferenceKey(getValue(row, mapping.recordId));
   const recordNameKey = normalizeContactReferenceKey(name.fullName || [name.firstName, name.lastName].filter(Boolean).join(" "));
   const mirrorOfKey = normalizeContactReferenceKey(getValue(row, mapping.mirrorOf));
-  const phones = [phone, ziPhone, mobile].filter((value, phoneIndex, values) => {
+  const phones = [phone, ziPhone, mobile, otherPhone, homePhone, assistantPhone].filter((value, phoneIndex, values) => {
     return value && values.indexOf(value) === phoneIndex;
   });
 
@@ -4184,13 +4217,16 @@ function prepareContactRow(row, mapping, index, cache) {
     recordNameKey,
     mirrorOfKey,
     company: cachedTransform(cache.companies, getValue(row, mapping.company), normalizeCompany),
-    organization: cachedTransform(cache.organizations, getValue(row, mapping.company), resolveCanonicalCompanyKey),
+    accountId: getValue(row, mapping.accountId),
     email,
     domain: emailDomain(email),
     linkedIn: cachedTransform(cache.linkedIn, getValue(row, mapping.ziPersonLinkedInUrl), normalizeLinkedInUrl),
     phone,
     ziPhone,
     mobile,
+    otherPhone,
+    homePhone,
+    assistantPhone,
     mailingStreet,
     mailingCity,
     mailingState,
@@ -4211,7 +4247,6 @@ function normalizeContactReferenceKey(value) {
 function prepareAccountRow(row, mapping, index, cache) {
   const rawName = getValue(row, mapping.name);
   const name = cachedTransform(cache.companies, rawName, normalizeCompany);
-  const organization = cachedTransform(cache.organizations, rawName, resolveCanonicalCompanyKey);
   const phone = cachedTransform(cache.phones, getValue(row, mapping.phone), normalizePhone);
   const billingStreet = cachedTransform(cache.addresses, getValue(row, mapping.billingStreet), normalizeAddress);
   const billingCity = cachedTransform(cache.text, getValue(row, mapping.billingCity), normalizeText);
@@ -4705,7 +4740,15 @@ function scoreContactPair(left, right, cache = null) {
         ziPersonLinkedInUrl: null,
         phone: null,
         ziPhone: null,
-        mobile: null
+        mobile: null,
+        otherPhone: null,
+        homePhone: null,
+        assistantPhone: null,
+        mailingStreet: null,
+        mailingCity: null,
+        mailingState: null,
+        mailingPostalCode: null,
+        mailingCountry: null
       }
     };
   }
@@ -4728,6 +4771,9 @@ function scoreContactPair(left, right, cache = null) {
   const phoneSimilarity = comparableScore(left.phone, right.phone, phoneScore);
   const ziPhoneSimilarity = comparableScore(left.ziPhone, right.ziPhone, phoneScore);
   const mobileSimilarity = comparableScore(left.mobile, right.mobile, phoneScore);
+  const otherPhoneSimilarity = comparableScore(left.otherPhone, right.otherPhone, phoneScore);
+  const homePhoneSimilarity = comparableScore(left.homePhone, right.homePhone, phoneScore);
+  const assistantPhoneSimilarity = comparableScore(left.assistantPhone, right.assistantPhone, phoneScore);
   const mailingStreetSimilarity = comparableScore(left.mailingStreet, right.mailingStreet, stringSimilarity);
   const mailingCitySimilarity = comparableScore(left.mailingCity, right.mailingCity, stringSimilarity);
   const mailingStateSimilarity = comparableScore(left.mailingState, right.mailingState, exactValueScore);
@@ -4754,7 +4800,15 @@ function scoreContactPair(left, right, cache = null) {
         ziPersonLinkedInUrl: linkedInSimilarity,
         phone: phoneSimilarity,
         ziPhone: ziPhoneSimilarity,
-        mobile: mobileSimilarity
+        mobile: mobileSimilarity,
+        otherPhone: otherPhoneSimilarity,
+        homePhone: homePhoneSimilarity,
+        assistantPhone: assistantPhoneSimilarity,
+        mailingStreet: mailingStreetSimilarity,
+        mailingCity: mailingCitySimilarity,
+        mailingState: mailingStateSimilarity,
+        mailingPostalCode: mailingPostalCodeSimilarity,
+        mailingCountry: mailingCountrySimilarity
       }
     };
   }
@@ -4911,6 +4965,9 @@ function scoreContactPair(left, right, cache = null) {
       phone: phoneSimilarity,
       ziPhone: ziPhoneSimilarity,
       mobile: mobileSimilarity,
+      otherPhone: otherPhoneSimilarity,
+      homePhone: homePhoneSimilarity,
+      assistantPhone: assistantPhoneSimilarity,
       mailingStreet: mailingStreetSimilarity,
       mailingCity: mailingCitySimilarity,
       mailingState: mailingStateSimilarity,

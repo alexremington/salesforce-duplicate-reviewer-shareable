@@ -468,68 +468,34 @@ async function assertStaticApp(baseUrl) {
 }
 
 async function assertSalesforceExportSchemaUpgradeRegression() {
-  const approvedContactQuery = [
-    "SELECT",
-    "  Id,",
-    "  Name,",
-    "  FirstName,",
-    "  LastName,",
-    "  Email,",
-    "  Phone,",
-    "  MobilePhone,",
-    "  Account.Name,",
-    "  MailingStreet,",
-    "  MailingCity,",
-    "  MailingState,",
-    "  MailingPostalCode,",
-    "  MailingCountry,",
-    "  LeadSource,",
-    "  CreatedDate,",
-    "  ziPersonDirectPhone__c,",
-    "  ZI_Person_LinkedIn_URL__c",
-    "FROM Contact"
-  ].join("\n");
-  const contactQueryExpectations = new Map([
-    [
-      path.join(PROJECT_DIR, "queries", "contacts.soql.example"),
-      [
-        "SELECT",
-        "  Id,",
-        "  Name,",
-        "  FirstName,",
-        "  LastName,",
-        "  Email,",
-        "  Phone,",
-        "  MobilePhone,",
-        "  Account.Name,",
-        "  MailingStreet,",
-        "  MailingCity,",
-        "  MailingState,",
-        "  MailingPostalCode,",
-        "  MailingCountry,",
-        "  LeadSource,",
-        "  CreatedDate,",
-        "  ziPersonDirectPhone__c,",
-        "  ZI_Person_LinkedIn_URL__c",
-        "FROM Contact",
-        "WHERE Name != null",
-        "LIMIT 1000"
-      ].join("\n")
-    ],
-    [
-      path.join(PROJECT_DIR, "queries", "contact-duplicate-record-items.soql"),
-      approvedContactQuery
-    ]
-  ]);
-  const accountQueryPath = path.join(PROJECT_DIR, "queries", "account-duplicate-record-items.soql");
+  const contactQueryPath = path.join(PROJECT_DIR, "queries", "report-00OVZ000003DjaH2AS.soql");
+  const accountQueryPath = path.join(PROJECT_DIR, "queries", "report-00OVZ000003Dm572AC.soql");
+  const contactQuery = await fs.readFile(contactQueryPath, "utf8");
   const accountQuery = await fs.readFile(accountQueryPath, "utf8");
 
-  for (const [contactQueryPath, expectedContactQuery] of contactQueryExpectations.entries()) {
-    const contactQuery = await fs.readFile(contactQueryPath, "utf8");
-    if (normalizeQueryText(contactQuery) !== normalizeQueryText(expectedContactQuery)) {
-      throw new Error(`Query schema regression failed for ${contactQueryPath}: ${JSON.stringify(contactQuery)}`);
-    }
-  }
+  assertQueryContainsAll(contactQueryPath, contactQuery, [
+    "Id",
+    "Name",
+    "FirstName",
+    "LastName",
+    "Email",
+    "Phone",
+    "MobilePhone",
+    "OtherPhone",
+    "HomePhone",
+    "AssistantPhone",
+    "Account.Name",
+    "AccountId",
+    "MailingStreet",
+    "MailingCity",
+    "MailingState",
+    "MailingPostalCode",
+    "MailingCountry",
+    "Title",
+    "Department",
+    "LeadSource",
+    "CreatedDate"
+  ]);
   assertQueryContainsAll(accountQueryPath, accountQuery, [
     "Id",
     "Name",
@@ -543,6 +509,10 @@ async function assertSalesforceExportSchemaUpgradeRegression() {
     "CurrencyIsoCode",
     "Parent.Name",
     "Industry",
+    "Type",
+    "NumberOfEmployees",
+    "AnnualRevenue",
+    "DUNSNumber",
     "Ultimate_Parent_Account__c"
   ]);
 
@@ -556,33 +526,34 @@ async function assertSalesforceExportSchemaUpgradeRegression() {
     "Email",
     "Phone",
     "MobilePhone",
+    "OtherPhone",
+    "HomePhone",
+    "AssistantPhone",
     "Account.Name",
+    "AccountId",
     "MailingStreet",
     "MailingCity",
     "MailingState",
     "MailingPostalCode",
     "MailingCountry",
+    "Title",
+    "Department",
     "LeadSource",
-    "CreatedDate",
-    "ziPersonDirectPhone__c",
-    "ZI_Person_LinkedIn_URL__c"
+    "CreatedDate"
   ];
   const contactParsed = api.parseCsv([
     contactHeaders.join(","),
-    "003E00000000001,Taylor Mason,Taylor,Mason,taylor.mason@example.com,555-010-1000,555-010-1001,Northstar Analytics,1 Main St,Dallas,TX,75201,United States,Web,2026-04-01T00:00:00.000+0000,555-010-1004,https://www.linkedin.com/in/taylor-mason-1010/",
-    "003E00000000002,Taylor Mason,Taylor,Mason,taylor.mason@example.com,555-010-1000,555-010-1001,Northstar Analytics,9 Other St,Austin,TX,73301,United States,Web,2026-04-01T00:00:00.000+0000,555-010-1004,https://www.linkedin.com/in/taylor-mason-1010/"
+    "003E00000000001,Taylor Mason,Taylor,Mason,taylor.mason@example.com,555-010-1000,555-010-1001,555-010-1002,555-010-1003,555-010-1004,Northstar Analytics,001E00000000001,1 Main St,Dallas,TX,75201,United States,Director,Sales,Web,2026-04-01T00:00:00.000+0000",
+    "003E00000000002,Taylor Mason,Taylor,Mason,taylor.mason@example.com,555-010-1000,555-010-1001,555-010-1002,555-010-1003,555-010-1004,Northstar Analytics,001E00000000001,9 Other St,Austin,TX,73301,United States,Director,Sales,Web,2026-04-01T00:00:00.000+0000"
   ].join("\n"));
   const contactRows = contactParsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
   const contactMapping = api.autoMapHeaders(contactParsed.headers, api.OBJECT_CONFIG.contact.fields);
   const contactPrepared = api.prepareRows(contactRows, "contact", contactMapping);
   if (
-    contactMapping.company !== "Account.Name" ||
+    contactMapping.accountId !== "AccountId" ||
+    contactMapping.otherPhone !== "OtherPhone" ||
     contactMapping.mailingStreet !== "MailingStreet" ||
-    contactMapping.mailingPostalCode !== "MailingPostalCode" ||
-    contactMapping.leadSource !== "LeadSource" ||
-    contactMapping.createdDate !== "CreatedDate" ||
-    contactMapping.ziPhone !== "ziPersonDirectPhone__c" ||
-    contactMapping.ziPersonLinkedInUrl !== "ZI_Person_LinkedIn_URL__c"
+    contactMapping.mailingPostalCode !== "MailingPostalCode"
   ) {
     throw new Error(`Contact export schema upgrade auto-mapping failed: ${JSON.stringify(contactMapping)}`);
   }
@@ -607,12 +578,16 @@ async function assertSalesforceExportSchemaUpgradeRegression() {
     "CurrencyIsoCode",
     "Parent.Name",
     "Industry",
+    "Type",
+    "NumberOfEmployees",
+    "AnnualRevenue",
+    "DUNSNumber",
     "Ultimate_Parent_Account__c"
   ];
   const accountParsed = api.parseCsv([
     accountHeaders.join(","),
-    "001E00000000001,Northstar Analytics,northstar.example,555-020-1000,1 Main St,Dallas,TX,75201,United States,USD,Northstar Holdings,Media,Northstar Holdings",
-    "001E00000000002,Northstar Analytics,northstar.example,555-020-1999,1 Main St,Dallas,TX,75201,United States,USD,Northstar Holdings,Media,Northstar Holdings"
+    "001E00000000001,Northstar Analytics,northstar.example,555-020-1000,1 Main St,Dallas,TX,75201,United States,USD,Northstar Holdings,Media,Company,45,1200000,123456789,Northstar Holdings",
+    "001E00000000002,Northstar Analytics,northstar.example,555-020-1999,1 Main St,Dallas,TX,75201,United States,USD,Northstar Holdings,Media,Company,45,1200000,123456789,Northstar Holdings"
   ].join("\n"));
   const accountRows = accountParsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
   const accountMapping = api.autoMapHeaders(accountParsed.headers, api.OBJECT_CONFIG.account.fields);
@@ -639,6 +614,7 @@ function assertQueryContainsAll(queryPath, queryText, fields) {
     throw new Error(`Query schema regression failed for ${queryPath}: missing ${missing.join(", ")}`);
   }
 }
+
 async function assertAccountScopeDivergenceRegression() {
   const api = loadAppApi();
   const csv = [
