@@ -8,7 +8,6 @@
     "check:changed": "node ../automation-shared-resources/scripts/check-js-syntax.js . --changed --exclude Output --exclude incoming --exclude logs --exclude node_modules && node ../automation-shared-resources/scripts/check-feature-manifest.js .",
     "check:features": "node ../automation-shared-resources/scripts/check-feature-manifest.js . --strict",
     "check:merge-queue": "node scripts/check-merge-queue-readiness.js",
-    "report:company-commentary-impact": "node scripts/company-commentary-impact-report.js",
     "check:windows": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/check-windows.ps1",
     "check:shareable": "scripts/check-shareable.sh",
     "closeout": "node scripts/closeout.js",

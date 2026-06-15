@@ -34,6 +34,9 @@ node ../automation-shared-resources/scripts/check-feature-manifest.js .
 echo "Checking server contracts..."
 node scripts/check-server-contracts.js
 
+echo "Checking merge queue readiness helper..."
+node scripts/check-merge-queue-readiness.js --self-check
+
 echo "Checking staging routing defaults..."
 contactsDryRun="$(scripts/run-staging-contacts-bulk-query.sh --dry-run)"
 case "${contactsDryRun}" in
