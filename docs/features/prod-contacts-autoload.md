@@ -1,6 +1,6 @@
 # Prod Contacts Autoload
 
-Status: complete
+Status: in progress
 
 ## User Story
 
@@ -10,8 +10,8 @@ Status: complete
 
 ## Scope
 
-- Mode or page: Server-backed Duplicate Reviewer startup, autoload routing, canonical prod-path resolution, and latest-file seeding.
-- Data source: `Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/`, `/api/prod-contacts/latest.json`, `/api/prod-contacts/latest.csv`, and prod latest-file metadata.
+- Mode or page: Server-backed Duplicate Reviewer startup, autoload routing, and latest-file seeding.
+- Data source: `/api/prod-contacts/latest.json`, `/api/prod-contacts/latest.csv`, and prod latest-file metadata.
 - Object type: Contact.
 - Primary actions: Autoload the prod Contacts dataset, keep the notification flag path working, and render the loaded records.
 - Secondary actions: Seed prod latest files into Recent files and keep the staging autoload path unchanged.
@@ -31,13 +31,11 @@ Status: complete
 - Whitespace, no-overlap, and scroll criteria: No layout changes are expected.
 - Keyboard, focus, and contrast criteria: No new focus targets are introduced.
 - Desktop success criteria: `autoload=prod-contacts` loads the prod Contacts dataset and displays it as the current source.
-- Desktop success criteria: The prod launcher and reviewer both read from `Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/`.
-- Desktop success criteria: The prod output files use the raw `salesforce-report-latest.json` and `salesforce-report-latest.csv` names.
 - Mobile success criteria: No mobile-specific behavior changes are expected.
 
 ## Verification
 
 - Local checks: `npm run check`, `npm run check:windows`, and `npm run smoke:ui:local`.
-- Playwright coverage, including Hume design alignment: Add a regression that proves `autoload=prod-contacts` loads the expected prod latest Contacts dataset from the canonical prod tree.
-- Manual checks: Confirm the prod latest file endpoint and launch URL work together end to end, including `autoload=prod-contacts`, `object=contact`, `notify=1`, `sticky=1`, and `name=salesforce-report-latest.json`.
-- Docs to update: `README.md`, `SETUP.md`, and the team handoff notes. Keep the canonical prod path and raw report-latest filenames documented.
+- Playwright coverage, including Hume design alignment: Add a regression that proves `autoload=prod-contacts` loads the expected prod latest Contacts dataset.
+- Manual checks: Confirm the prod latest file endpoint and launch URL work together end to end.
+- Docs to update: `README.md`, `SETUP.md`, and the team handoff notes.

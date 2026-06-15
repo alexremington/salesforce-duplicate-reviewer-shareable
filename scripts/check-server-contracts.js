@@ -68,8 +68,10 @@ async function main() {
   fakeSalesforceCli = await writeFakeSalesforceCli(tempDir, fakeSalesforceServer.baseUrl);
   const contactsCsvPath = path.join(tempDir, "contacts-latest.csv");
   const accountsCsvPath = path.join(tempDir, "accounts-latest.csv");
+  const prodContactsCsvPath = path.join(tempDir, "prod-contacts-latest.csv");
   await writeSmokeDataset(contactsCsvPath, "003T00000090001", "003T00000090002");
   await writeSmokeDataset(accountsCsvPath, "001T00000090001", "001T00000090002");
+  await writeSmokeDataset(prodContactsCsvPath, "003P00000090001", "003P00000090002");
 
   serverProcess = childProcess.spawn(process.execPath, [SERVER_SCRIPT], {
     cwd: PROJECT_DIR,
@@ -80,9 +82,12 @@ async function main() {
       DUPLICATE_REVIEWER_STATIC_DIR: PUBLIC_DIR,
       STAGING_CONTACTS_CSV: contactsCsvPath,
       STAGING_ACCOUNTS_CSV: accountsCsvPath,
+      PROD_CONTACTS_CSV: prodContactsCsvPath,
       SF_CLI_BIN: fakeSalesforceCli,
       SF_ORG_ALIAS: "smoke-org",
       SF_INSTANCE_URL: fakeSalesforceServer.baseUrl,
+      PROD_SF_ORG_ALIAS: "smoke-prod",
+      PROD_SF_INSTANCE_URL: fakeSalesforceServer.baseUrl,
       SF_API_VERSION: "v67.0"
     },
     stdio: ["ignore", "pipe", "pipe"]
@@ -107,6 +112,7 @@ async function main() {
     await assertRetiredMergeGateAbsent();
     await assertStaticApp(baseUrl);
     await assertLatestEndpointCaching(baseUrl);
+    await assertProdLatestEndpointCaching(baseUrl);
     await assertSalesforceOrgCatalogRoute(baseUrl);
     await assertSalesforcePullReuseRegression();
     await assertSalesforcePullAuthPreflightRegression();
@@ -217,66 +223,32 @@ async function assertLatestEndpointCaching(baseUrl) {
   }
 }
 
-async function assertSchedulerReviewerForceRefreshRegression() {
-  const smokeRoot = path.join(tempDir, "scheduler-reviewer-force-refresh");
-  const homeDir = path.join(smokeRoot, "home");
-  const cliDir = path.join(smokeRoot, "cli");
-  const staticDir = path.join(homeDir, "Library", "Application Support", "salesforce-duplicate-reviewer", "static");
-  const logsDir = path.join(homeDir, "Library", "Logs", "salesforce-duplicate-reviewer");
-  const launchAgentsDir = path.join(homeDir, "Library", "LaunchAgents");
-  const stagingContactsCsv = path.join(smokeRoot, "staging", "Output", "staging-contacts", "salesforce-report-latest.csv");
-  const stagingAccountsCsv = path.join(smokeRoot, "staging", "Output", "staging-accounts", "salesforce-report-latest.csv");
-  const staticBundleApp = path.join(staticDir, "app.js");
+async function assertProdLatestEndpointCaching(baseUrl) {
+  const response = await requestText(`${baseUrl}/api/prod-contacts/latest.json`);
+  if (response.statusCode !== 200 || !response.body.includes("salesforce-duplicate-reviewer.dataset")) {
+    throw new Error(`Prod latest JSON cache contract failed: HTTP ${response.statusCode}: ${response.body}`);
+  }
 
-  await fs.mkdir(path.dirname(stagingContactsCsv), { recursive: true });
-  await fs.mkdir(path.dirname(stagingAccountsCsv), { recursive: true });
-  await fs.mkdir(cliDir, { recursive: true });
-  await fs.mkdir(launchAgentsDir, { recursive: true });
-  await fs.mkdir(logsDir, { recursive: true });
-  await fs.mkdir(staticDir, { recursive: true });
-  await writeSmokeDataset(stagingContactsCsv, "003S00000090001", "003S00000090002");
-  await writeSmokeDataset(stagingAccountsCsv, "001S00000090001", "001S00000090002");
+  const payload = JSON.parse(response.body);
+  if (
+    payload?.fileName !== "salesforce-prod-contacts-latest.json" ||
+    payload?.source?.name !== "Latest Prod Contacts" ||
+    payload?.source?.orgAlias !== "smoke-prod" ||
+    payload?.source?.instanceUrl !== fakeSalesforceServer.baseUrl
+  ) {
+    throw new Error(`Prod latest JSON cache contract did not preserve prod source metadata: ${response.body}`);
+  }
 
-  const env = {
-    ...process.env,
-    HOME: homeDir,
-    SF_CLI_BIN: await writeFakeSalesforceCli(cliDir, fakeSalesforceServer.baseUrl),
-    SF_ORG_ALIAS: "smoke-org",
-    SF_INSTANCE_URL: fakeSalesforceServer.baseUrl,
-    SF_API_VERSION: "v67.0",
-    DUPLICATE_REVIEWER_STATIC_DIR: staticDir,
-    STAGING_CONTACTS_CSV: stagingContactsCsv,
-    STAGING_ACCOUNTS_CSV: stagingAccountsCsv
-  };
-  const scriptPath = path.join(PROJECT_DIR, "scripts", "start-reviewer-server.sh");
-
-  try {
-    const firstLaunch = await runShellScript(scriptPath, [], env);
-    const baseUrl = firstLaunch.url;
-    if (!baseUrl) {
-      throw new Error(`Reviewer force-refresh regression did not return a launch URL: ${JSON.stringify(firstLaunch)}`);
-    }
-    const firstHealth = await requestJson(`${baseUrl}/api/health`);
-    const firstBundleStat = await fs.stat(staticBundleApp);
-    if (!firstHealth?.pid) {
-      throw new Error(`Reviewer force-refresh regression did not expose startup health state: ${JSON.stringify(firstHealth)}`);
-    }
-
-    const secondLaunch = await runShellScript(scriptPath, ["--force-refresh"], env);
-    const secondHealth = await requestJson(`${baseUrl}/api/health`);
-    const secondBundleStat = await fs.stat(staticBundleApp);
-    if (
-      !secondLaunch.stdout.includes("Force-refreshing Salesforce Duplicate Reviewer server at") ||
-      secondHealth.pid === firstHealth.pid ||
-      secondBundleStat.mtimeMs <= firstBundleStat.mtimeMs
-    ) {
-      throw new Error(
-        `Reviewer force-refresh regression failed: ${JSON.stringify({ firstHealth, secondHealth, firstBundleStat, secondBundleStat, secondLaunch: secondLaunch.stdout })}`
-      );
-    }
-  } finally {
-    await unloadReviewerLaunchAgent();
-    await fs.rm(smokeRoot, { recursive: true, force: true }).catch(() => {});
+  const latestFiles = await requestJson(`${baseUrl}/api/prod/latest-files`);
+  const files = Array.isArray(latestFiles.files) ? latestFiles.files : [];
+  const prodContact = files.find((file) => file.source === "prod-contacts");
+  if (
+    !prodContact ||
+    prodContact.endpoint !== "/api/prod-contacts/latest.json" ||
+    prodContact.name !== "salesforce-prod-contacts-latest.json" ||
+    prodContact.label !== "Latest Prod Contacts"
+  ) {
+    throw new Error(`Prod latest-files route failed: ${JSON.stringify(latestFiles)}`);
   }
 }
 

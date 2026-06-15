@@ -25,8 +25,15 @@ const STAGING_CONTACTS_CSV =
 const STAGING_ACCOUNTS_CSV =
   process.env.STAGING_ACCOUNTS_CSV ||
   path.join(OUTPUT_DIR, "staging-accounts", "salesforce-report-latest.csv");
-const SF_ORG_ALIAS = process.env.SF_ORG_ALIAS || "your-org-alias";
-const SF_INSTANCE_URL = process.env.SF_INSTANCE_URL || "https://your-domain.my.salesforce.com";
+const PROD_CONTACTS_CSV =
+  process.env.PROD_CONTACTS_CSV ||
+  path.join(OUTPUT_DIR, "prod-contacts", "salesforce-prod-contacts-latest.csv");
+const STAGING_SF_ORG_ALIAS = process.env.SF_ORG_ALIAS || "politico-staging";
+const STAGING_SF_INSTANCE_URL = process.env.SF_INSTANCE_URL || "https://politico--staging.sandbox.my.salesforce.com";
+const PROD_SF_ORG_ALIAS = process.env.PROD_SF_ORG_ALIAS || "politico";
+const PROD_SF_INSTANCE_URL = process.env.PROD_SF_INSTANCE_URL || "https://login.salesforce.com";
+const SF_ORG_ALIAS = STAGING_SF_ORG_ALIAS;
+const SF_INSTANCE_URL = STAGING_SF_INSTANCE_URL;
 const SF_API_VERSION = process.env.SF_API_VERSION || "v67.0";
 const SF_CLI_BIN = String(process.env.SF_CLI_BIN || "").trim();
 const FEATURE_VERSION = "duplicate-reviewer-cli-warning-safe-v3";
@@ -128,7 +135,10 @@ const CSV_ENDPOINTS = new Map([
       jsonPath: STAGING_CONTACTS_CSV.replace(/\.csv$/i, ".json"),
       fileName: "salesforce-report-latest.csv",
       objectType: "contact",
-      label: "Latest Contacts"
+      label: "Latest Contacts",
+      source: "staging-contacts",
+      orgAlias: STAGING_SF_ORG_ALIAS,
+      instanceUrl: STAGING_SF_INSTANCE_URL
     }
   ],
   [
@@ -138,7 +148,23 @@ const CSV_ENDPOINTS = new Map([
       jsonPath: STAGING_ACCOUNTS_CSV.replace(/\.csv$/i, ".json"),
       fileName: "salesforce-report-latest.csv",
       objectType: "account",
-      label: "Latest Accounts"
+      label: "Latest Accounts",
+      source: "staging-accounts",
+      orgAlias: STAGING_SF_ORG_ALIAS,
+      instanceUrl: STAGING_SF_INSTANCE_URL
+    }
+  ],
+  [
+    "/api/prod-contacts/latest.csv",
+    {
+      path: PROD_CONTACTS_CSV,
+      jsonPath: PROD_CONTACTS_CSV.replace(/\.csv$/i, ".json"),
+      fileName: "salesforce-prod-contacts-latest.csv",
+      objectType: "contact",
+      label: "Latest Prod Contacts",
+      source: "prod-contacts",
+      orgAlias: PROD_SF_ORG_ALIAS,
+      instanceUrl: PROD_SF_INSTANCE_URL
     }
   ]
 ]);
@@ -271,7 +297,13 @@ async function handleRequest(request, response) {
   }
 
   if (request.method === "GET" && url.pathname === "/api/staging/latest-files") {
-    const files = await stagingLatestFiles();
+    const files = await latestFilesForSource("staging");
+    sendJson(response, { files });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/prod/latest-files") {
+    const files = await latestFilesForSource("prod");
     sendJson(response, { files });
     return;
   }
@@ -477,14 +509,14 @@ async function readJsonEndpointData(endpoint) {
   }
 }
 
-async function stagingLatestFiles() {
+async function latestFilesForSource(sourcePrefix) {
   const files = await Promise.all(
-    [...JSON_ENDPOINTS.entries()].map(async ([endpointPath, endpoint]) => {
+    [...JSON_ENDPOINTS.entries()].filter(([, endpoint]) => String(endpoint.source || "").startsWith(`${sourcePrefix}-`)).map(async ([endpointPath, endpoint]) => {
       const stat = await latestEndpointStat(endpoint);
       if (!stat) return null;
 
       return {
-        source: endpointPath.includes("accounts") ? "staging-accounts" : "staging-contacts",
+        source: String(endpoint.source || ""),
         objectType: endpoint.objectType,
         label: endpoint.label,
         name: endpoint.fileName,
@@ -599,8 +631,8 @@ function reviewDatasetFromJsonExport(json, endpoint) {
       source: {
         ...(payload.source || {}),
         name: endpoint.label,
-        orgAlias: payload.source?.orgAlias || SF_ORG_ALIAS,
-        instanceUrl: payload.source?.instanceUrl || normalizeInstanceUrl(SF_INSTANCE_URL)
+        orgAlias: payload.source?.orgAlias || endpoint.orgAlias || STAGING_SF_ORG_ALIAS,
+        instanceUrl: payload.source?.instanceUrl || normalizeInstanceUrl(endpoint.instanceUrl || STAGING_SF_INSTANCE_URL)
       }
     };
   }
@@ -654,8 +686,8 @@ function reviewDatasetEnvelope({ endpoint, fields, records, format }) {
       system: "salesforce",
       name: endpoint.label,
       format,
-      orgAlias: SF_ORG_ALIAS,
-      instanceUrl: normalizeInstanceUrl(SF_INSTANCE_URL)
+      orgAlias: endpoint.orgAlias || STAGING_SF_ORG_ALIAS,
+      instanceUrl: normalizeInstanceUrl(endpoint.instanceUrl || STAGING_SF_INSTANCE_URL)
     },
     fields,
     records

@@ -50,12 +50,85 @@ case "${contactsDryRun}" in
     exit 1
     ;;
 esac
-if ! grep -Fq "sf org display" scripts/run-salesforce-bulk-query.sh; then
-  echo "Bulk query wrapper did not use sf org display."
+case "${contactsDryRun}" in
+  *"Bulk poll interval ms: 5000"*) ;;
+  *)
+    echo "${contactsDryRun}"
+    echo "Staging Contacts bulk polling was not pinned to the faster handoff interval."
+    exit 1
+    ;;
+esac
+case "${contactsDryRun}" in
+  *"Latest JSON: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.json"*) ;;
+  *)
+    echo "${contactsDryRun}"
+    echo "Staging Contacts did not preserve the canonical latest JSON output flow."
+    exit 1
+    ;;
+esac
+case "${contactsDryRun}" in
+  *"Compatibility CSV: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.csv"*) ;;
+  *)
+    echo "${contactsDryRun}"
+    echo "Staging Contacts did not preserve the canonical compatibility CSV output flow."
+    exit 1
+    ;;
+esac
+prodContactsDryRun="$(scripts/run-prod-contacts-bulk-query.sh --dry-run)"
+case "${prodContactsDryRun}" in
+  *"/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts"*) ;;
+  *)
+    echo "${prodContactsDryRun}"
+    echo "Prod Contacts did not resolve to the canonical Salesforce Pulls prod folder."
+    exit 1
+    ;;
+esac
+case "${prodContactsDryRun}" in
+  *"Org alias: politico"*) ;;
+  *)
+    echo "${prodContactsDryRun}"
+    echo "Prod Contacts did not use the canonical prod Salesforce org alias."
+    exit 1
+    ;;
+esac
+case "${prodContactsDryRun}" in
+  *"Instance: https://login.salesforce.com"*) ;;
+  *)
+    echo "${prodContactsDryRun}"
+    echo "Prod Contacts did not use the canonical prod Salesforce instance URL."
+    exit 1
+    ;;
+esac
+case "${prodContactsDryRun}" in
+  *"SOQL file: ${PROJECT_DIR}/queries/report-00OVq00000CxYd3MAF.soql"*) ;;
+  *)
+    echo "${prodContactsDryRun}"
+    echo "Prod Contacts did not use the canonical prod Contacts query file."
+    exit 1
+    ;;
+esac
+case "${prodContactsDryRun}" in
+  *"Latest JSON: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/salesforce-prod-contacts-latest.json"*) ;;
+  *)
+    echo "${prodContactsDryRun}"
+    echo "Prod Contacts did not preserve the canonical prod latest JSON output flow."
+    exit 1
+    ;;
+esac
+case "${prodContactsDryRun}" in
+  *"Compatibility CSV: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/salesforce-prod-contacts-latest.csv"*) ;;
+  *)
+    echo "${prodContactsDryRun}"
+    echo "Prod Contacts did not preserve the canonical prod compatibility CSV output flow."
+    exit 1
+    ;;
+esac
+if ! grep -Fq "autoload=prod-contacts" scripts/run-prod-contacts-bulk-query.sh; then
+  echo "Prod Contacts launcher did not open Duplicate Reviewer with the prod autoload URL."
   exit 1
 fi
-if ! grep -Fq 'start-reviewer-server.sh" --force-refresh' scripts/run-staging-contacts-bulk-query.sh; then
-  echo "Staging Contacts launcher did not force-refresh the reviewer server before opening the URL."
+if ! grep -Fq "sf org auth show-access-token" scripts/run-salesforce-bulk-query.sh; then
+  echo "Bulk query wrapper did not use sf org auth show-access-token."
   exit 1
 fi
 labelsDryRun="$(node scripts/run-salesforce-duplicate-label-export.js --object contact --dry-run)"

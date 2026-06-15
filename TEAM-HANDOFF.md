@@ -14,6 +14,8 @@ Share a GitHub Release archive or a clean clone of the public-safe branch. Do no
 
 For duplicate-label exports, double-click `Launch Duplicate Labels Export - Mac.command` on macOS or `Launch Duplicate Labels Export - Windows.cmd` on Windows. Those launchers default to the canonical staging Contacts or Accounts CSV when it exists, fall back to prompting only if the file is missing, then write app-ready training labels under `Output/` by default.
 
+For prod Contacts review, run `scripts/run-prod-contacts-bulk-query.sh` after the prod pull completes. It opens Duplicate Reviewer on the `prod-contacts` autoload route and keeps the prod latest files separate from staging.
+
 Use the launcher for normal server-backed work. When latest Contact or Account exports exist under `Output/`, the app adds them to `Recent files` automatically.
 
 For local UI smoke tests, run `npm run sync:shared` after shared resource updates, then run `npm run setup:playwright` once from any managed app. That creates a shared Playwright install in `Automation Projects/Apps/.shared-playwright`.

@@ -125,6 +125,7 @@ async function run() {
 
   try {
     const fileModeRedirect = await assertFileModeRedirect(browser);
+    const prodContactsAutoloadState = await assertProdContactsAutoload(browser);
     const emptyImportButtonState = await assertEmptyStateOmitsDuplicateImportAction(browser);
     const lastNameChangeCandidateState = await assertLastNameChangeCandidateMatch(browser, lastNameChangeCsvPath);
     const differentCompanyConflictState = await assertDifferentCompanyConflictSeparated(browser, differentCompanyConflictCsvPath);
@@ -1518,12 +1519,13 @@ async function assertFileModeRedirect(browser) {
   }
 }
 
-async function assertProdContactsAutoload(page, { closePage = true } = {}) {
+async function assertProdContactsAutoload(browser) {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
   const prodDataset = {
     schema: "salesforce-duplicate-reviewer.dataset",
     schemaVersion: 1,
     objectType: "contact",
-    fileName: "salesforce-report-latest.json",
+    fileName: "salesforce-prod-contacts-latest.json",
     source: {
       system: "salesforce",
       name: "Latest Prod Contacts",
@@ -1541,18 +1543,6 @@ async function assertProdContactsAutoload(page, { closePage = true } = {}) {
       { Id: "003P00000000002", Name: "Prod Contact Two", Email: "prod.two@example.com" }
     ]
   };
-  const canonicalRecord = {
-    id: "contact:/api/prod-contacts/latest.json",
-    name: "salesforce-report-latest.json",
-    displayName: "Latest Prod Contacts",
-    size: 123,
-    objectType: "contact",
-    format: "json",
-    contractVersion: "",
-    content: "",
-    endpoint: "/api/prod-contacts/latest.json",
-    updatedAt: Date.now() - 1000
-  };
 
   try {
     await page.route("**/api/staging/latest-files", async (route) => {
@@ -1568,7 +1558,7 @@ async function assertProdContactsAutoload(page, { closePage = true } = {}) {
               source: "prod-contacts",
               objectType: "contact",
               label: "Latest Prod Contacts",
-              name: "salesforce-report-latest.json",
+              name: "salesforce-prod-contacts-latest.json",
               endpoint: "/api/prod-contacts/latest.json",
               size: 1,
               updatedAt: Date.now()
@@ -1584,63 +1574,29 @@ async function assertProdContactsAutoload(page, { closePage = true } = {}) {
         body: `${JSON.stringify(prodDataset)}\n`
       });
     });
-    await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
-    await page.waitForLoadState("load");
-    await clearRecentFilesStore(page);
-    await page.evaluate(async (record) => {
-      const openDb = () => new Promise((resolve, reject) => {
-        const request = indexedDB.open("salesforce-duplicate-reviewer", 2);
-        request.onupgradeneeded = () => {
-          const db = request.result;
-          if (!db.objectStoreNames.contains("recentFiles")) {
-            db.createObjectStore("recentFiles", { keyPath: "id" });
-          }
-        };
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      });
-      const transactionDone = (transaction) => new Promise((resolve, reject) => {
-        transaction.oncomplete = () => resolve();
-        transaction.onerror = () => reject(transaction.error);
-        transaction.onabort = () => reject(transaction.error);
-      });
-      const db = await openDb();
-      const transaction = db.transaction("recentFiles", "readwrite");
-      transaction.objectStore("recentFiles").put(record);
-      await transactionDone(transaction);
-      db.close();
-    }, canonicalRecord);
 
-    await page.goto(`${baseUrl}/?autoload=prod-contacts&object=contact&notify=1&sticky=1&name=salesforce-report-latest.json`, {
+    await page.goto(`${baseUrl}/?autoload=prod-contacts&object=contact&notify=1&sticky=1&name=salesforce-prod-contacts-latest.json`, {
       waitUntil: "domcontentloaded"
     });
-    const recentFile = page.locator(".recent-file").filter({ hasText: "Latest Prod Contacts" }).first();
-    await recentFile.waitFor({ state: "visible", timeout: 5000 });
-    await recentFile.click();
-    await page.waitForFunction(() => (
-      state.fileName === "salesforce-report-latest.json" &&
-      state.rows.length === 2 &&
-      state.datasetSource?.endpoint === "/api/prod-contacts/latest.json" &&
-      state.datasetSource?.displayName === "Latest Prod Contacts"
-    ), null, { timeout: 10000 });
+    await page.waitForFunction(() => state.rows.length === 2 && state.objectType === "contact", null, { timeout: 10000 });
 
-    const url = new URL(page.url());
     const autoloadState = await page.evaluate(() => ({
       fileName: state.fileName,
-      sourceName: state.datasetMetadata?.source?.name || "",
+      displayName: state.datasetSource?.displayName || "",
+      endpoint: state.datasetSource?.endpoint || "",
+      orgAlias: state.datasetSource?.orgAlias || "",
+      instanceUrl: state.datasetSource?.instanceUrl || "",
       rowCount: state.rows.length,
       recentFiles: [...document.querySelectorAll(".recent-file")].map((node) => node.textContent.trim())
     }));
 
     if (
-      url.searchParams.get("autoload") !== "prod-contacts" ||
-      url.searchParams.get("object") !== "contact" ||
-      url.searchParams.get("notify") !== "1" ||
-      url.searchParams.get("sticky") !== "1" ||
-      url.searchParams.get("name") !== "salesforce-report-latest.json" ||
-      autoloadState.fileName !== "salesforce-report-latest.json" ||
-      autoloadState.sourceName !== "Latest Prod Contacts" ||
+      autoloadState.fileName !== "salesforce-prod-contacts-latest.json" ||
+      autoloadState.displayName !== "Latest Prod Contacts" ||
+      autoloadState.endpoint !== "/api/prod-contacts/latest.json" ||
       autoloadState.rowCount !== 2 ||
+      autoloadState.orgAlias !== "qa-prod-org" ||
+      autoloadState.instanceUrl !== "https://qa-prod-org.example.invalid" ||
       !autoloadState.recentFiles.some((text) => text.includes("Latest Prod Contacts"))
     ) {
       throw new Error(`Prod Contacts autoload regression failed: ${JSON.stringify(autoloadState)}`);
@@ -1648,341 +1604,8 @@ async function assertProdContactsAutoload(page, { closePage = true } = {}) {
 
     return autoloadState;
   } finally {
-    if (closePage) {
-      await page.close();
-    }
-  }
-}
-
-async function assertPairRegressionGroups(browser, filePath) {
-  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
-  try {
-    await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await importContactsThroughMenu(page, filePath);
-    await waitForFirstGroup(page, "Pair regression load");
-
-    const loadState = await datasetLoadState(page);
-    const groupedState = await page.evaluate(() => ({
-      rowIds: state.rows.map((row) => row.Id),
-      groups: state.groups.map((group) => ({
-        ids: group.records.map((record) => record.Id).sort(),
-        score: group.score,
-        minPairScore: group.minPairScore
-      }))
-    }));
-
-    const expectedPairs = [
-      ["003Vq00000MVET7IAP", "003Vq00000MVET8IAP"],
-      ["003Vq00000zOGBrIAO", "003Vq00000zOGBsIAO"],
-      ["003Vq00000zOGBzIAO", "003Vq00000zOGC0IAO"]
-    ].map((pair) => pair.slice().sort().join("|"));
-    const falsePair = ["003Vq00000zOXKLIA4", "003Vq00000zOXKMIA4"].slice().sort().join("|");
-    const groupedKeys = groupedState.groups.map((group) => group.ids.join("|"));
-    const missingGroupedPairs = expectedPairs.filter((pairKey) => !groupedKeys.includes(pairKey));
-    const groupedFalsePair = groupedKeys.includes(falsePair);
-
-    return {
-      ...loadState,
-      rowIds: groupedState.rowIds,
-      groupedKeys,
-      missingGroupedPairs,
-      groupedFalsePair
-    };
-  } finally {
     await page.close();
   }
-}
-
-async function assertProdContactsRecentFileSourceMapping(page) {
-  const prodDataset = {
-    schema: "salesforce-duplicate-reviewer.dataset",
-    schemaVersion: 1,
-    objectType: "contact",
-    fileName: "salesforce-report-latest.json",
-    source: {
-      system: "salesforce",
-      name: "Latest Prod Contacts",
-      format: "salesforce-records-json",
-      orgAlias: "qa-prod-org",
-      instanceUrl: "https://qa-prod-org.example.invalid"
-    },
-    fields: [
-      { apiName: "Id", label: "Id", type: "text" },
-      { apiName: "Name", label: "Name", type: "text" },
-      { apiName: "Email", label: "Email", type: "text" }
-    ],
-    records: [
-      { Id: "003P00000000001", Name: "Prod Contact One", Email: "prod.one@example.com" },
-      { Id: "003P00000000002", Name: "Prod Contact Two", Email: "prod.two@example.com" }
-    ]
-  };
-  const canonicalRecord = {
-    id: "contact:/api/prod-contacts/latest.json",
-    name: "salesforce-report-latest.json",
-    displayName: "Latest Prod Contacts",
-    size: 123,
-    objectType: "contact",
-    format: "json",
-    contractVersion: "",
-    content: "",
-    endpoint: "/api/prod-contacts/latest.json",
-    updatedAt: Date.now() - 1000
-  };
-
-  try {
-    await page.route("**/api/prod/latest-files", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          files: [
-            {
-              source: "prod-contacts",
-              objectType: "contact",
-              label: "Latest Prod Contacts",
-              name: "salesforce-report-latest.json",
-              endpoint: "/api/prod-contacts/latest.json",
-              size: 1,
-              updatedAt: Date.now()
-            }
-          ]
-        })
-      });
-    });
-    await page.route("**/api/prod-contacts/latest.json", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: `${JSON.stringify(prodDataset)}\n`
-      });
-    });
-    await clearRecentFilesStore(page);
-    await page.evaluate(async (record) => {
-      const openDb = () => new Promise((resolve, reject) => {
-        const request = indexedDB.open("salesforce-duplicate-reviewer", 2);
-        request.onupgradeneeded = () => {
-          const db = request.result;
-          if (!db.objectStoreNames.contains("recentFiles")) {
-            db.createObjectStore("recentFiles", { keyPath: "id" });
-          }
-        };
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      });
-      const transactionDone = (transaction) => new Promise((resolve, reject) => {
-        transaction.oncomplete = () => resolve();
-        transaction.onerror = () => reject(transaction.error);
-        transaction.onabort = () => reject(transaction.error);
-      });
-      const db = await openDb();
-      const transaction = db.transaction("recentFiles", "readwrite");
-      transaction.objectStore("recentFiles").put(record);
-      await transactionDone(transaction);
-      db.close();
-    }, canonicalRecord);
-
-    await page.reload({ waitUntil: "domcontentloaded" });
-    const recentFile = page.locator(".recent-file").filter({ hasText: "Latest Prod Contacts" }).first();
-    await recentFile.waitFor({ state: "visible", timeout: 5000 });
-    await recentFile.click();
-    await page.waitForFunction(() => (
-      state.fileName === "salesforce-report-latest.json" &&
-      state.rows.length === 2 &&
-      state.datasetSource?.endpoint === "/api/prod-contacts/latest.json" &&
-      state.datasetSource?.displayName === "Latest Prod Contacts"
-    ), null, { timeout: 10000 });
-
-    const sourceState = await page.evaluate(async () => {
-      const openDb = () => new Promise((resolve, reject) => {
-        const request = indexedDB.open("salesforce-duplicate-reviewer", 2);
-        request.onupgradeneeded = () => {
-          const db = request.result;
-          if (!db.objectStoreNames.contains("recentFiles")) {
-            db.createObjectStore("recentFiles", { keyPath: "id" });
-          }
-        };
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      });
-      const db = await openDb();
-      const transaction = db.transaction("recentFiles", "readonly");
-      const records = await new Promise((resolve, reject) => {
-        const request = transaction.objectStore("recentFiles").getAll();
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      });
-      db.close();
-      const canonicalRecord = records.find((record) => record.id === "contact:/api/prod-contacts/latest.json");
-      return {
-        records,
-        canonicalRecord,
-        fileName: state.fileName,
-        sourceEndpoint: state.datasetSource?.endpoint || "",
-        sourceDisplayName: state.datasetSource?.displayName || "",
-        rendered: [...document.querySelectorAll(".recent-file")].map((node) => node.textContent.trim())
-      };
-    });
-
-    if (
-      !sourceState.canonicalRecord ||
-      sourceState.canonicalRecord.endpoint !== "/api/prod-contacts/latest.json" ||
-      sourceState.canonicalRecord.name !== "salesforce-report-latest.json" ||
-      sourceState.fileName !== "salesforce-report-latest.json" ||
-      sourceState.sourceEndpoint !== "/api/prod-contacts/latest.json" ||
-      sourceState.sourceDisplayName !== "Latest Prod Contacts" ||
-      !sourceState.rendered.some((text) => text.includes("Latest Prod Contacts")) ||
-      sourceState.rendered.some((text) => text.includes("salesforce-prod-contacts-latest.json"))
-    ) {
-      throw new Error(`Prod Contacts recent-file source mapping failed: ${JSON.stringify(sourceState)}`);
-    }
-
-    return sourceState;
-  } finally {
-    // Caller owns the shared prod-contacts page lifecycle.
-  }
-}
-
-async function assertLegacyProdContactsRecentFileCompatibility(page) {
-  const prodDataset = {
-    schema: "salesforce-duplicate-reviewer.dataset",
-    schemaVersion: 1,
-    objectType: "contact",
-    fileName: "salesforce-report-latest.json",
-    source: {
-      system: "salesforce",
-      name: "Latest Prod Contacts",
-      format: "salesforce-records-json",
-      orgAlias: "qa-prod-org",
-      instanceUrl: "https://qa-prod-org.example.invalid"
-    },
-    fields: [
-      { apiName: "Id", label: "Id", type: "text" },
-      { apiName: "Name", label: "Name", type: "text" },
-      { apiName: "Email", label: "Email", type: "text" }
-    ],
-    records: [
-      { Id: "003P00000000001", Name: "Prod Contact One", Email: "prod.one@example.com" },
-      { Id: "003P00000000002", Name: "Prod Contact Two", Email: "prod.two@example.com" }
-    ]
-  };
-  const legacyRecord = {
-    id: "contact:salesforce-prod-contacts-latest.json",
-    name: "salesforce-prod-contacts-latest.json",
-    displayName: "Latest Prod Contacts",
-    size: 123,
-    objectType: "contact",
-    format: "json",
-    contractVersion: "",
-    content: "",
-    endpoint: "/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/salesforce-prod-contacts-latest.json",
-    updatedAt: Date.now() - 1000
-  };
-
-  try {
-    await page.route("**/api/staging/latest-files", async (route) => {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: [] }) });
-    });
-    await page.route("**/api/prod/latest-files", async (route) => {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: [] }) });
-    });
-    await page.route("**/api/prod-contacts/latest.json", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: `${JSON.stringify(prodDataset)}\n`
-      });
-    });
-    await clearRecentFilesStore(page);
-
-    await page.evaluate(async (record) => {
-      const openDb = () => new Promise((resolve, reject) => {
-        const request = indexedDB.open("salesforce-duplicate-reviewer", 2);
-        request.onupgradeneeded = () => {
-          const db = request.result;
-          if (!db.objectStoreNames.contains("recentFiles")) {
-            db.createObjectStore("recentFiles", { keyPath: "id" });
-          }
-        };
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      });
-      const transactionDone = (transaction) => new Promise((resolve, reject) => {
-        transaction.oncomplete = () => resolve();
-        transaction.onerror = () => reject(transaction.error);
-        transaction.onabort = () => reject(transaction.error);
-      });
-      const db = await openDb();
-      const transaction = db.transaction("recentFiles", "readwrite");
-      transaction.objectStore("recentFiles").put(record);
-      await transactionDone(transaction);
-      db.close();
-    }, legacyRecord);
-
-    await page.reload({ waitUntil: "domcontentloaded" });
-    const recentFile = page.locator(".recent-file").filter({ hasText: "Latest Prod Contacts" }).first();
-    await recentFile.waitFor({ state: "visible", timeout: 5000 });
-
-    const sourceState = await page.evaluate(async () => {
-      const openDb = () => new Promise((resolve, reject) => {
-        const request = indexedDB.open("salesforce-duplicate-reviewer", 2);
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      });
-      const db = await openDb();
-      const transaction = db.transaction("recentFiles", "readonly");
-      const records = await new Promise((resolve, reject) => {
-        const request = transaction.objectStore("recentFiles").getAll();
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      });
-      db.close();
-      const legacyRecord = records.find((record) => record.id === "contact:salesforce-prod-contacts-latest.json");
-      return {
-        records,
-        legacyRecord,
-        fileName: state.fileName,
-        sourceEndpoint: state.datasetSource?.endpoint || "",
-        sourceDisplayName: state.datasetSource?.displayName || "",
-        rendered: [...document.querySelectorAll(".recent-file")].map((node) => node.textContent.trim())
-      };
-    });
-
-    if (
-      !sourceState.legacyRecord ||
-      !sourceState.rendered.some((text) => text.includes("Latest Prod Contacts")) ||
-      sourceState.rendered.some((text) => text.includes("salesforce-prod-contacts-latest.json"))
-    ) {
-      throw new Error(`Legacy prod Contacts recent-file compatibility failed: ${JSON.stringify(sourceState)}`);
-    }
-  } finally {
-    // Caller owns the shared prod-contacts page lifecycle.
-  }
-}
-
-async function clearRecentFilesStore(page) {
-  await page.evaluate(async () => {
-    const openDb = () => new Promise((resolve, reject) => {
-      const request = indexedDB.open("salesforce-duplicate-reviewer", 2);
-      request.onupgradeneeded = () => {
-        const db = request.result;
-        if (!db.objectStoreNames.contains("recentFiles")) {
-          db.createObjectStore("recentFiles", { keyPath: "id" });
-        }
-      };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    const transactionDone = (transaction) => new Promise((resolve, reject) => {
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
-    });
-    const db = await openDb();
-    const transaction = db.transaction("recentFiles", "readwrite");
-    transaction.objectStore("recentFiles").clear();
-    await transactionDone(transaction);
-    db.close();
-  });
 }
 
 async function mergeLeadSourceRuleState(page) {

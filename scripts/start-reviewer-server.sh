@@ -110,6 +110,10 @@ write_server_plist() {
     <string>${SF_INSTANCE_URL:-https://your-domain.my.salesforce.com}</string>
     <key>SF_API_VERSION</key>
     <string>${SF_API_VERSION:-v67.0}</string>
+    <key>PROD_SF_ORG_ALIAS</key>
+    <string>${PROD_SF_ORG_ALIAS:-politico}</string>
+    <key>PROD_SF_INSTANCE_URL</key>
+    <string>${PROD_SF_INSTANCE_URL:-https://login.salesforce.com}</string>
   </dict>
   <key>StandardOutPath</key>
   <string>${OUT_LOG}</string>

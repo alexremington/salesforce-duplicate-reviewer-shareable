@@ -1731,6 +1731,17 @@ async function loadDatasetText(datasetText, {
     });
   }
   if (!isCurrentLoadRequest(loadRequestId)) return;
+  setLoadedDatasetSource({
+    endpoint,
+    fileName: result.fileName || fileName || datasetFileNameForFormat(format),
+    displayName: displayName || result.displayName || fileName || state.fileName || "",
+    objectType: result.objectType || normalizedObjectType,
+    format: result.format || format,
+    contractVersion: result.contractVersion || result.datasetMetadata?.contractVersion || "",
+    metadata: result.datasetMetadata || {},
+    orgAlias: state.datasetSource?.orgAlias || "",
+    instanceUrl: state.datasetSource?.instanceUrl || ""
+  });
   if (saveRecent) {
     saveRecentFileInBackground({
       name: result.fileName || fileName || datasetFileNameForFormat(format),
@@ -1772,7 +1783,7 @@ async function loadFromUrlIfRequested() {
     "prod-contacts": {
       endpoint: "/api/prod-contacts/latest.json",
       defaultObjectType: "contact",
-      defaultFileName: "salesforce-report-latest.json",
+      defaultFileName: "salesforce-prod-contacts-latest.json",
       label: "Latest Prod Contacts"
     },
     "staging-accounts": {
@@ -2146,10 +2157,16 @@ function recentEndpointForName(name, objectType = "") {
       ? "/api/staging-accounts/latest.json"
       : "/api/staging-contacts/latest.json";
   }
+  if (normalizedName === "salesforce-prod-contacts-latest.json") {
+    return "/api/prod-contacts/latest.json";
+  }
   if (normalizedName === "salesforce-report-latest.csv") {
     return String(objectType || "").toLowerCase() === "account"
       ? "/api/staging-accounts/latest.csv"
       : "/api/staging-contacts/latest.csv";
+  }
+  if (normalizedName === "salesforce-prod-contacts-latest.csv") {
+    return "/api/prod-contacts/latest.csv";
   }
 
   return {
@@ -2157,7 +2174,7 @@ function recentEndpointForName(name, objectType = "") {
     "salesforce-staging-accounts-latest.csv": "/api/staging-accounts/latest.csv",
     "salesforce-staging-contacts-latest.json": "/api/staging-contacts/latest.json",
     "salesforce-staging-accounts-latest.json": "/api/staging-accounts/latest.json",
-    "salesforce-prod-contacts-latest.csv": "/api/prod-contacts/latest.json",
+    "salesforce-prod-contacts-latest.csv": "/api/prod-contacts/latest.csv",
     "salesforce-prod-contacts-latest.json": "/api/prod-contacts/latest.json"
   }[normalizedName] || "";
 }
@@ -9766,7 +9783,7 @@ function latestContactsSourceFromRecentFiles() {
     .filter((record) => {
       if (!record?.endpoint || normalizeObjectType(record.objectType) !== "contact") return false;
       const text = `${record.endpoint} ${record.displayName || ""} ${record.name || ""}`.toLowerCase();
-      return text.includes("staging-contacts") || text.includes("latest contacts");
+      return text.includes("staging-contacts") || text.includes("prod-contacts") || text.includes("latest contacts");
     })
     .sort((left, right) => {
       const leftJson = String(left.format || left.name || left.endpoint || "").toLowerCase().endsWith(".json") || String(left.format || "").toLowerCase() === "json";

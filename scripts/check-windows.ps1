@@ -102,13 +102,9 @@ if ($labelsDryRun -notmatch [regex]::Escape($expectedLabelsSource)) {
 }
 
 Write-Host 'Checking staging routing defaults...'
-$canonicalRoot = if ($IsWindows -and $env:APPDATA) {
-  $env:APPDATA
-} else {
-  $HOME
-}
-$contactsOutDir = Join-Path $canonicalRoot 'Salesforce Pulls\Duplicate Reviewer\staging\Output\staging-contacts'
-$accountsOutDir = Join-Path $canonicalRoot 'Salesforce Pulls\Duplicate Reviewer\staging\Output\staging-accounts'
+$contactsOutDir = 'C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts'
+$accountsOutDir = 'C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-accounts'
+$prodContactsOutDir = 'C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts'
 $env:OUT_DIR = $contactsOutDir
 $contactsDryRun = (& scripts/run-staging-contacts-bulk-query.sh --dry-run) -join "`n"
 if ($contactsDryRun -notmatch '/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts') {
@@ -127,9 +123,35 @@ if ($contactsDryRun -notmatch 'Compatibility CSV: .*[\\/]Salesforce Pulls[\\/]Du
   Write-Host $contactsDryRun
   throw 'Staging Contacts did not preserve the canonical compatibility CSV output flow.'
 }
-$stagingContactsLauncher = Get-Content scripts/run-staging-contacts-bulk-query.sh -Raw
-if ($stagingContactsLauncher -notmatch 'start-reviewer-server.sh" --force-refresh') {
-  throw 'Staging Contacts launcher did not force-refresh the reviewer server before opening the URL.'
+$env:OUT_DIR = $prodContactsOutDir
+$prodContactsDryRun = (& scripts/run-prod-contacts-bulk-query.sh --dry-run) -join "`n"
+if ($prodContactsDryRun -notmatch '/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts') {
+  Write-Host $prodContactsDryRun
+  throw 'Prod Contacts did not resolve to the canonical Salesforce Pulls prod folder.'
+}
+if ($prodContactsDryRun -notmatch 'Org alias: politico') {
+  Write-Host $prodContactsDryRun
+  throw 'Prod Contacts did not use the canonical prod Salesforce org alias.'
+}
+if ($prodContactsDryRun -notmatch 'Instance: https://login.salesforce.com') {
+  Write-Host $prodContactsDryRun
+  throw 'Prod Contacts did not use the canonical prod Salesforce instance URL.'
+}
+if ($prodContactsDryRun -notmatch 'SOQL file: .*/queries/report-00OVq00000CxYd3MAF.soql') {
+  Write-Host $prodContactsDryRun
+  throw 'Prod Contacts did not use the canonical prod Contacts query file.'
+}
+if ($prodContactsDryRun -notmatch 'Latest JSON: .*/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/salesforce-prod-contacts-latest.json') {
+  Write-Host $prodContactsDryRun
+  throw 'Prod Contacts did not preserve the canonical prod latest JSON output flow.'
+}
+if ($prodContactsDryRun -notmatch 'Compatibility CSV: .*/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/salesforce-prod-contacts-latest.csv') {
+  Write-Host $prodContactsDryRun
+  throw 'Prod Contacts did not preserve the canonical prod compatibility CSV output flow.'
+}
+$prodLauncher = Get-Content scripts/run-prod-contacts-bulk-query.sh -Raw
+if ($prodLauncher -notmatch 'autoload=prod-contacts') {
+  throw 'Prod Contacts launcher did not open Duplicate Reviewer with the prod autoload URL.'
 }
 $bulkQueryWrapper = Get-Content scripts/run-salesforce-bulk-query.sh -Raw
 if ($bulkQueryWrapper -notmatch 'sf org display') {

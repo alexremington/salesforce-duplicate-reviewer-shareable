@@ -4,6 +4,63 @@
   "updatedAt": "2026-06-15T19:26:08.550Z",
   "features": [
     {
+      "id": "prod-contacts-autoload",
+      "title": "Prod Contacts Autoload",
+      "app": "salesforce-duplicate-reviewer",
+      "status": "in-progress",
+      "visibleUi": true,
+      "brief": "docs/features/prod-contacts-autoload.md",
+      "requirements": [
+        "Add a prod Contacts autoload source alongside the existing staging autoload source.",
+        "Expose the prod latest Contacts JSON and CSV endpoints from the server.",
+        "Seed the prod latest file into Recent files when the reviewer launches server-backed.",
+        "Keep staging Contacts and Accounts autoload behavior unchanged."
+      ],
+      "acceptanceCriteria": [
+        "autoload=prod-contacts loads the expected prod latest Contacts dataset and labels it as the prod latest file.",
+        "The app can fetch /api/prod-contacts/latest.json and /api/prod-contacts/latest.csv.",
+        "The prod latest file is available in recent files with a clear prod label.",
+        "The staging autoload path still works."
+      ],
+      "fixtures": [
+        "A prod Contacts JSON export with Contact rows.",
+        "A prod Contacts CSV fallback for the same dataset."
+      ],
+      "tests": [
+        {
+          "name": "Fast checks",
+          "command": "npm run check",
+          "status": "not-run",
+          "evidence": ""
+        },
+        {
+          "name": "Cross-platform check",
+          "command": "npm run check:windows",
+          "status": "not-run",
+          "evidence": ""
+        },
+        {
+          "name": "Targeted Playwright smoke",
+          "command": "npm run smoke:ui:local",
+          "status": "not-run",
+          "evidence": ""
+        }
+      ],
+      "crossPlatform": {
+        "mac": "pending",
+        "windows": "pending"
+      },
+      "risks": [
+        "The new prod source must stay isolated from the existing staging dataset labels and endpoints."
+      ],
+      "humeDesign": {
+        "reviewed": false,
+        "notes": "No visible UI redesign; preserve the existing loading and review layout."
+      },
+      "createdAt": "2026-06-15T00:00:00.000Z",
+      "updatedAt": "2026-06-15T00:00:00.000Z"
+    },
+    {
       "id": "dataset-export-with-scores",
       "title": "Dataset Export With Scores",
       "app": "salesforce-duplicate-reviewer",
