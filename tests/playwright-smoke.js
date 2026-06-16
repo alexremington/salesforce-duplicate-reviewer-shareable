@@ -454,7 +454,16 @@ async function run() {
     ) {
       throw new Error(`Expected stale failure-card refresh to preserve the rollback-capable JSON contract: ${JSON.stringify(staleFailureCardRefreshState)}`);
     }
-    if (!authBlockedMergeState.mergeSubmitDisabled || !authBlockedMergeState.warningVisible || !/Salesforce auth is blocked/i.test(authBlockedMergeState.warningText || "")) {
+    if (
+      !authBlockedMergeState.mergeSubmitDisabled ||
+      !authBlockedMergeState.entryWarningVisible ||
+      !/Salesforce auth is blocked\. Refresh the Salesforce session before starting merge review/i.test(authBlockedMergeState.entryWarningText || "") ||
+      authBlockedMergeState.entryPremergeRequestCount !== 0 ||
+      authBlockedMergeState.confirmDisabled !== true ||
+      !authBlockedMergeState.confirmWarningVisible ||
+      !/Salesforce auth is blocked\. Refresh the Salesforce session before confirming merge review/i.test(authBlockedMergeState.confirmWarningText || "") ||
+      authBlockedMergeState.mergeRequestCount !== 0
+    ) {
       throw new Error(`Expected auth-blocked merge review to disable the merge action and show a warning: ${JSON.stringify(authBlockedMergeState)}`);
     }
     await page.locator(".group-item-main").first().click();
@@ -1908,14 +1917,69 @@ function toSalesforceCurrentRecord(record) {
 
 async function captureAuthBlockedMergeGate(browser, csvPath) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+  let premergeRequestCount = 0;
+  let mergeRequestCount = 0;
+  const dialogs = [];
+  const handleDialog = async (dialog) => {
+    dialogs.push(dialog.message());
+    await dialog.accept();
+  };
+  page.on("dialog", handleDialog);
   try {
     await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
     await importContactsThroughMenu(page, csvPath);
     await waitForFirstGroup(page, "Auth-blocked merge gate dataset load");
     await page.locator(".group-item-main").first().click();
     await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
-    await page.locator('[data-review-mode="merge"]').click();
-    await page.locator(".merge-master-choice").first().waitFor({ state: "visible", timeout: 5000 });
+    await page.route("**/api/salesforce/premerge-check", async (route) => {
+      premergeRequestCount += 1;
+      const payload = JSON.parse(route.request().postData() || "{}");
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: true,
+          status: "fresh",
+          checkedAt: new Date().toISOString(),
+          objectType: "Contact",
+          groupKey: payload.groupKey || "",
+          masterId: payload.masterId || "",
+          mergeIds: [],
+          ids: [],
+          missingIds: [],
+          deletedIds: [],
+          changedFields: [],
+          currentRecords: [],
+          loadedRecords: []
+        })
+      });
+    });
+    await page.route("**/api/salesforce/merge", async (route) => {
+      mergeRequestCount += 1;
+      const payload = JSON.parse(route.request().postData() || "{}");
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: true,
+          status: "success",
+          objectType: "Contact",
+          groupKey: payload.groupKey || "",
+          masterId: payload.masterId || "",
+          mergedRecordIds: payload.mergeIds || [],
+          updatedRelatedIds: [],
+          mergedAt: new Date().toISOString(),
+          mergeReport: {
+            generatedAt: new Date().toISOString(),
+            fileName: "salesforce-merge-report-latest.csv",
+            latestFileName: "salesforce-merge-report-latest.csv",
+            csvPath: "/tmp/salesforce-merge-report-latest.csv",
+            latestCsvPath: "/tmp/salesforce-merge-report-latest.csv",
+            rows: []
+          }
+        })
+      });
+    });
     await page.evaluate(() => {
       state.serverHealth = {
         ok: true,
@@ -1926,13 +1990,65 @@ async function captureAuthBlockedMergeGate(browser, csvPath) {
       };
       if (typeof renderDetail === "function") renderDetail();
     });
+    await page.locator('[data-review-mode="merge"]').click();
+    await page.locator(".merge-master-choice").first().waitFor({ state: "visible", timeout: 5000 });
     const mergeSubmitDisabled = await page.locator(".merge-submit-button").isDisabled();
-    const warningLocator = page.locator(".merge-auth-warning");
-    await warningLocator.waitFor({ state: "visible", timeout: 5000 });
-    const warningVisible = await warningLocator.isVisible();
-    const warningText = (await warningLocator.textContent())?.trim() || "";
-    return { mergeSubmitDisabled, warningVisible, warningText };
+    const entryWarningLocator = page.locator(".merge-auth-warning");
+    await entryWarningLocator.waitFor({ state: "visible", timeout: 5000 });
+    const entryWarningVisible = await entryWarningLocator.isVisible();
+    const entryWarningText = (await entryWarningLocator.textContent())?.trim() || "";
+    await page.locator(".merge-submit-button").evaluate((button) => button.click());
+    await page.waitForTimeout(100);
+    const entryPremergeRequestCount = premergeRequestCount;
+
+    await page.evaluate(() => {
+      state.serverHealth = {
+        ok: true,
+        salesforceAuthFresh: true,
+        salesforceAuthFreshCheckedAt: new Date().toISOString(),
+        runtimeAligned: true,
+        runtimeAlignedCheckedAt: new Date().toISOString()
+      };
+      if (typeof renderDetail === "function") renderDetail();
+    });
+    await page.locator(".merge-submit-button").waitFor({ state: "visible", timeout: 5000 });
+    await page.locator(".merge-submit-button").click();
+    await page.locator(".merge-review-panel").waitFor({ state: "visible", timeout: 5000 });
+    await page.locator(".merge-confirm-preview-button").waitFor({ state: "visible", timeout: 5000 });
+
+    await page.evaluate(() => {
+      state.serverHealth = {
+        ok: true,
+        salesforceAuthFresh: false,
+        salesforceAuthFreshCheckedAt: new Date().toISOString(),
+        runtimeAligned: true,
+        runtimeAlignedCheckedAt: new Date().toISOString()
+      };
+      if (typeof renderDetail === "function") renderDetail();
+    });
+    const confirmDisabled = await page.locator(".merge-confirm-preview-button").isDisabled();
+    const confirmWarningLocator = page.locator(".merge-review-panel .merge-auth-warning");
+    await confirmWarningLocator.waitFor({ state: "visible", timeout: 5000 });
+    const confirmWarningVisible = await confirmWarningLocator.isVisible();
+    const confirmWarningText = (await confirmWarningLocator.textContent())?.trim() || "";
+    await page.locator(".merge-confirm-preview-button").evaluate((button) => button.click());
+    await page.waitForTimeout(100);
+
+    return {
+      mergeSubmitDisabled,
+      entryWarningVisible,
+      entryWarningText,
+      entryPremergeRequestCount,
+      confirmDisabled,
+      confirmWarningVisible,
+      confirmWarningText,
+      mergeRequestCount,
+      dialogCount: dialogs.length
+    };
   } finally {
+    await page.unroute("**/api/salesforce/premerge-check").catch(() => {});
+    await page.unroute("**/api/salesforce/merge").catch(() => {});
+    page.off("dialog", handleDialog);
     await page.close();
   }
 }
