@@ -46,6 +46,8 @@ The public mirror `main` branch is protected with required checks. The private r
 
 If private branch protection becomes available, require `Repository checks` and `UI smoke test` on both private branches. Until then, run the checks before pushing and keep public mirror pushes deliberate.
 
+If mirror reconciliation needs temporary worktrees, scratch repos, or helper links, treat them as disposable repair state and remove them after the mirror push completes.
+
 ## Releases
 
 Create releases from known-good tags:

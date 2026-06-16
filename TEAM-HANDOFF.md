@@ -16,6 +16,8 @@ For duplicate-label exports, double-click `Launch Duplicate Labels Export - Mac.
 
 For prod Contacts review, run `scripts/run-prod-contacts-bulk-query.sh` after the prod pull completes. It opens Duplicate Reviewer on the `prod-contacts` autoload route with `object=contact`, `notify=1`, `sticky=1`, and `name=salesforce-prod-contacts-latest.json`, keeps the prod latest files separate from staging, and repairs any legacy download-prefixed prod output into `Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/` before the reviewer opens.
 
+If mirror reconciliation needs temporary worktrees, scratch repos, or helper links, treat them as disposable repair state and remove them before handoff.
+
 Use the launcher for normal server-backed work. When latest Contact or Account exports exist under `Output/`, the app adds them to `Recent files` automatically.
 
 For local UI smoke tests, run `npm run sync:shared` after shared resource updates, then run `npm run setup:playwright` once from any managed app. That creates a shared Playwright install in `Automation Projects/Apps/.shared-playwright`.

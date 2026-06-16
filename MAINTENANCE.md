@@ -41,7 +41,8 @@ git diff origin/shareable..shareable
 git switch main
 ```
 
-Review `git diff origin/shareable..shareable` before publishing the public mirror, and do not push `main` directly to `public/main`.
+Review `git diff origin/shareable..shareable` before pushing the public mirror.
+If mirror reconciliation needs temporary worktrees, scratch repos, or helper links, treat them as disposable repair state and remove them after the publish completes.
 
 ## Never Commit
 
