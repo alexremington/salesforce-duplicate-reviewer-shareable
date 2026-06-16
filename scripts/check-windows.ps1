@@ -150,8 +150,14 @@ if ($prodContactsDryRun -notmatch 'Compatibility CSV: .*/Salesforce Pulls/Duplic
   throw 'Prod Contacts did not preserve the canonical prod compatibility CSV output flow.'
 }
 $prodLauncher = Get-Content scripts/run-prod-contacts-bulk-query.sh -Raw
-if ($prodLauncher -notmatch 'autoload=prod-contacts') {
-  throw 'Prod Contacts launcher did not open Duplicate Reviewer with the prod autoload URL.'
+if ($prodLauncher -notmatch 'autoload_url="\$\{reviewer_url\}/\?autoload=prod-contacts&object=contact&notify=1&sticky=1&name=\$\{LATEST_JSON_NAME\}"') {
+  throw 'Prod Contacts launcher did not open Duplicate Reviewer with the expected prod handoff URL.'
+}
+if ($prodLauncher -notmatch 'reviewer_url="\$\("\$\{PROJECT_DIR\}/scripts/start-reviewer-server.sh" \| tail -n 1\)"') {
+  throw 'Prod Contacts launcher did not start or reuse the reviewer server before opening the URL.'
+}
+if ($prodLauncher -notmatch 'name=\$\{LATEST_JSON_NAME\}') {
+  throw 'Prod Contacts launcher did not target the prod latest JSON file.'
 }
 $bulkQueryWrapper = Get-Content scripts/run-salesforce-bulk-query.sh -Raw
 if ($bulkQueryWrapper -notmatch 'sf org display') {

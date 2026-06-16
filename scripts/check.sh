@@ -123,8 +123,16 @@ case "${prodContactsDryRun}" in
     exit 1
     ;;
 esac
-if ! grep -Fq "autoload=prod-contacts" scripts/run-prod-contacts-bulk-query.sh; then
-  echo "Prod Contacts launcher did not open Duplicate Reviewer with the prod autoload URL."
+if ! grep -Fq 'autoload_url="${reviewer_url}/?autoload=prod-contacts&object=contact&notify=1&sticky=1&name=${LATEST_JSON_NAME}"' scripts/run-prod-contacts-bulk-query.sh; then
+  echo "Prod Contacts launcher did not open Duplicate Reviewer with the expected prod handoff URL."
+  exit 1
+fi
+if ! grep -Fq 'reviewer_url="$("${PROJECT_DIR}/scripts/start-reviewer-server.sh" | tail -n 1)"' scripts/run-prod-contacts-bulk-query.sh; then
+  echo "Prod Contacts launcher did not start or reuse the reviewer server before opening the URL."
+  exit 1
+fi
+if ! grep -Fq 'name=${LATEST_JSON_NAME}' scripts/run-prod-contacts-bulk-query.sh; then
+  echo "Prod Contacts launcher did not target the prod latest JSON file."
   exit 1
 fi
 if ! grep -Fq "sf org auth show-access-token" scripts/run-salesforce-bulk-query.sh; then

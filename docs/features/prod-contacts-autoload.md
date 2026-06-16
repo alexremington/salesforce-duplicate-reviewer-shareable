@@ -37,5 +37,5 @@ Status: in progress
 
 - Local checks: `npm run check`, `npm run check:windows`, and `npm run smoke:ui:local`.
 - Playwright coverage, including Hume design alignment: Add a regression that proves `autoload=prod-contacts` loads the expected prod latest Contacts dataset.
-- Manual checks: Confirm the prod latest file endpoint and launch URL work together end to end.
+- Manual checks: Confirm the prod latest file endpoint and launch URL work together end to end, including `autoload=prod-contacts`, `object=contact`, `notify=1`, `sticky=1`, and `name=salesforce-prod-contacts-latest.json`.
 - Docs to update: `README.md`, `SETUP.md`, and the team handoff notes.

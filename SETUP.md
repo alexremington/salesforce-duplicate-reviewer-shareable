@@ -52,7 +52,7 @@ The browser UI can also load CSV files directly through the file picker.
 
 Use the launcher for normal review work after Scheduler downloads finish. The server-backed app automatically adds the latest Contact and Account exports to `Recent files` when those exports exist.
 
-Use `scripts/run-prod-contacts-bulk-query.sh` when you need the prod Contacts pull to open Duplicate Reviewer automatically on the freshly downloaded prod dataset. The prod launcher keeps its output under `Output/prod-contacts/` with `salesforce-prod-contacts-latest.*` filenames.
+Use `scripts/run-prod-contacts-bulk-query.sh` when you need the prod Contacts pull to open Duplicate Reviewer automatically on the freshly downloaded prod dataset. The prod launcher opens `/?autoload=prod-contacts&object=contact&notify=1&sticky=1&name=salesforce-prod-contacts-latest.json` and keeps its output under `Output/prod-contacts/` with `salesforce-prod-contacts-latest.*` filenames.
 
 On Windows, OneDrive may show `Node.js JavaScript Runtime` downloading a recent dataset when the latest export is cloud-only. Mark the app folder, `Output` folder, or latest export folder as `Always keep on this device` in File Explorer so recent dataset loads do not need OneDrive hydration.
 

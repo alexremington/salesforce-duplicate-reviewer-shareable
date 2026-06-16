@@ -1580,10 +1580,10 @@ async function assertProdContactsAutoload(browser) {
     });
     await page.waitForFunction(() => state.rows.length === 2 && state.objectType === "contact", null, { timeout: 10000 });
 
+    const url = new URL(page.url());
     const autoloadState = await page.evaluate(() => ({
       fileName: state.fileName,
-      displayName: state.datasetSource?.displayName || "",
-      endpoint: state.datasetSource?.endpoint || "",
+      sourceName: state.datasetMetadata?.source?.name || "",
       orgAlias: state.datasetSource?.orgAlias || "",
       instanceUrl: state.datasetSource?.instanceUrl || "",
       rowCount: state.rows.length,
@@ -1591,9 +1591,13 @@ async function assertProdContactsAutoload(browser) {
     }));
 
     if (
+      url.searchParams.get("autoload") !== "prod-contacts" ||
+      url.searchParams.get("object") !== "contact" ||
+      url.searchParams.get("notify") !== "1" ||
+      url.searchParams.get("sticky") !== "1" ||
+      url.searchParams.get("name") !== "salesforce-prod-contacts-latest.json" ||
       autoloadState.fileName !== "salesforce-prod-contacts-latest.json" ||
-      autoloadState.displayName !== "Latest Prod Contacts" ||
-      autoloadState.endpoint !== "/api/prod-contacts/latest.json" ||
+      autoloadState.sourceName !== "Latest Prod Contacts" ||
       autoloadState.rowCount !== 2 ||
       autoloadState.orgAlias !== "qa-prod-org" ||
       autoloadState.instanceUrl !== "https://qa-prod-org.example.invalid" ||
