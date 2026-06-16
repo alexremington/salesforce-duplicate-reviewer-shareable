@@ -5,6 +5,7 @@ const crypto = require("node:crypto");
 const fsSync = require("node:fs");
 const fs = require("node:fs/promises");
 const http = require("node:http");
+const os = require("node:os");
 const path = require("node:path");
 const { URL } = require("node:url");
 const { buildCodexTrainingCommand } = require("./codex-training");
@@ -27,7 +28,7 @@ const STAGING_ACCOUNTS_CSV =
   path.join(OUTPUT_DIR, "staging-accounts", "salesforce-report-latest.csv");
 const PROD_CONTACTS_CSV =
   process.env.PROD_CONTACTS_CSV ||
-  path.join(OUTPUT_DIR, "prod-contacts", "salesforce-prod-contacts-latest.csv");
+  defaultProdContactsCsvPath();
 const STAGING_SF_ORG_ALIAS = process.env.SF_ORG_ALIAS || "politico-staging";
 const STAGING_SF_INSTANCE_URL = process.env.SF_INSTANCE_URL || "https://politico--staging.sandbox.my.salesforce.com";
 const PROD_SF_ORG_ALIAS = process.env.PROD_SF_ORG_ALIAS || "politico";
@@ -179,6 +180,35 @@ const JSON_ENDPOINTS = new Map(
     }
   ])
 );
+
+function defaultProdContactsCsvPath() {
+  if (process.platform === "win32") {
+    return path.join(
+      os.homedir(),
+      "OneDrive - POLITICO",
+      "Salesforce Pulls",
+      "Duplicate Reviewer",
+      "prod",
+      "Output",
+      "prod-contacts",
+      "salesforce-prod-contacts-latest.csv"
+    );
+  }
+
+  return path.join(
+    os.homedir(),
+    "Library",
+    "CloudStorage",
+    "OneDrive-POLITICO",
+    "Automation Projects",
+    "Salesforce Pulls",
+    "Duplicate Reviewer",
+    "prod",
+    "Output",
+    "prod-contacts",
+    "salesforce-prod-contacts-latest.csv"
+  );
+}
 
 main().catch((error) => {
   console.error(error);

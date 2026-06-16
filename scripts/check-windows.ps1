@@ -89,6 +89,12 @@ if ($LASTEXITCODE -ne 0) {
   throw 'Server contract checks failed.'
 }
 
+Write-Host 'Checking prod Contacts output repair...'
+& node scripts/check-prod-contacts-output-repair.js
+if ($LASTEXITCODE -ne 0) {
+  throw 'Prod Contacts output repair checks failed.'
+}
+
 Write-Host 'Checking duplicate labels export defaults...'
 $labelsDryRun = (& node scripts/run-salesforce-duplicate-label-export.js --object contact --dry-run) -join "`n"
 $expectedLabelsSource = if ($IsWindows) {
@@ -153,11 +159,18 @@ $prodLauncher = Get-Content scripts/run-prod-contacts-bulk-query.sh -Raw
 if ($prodLauncher -notmatch 'autoload_url="\$\{reviewer_url\}/\?autoload=prod-contacts&object=contact&notify=1&sticky=1&name=\$\{LATEST_JSON_NAME\}"') {
   throw 'Prod Contacts launcher did not open Duplicate Reviewer with the expected prod handoff URL.'
 }
+if ($prodLauncher -notmatch 'prod-contacts-output-repair\.js') {
+  throw 'Prod Contacts launcher did not invoke the canonical output repair helper.'
+}
 if ($prodLauncher -notmatch 'reviewer_url="\$\("\$\{PROJECT_DIR\}/scripts/start-reviewer-server.sh" \| tail -n 1\)"') {
   throw 'Prod Contacts launcher did not start or reuse the reviewer server before opening the URL.'
 }
 if ($prodLauncher -notmatch 'name=\$\{LATEST_JSON_NAME\}') {
   throw 'Prod Contacts launcher did not target the prod latest JSON file.'
+}
+$startServer = Get-Content scripts/start-reviewer-server.sh -Raw
+if ($startServer -notmatch 'PROD_CONTACTS_CSV') {
+  throw 'Reviewer launcher did not pass the canonical prod Contacts CSV path to the server.'
 }
 $bulkQueryWrapper = Get-Content scripts/run-salesforce-bulk-query.sh -Raw
 if ($bulkQueryWrapper -notmatch 'sf org display') {

@@ -13,12 +13,16 @@
       "requirements": [
         "Add a prod Contacts autoload source alongside the existing staging autoload source.",
         "Expose the prod latest Contacts JSON and CSV endpoints from the server.",
+        "Route the reviewer server to the canonical Duplicate Reviewer/prod output tree when the prod launcher starts.",
+        "Repair any legacy download-prefixed prod output into the canonical prod tree before the reviewer opens.",
         "Seed the prod latest file into Recent files when the reviewer launches server-backed.",
         "Keep staging Contacts and Accounts autoload behavior unchanged."
       ],
       "acceptanceCriteria": [
         "autoload=prod-contacts loads the expected prod latest Contacts dataset and labels it as the prod latest file.",
         "The app can fetch /api/prod-contacts/latest.json and /api/prod-contacts/latest.csv.",
+        "The prod launcher and server both resolve the canonical Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts path.",
+        "The prod launcher repairs any legacy download-prefixed prod output before opening the reviewer.",
         "The prod latest file is available in recent files with a clear prod label.",
         "The staging autoload path still works."
       ],

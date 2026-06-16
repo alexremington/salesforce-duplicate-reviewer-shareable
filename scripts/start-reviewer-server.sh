@@ -43,6 +43,8 @@ if [[ $# -gt 0 ]]; then
 fi
 
 export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export DUPLICATE_REVIEWER_PROD_ROOT="${DUPLICATE_REVIEWER_PROD_ROOT:-${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/prod}"
+export PROD_CONTACTS_CSV="${PROD_CONTACTS_CSV:-${DUPLICATE_REVIEWER_PROD_ROOT}/Output/prod-contacts/salesforce-prod-contacts-latest.csv}"
 
 mkdir -p "${LOG_DIR}"
 
@@ -110,6 +112,10 @@ write_server_plist() {
     <string>${SF_INSTANCE_URL:-https://your-domain.my.salesforce.com}</string>
     <key>SF_API_VERSION</key>
     <string>${SF_API_VERSION:-v67.0}</string>
+    <key>DUPLICATE_REVIEWER_PROD_ROOT</key>
+    <string>${DUPLICATE_REVIEWER_PROD_ROOT}</string>
+    <key>PROD_CONTACTS_CSV</key>
+    <string>${PROD_CONTACTS_CSV}</string>
     <key>PROD_SF_ORG_ALIAS</key>
     <string>${PROD_SF_ORG_ALIAS:-politico}</string>
     <key>PROD_SF_INSTANCE_URL</key>

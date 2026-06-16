@@ -14,7 +14,7 @@ Share a GitHub Release archive or a clean clone of the public-safe branch. Do no
 
 For duplicate-label exports, double-click `Launch Duplicate Labels Export - Mac.command` on macOS or `Launch Duplicate Labels Export - Windows.cmd` on Windows. Those launchers default to the canonical staging Contacts or Accounts CSV when it exists, fall back to prompting only if the file is missing, then write app-ready training labels under `Output/` by default.
 
-For prod Contacts review, run `scripts/run-prod-contacts-bulk-query.sh` after the prod pull completes. It opens Duplicate Reviewer on the `prod-contacts` autoload route with `object=contact`, `notify=1`, `sticky=1`, and `name=salesforce-prod-contacts-latest.json`, and keeps the prod latest files separate from staging.
+For prod Contacts review, run `scripts/run-prod-contacts-bulk-query.sh` after the prod pull completes. It opens Duplicate Reviewer on the `prod-contacts` autoload route with `object=contact`, `notify=1`, `sticky=1`, and `name=salesforce-prod-contacts-latest.json`, keeps the prod latest files separate from staging, and repairs any legacy download-prefixed prod output into `Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/` before the reviewer opens.
 
 Use the launcher for normal server-backed work. When latest Contact or Account exports exist under `Output/`, the app adds them to `Recent files` automatically.
 

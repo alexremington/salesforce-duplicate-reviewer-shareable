@@ -19,6 +19,7 @@ export OUT_DIR="${OUT_DIR:-${DUPLICATE_REVIEWER_PROD_ROOT}/Output/prod-contacts}
 export LATEST_CSV_NAME="${LATEST_CSV_NAME:-salesforce-prod-contacts-latest.csv}"
 export LATEST_JSON_NAME="${LATEST_JSON_NAME:-salesforce-prod-contacts-latest.json}"
 export BULK_POLL_MS="${BULK_POLL_MS:-5000}"
+export PROD_CONTACTS_CSV="${PROD_CONTACTS_CSV:-${DUPLICATE_REVIEWER_PROD_ROOT}/Output/prod-contacts/salesforce-prod-contacts-latest.csv}"
 
 if [[ "${1:-}" == "--background" ]]; then
   shift
@@ -35,6 +36,8 @@ fi
 if [[ "${1:-}" == "--dry-run" ]]; then
   exec "${PROJECT_DIR}/scripts/run-salesforce-bulk-query.sh" "$@"
 fi
+
+node "${PROJECT_DIR}/scripts/prod-contacts-output-repair.js"
 
 notify_failure() {
   /usr/bin/osascript -e 'display notification "The prod Contacts export failed. Check the job logs." with title "Duplicate Reviewer"' >/dev/null 2>&1 || true
