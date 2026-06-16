@@ -7,8 +7,8 @@
       "id": "prod-contacts-autoload",
       "title": "Prod Contacts Autoload",
       "app": "salesforce-duplicate-reviewer",
-      "status": "in-progress",
-      "visibleUi": true,
+      "status": "complete",
+      "visibleUi": false,
       "brief": "docs/features/prod-contacts-autoload.md",
       "requirements": [
         "Add a prod Contacts autoload source alongside the existing staging autoload source.",
@@ -34,25 +34,25 @@
         {
           "name": "Fast checks",
           "command": "npm run check",
-          "status": "not-run",
-          "evidence": ""
+          "status": "passed",
+          "evidence": "npm run check passed on 2026-06-16."
         },
         {
           "name": "Cross-platform check",
           "command": "npm run check:windows",
-          "status": "not-run",
-          "evidence": ""
+          "status": "passed",
+          "evidence": "npm run check:windows passed on 2026-06-16."
         },
         {
           "name": "Targeted Playwright smoke",
           "command": "npm run smoke:ui:local",
-          "status": "not-run",
-          "evidence": ""
+          "status": "passed",
+          "evidence": "npm run smoke:ui:local passed on 2026-06-16."
         }
       ],
       "crossPlatform": {
-        "mac": "pending",
-        "windows": "pending"
+        "mac": "passed",
+        "windows": "passed"
       },
       "risks": [
         "The new prod source must stay isolated from the existing staging dataset labels and endpoints."
