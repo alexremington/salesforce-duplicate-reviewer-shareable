@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 
-"""Report a safe public-branch mirror path for a repo with private/public history."""
+"""Report branch divergence and a safe public-mirror path."""
 
 from __future__ import annotations
 
 import argparse
-import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -59,8 +58,12 @@ def scan_public_safe(repo: Path, branch: str) -> list[str]:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", required=True, help="Repository path.")
-    parser.add_argument("--source-branch", default="main", help="Private branch to mirror from.")
-    parser.add_argument("--public-branch", default="public/main", help="Public branch to mirror to.")
+    parser.add_argument(
+        "--source-branch",
+        default="main",
+        help="Public-safe source branch to mirror from.",
+    )
+    parser.add_argument("--public-branch", default="public/main", help="Public mirror branch to mirror to.")
     parser.add_argument(
         "--assert-public-safe",
         action="store_true",
@@ -88,6 +91,8 @@ def main(argv: list[str]) -> int:
         source = run_git(repo, "rev-parse", args.source_branch)
         public = run_git(repo, "rev-parse", args.public_branch)
         base = run_git(repo, "merge-base", args.source_branch, args.public_branch)
+        source_only = int(run_git(repo, "rev-list", "--count", f"{args.public_branch}..{args.source_branch}"))
+        public_only = int(run_git(repo, "rev-list", "--count", f"{args.source_branch}..{args.public_branch}"))
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -96,6 +101,7 @@ def main(argv: list[str]) -> int:
     print(f"source_branch: {args.source_branch} ({source})")
     print(f"public_branch: {args.public_branch} ({public})")
     print(f"merge_base: {base}")
+    print(f"divergence: source_only={source_only}, public_only={public_only}")
     print(f"working_tree_clean: {'yes' if not status else 'no'}")
 
     if args.assert_public_safe:
@@ -112,11 +118,25 @@ def main(argv: list[str]) -> int:
         return 0
 
     print("status: diverged")
-    print("safe_path:")
-    quoted_repo = shlex.quote(str(repo))
-    print(f"1. `git -C {quoted_repo} checkout -b public-sync-{source[:8]} {args.public_branch}`")
-    print(f"2. `git -C {quoted_repo} cherry-pick {base}..{args.source_branch}`")
-    print(f"3. Review, resolve conflicts, then push the public-sync branch.")
+    print("safe_next_step:")
+    if source_only and not public_only:
+        print(
+            f"1. In the mirror worktree, start from {args.public_branch}, cherry-pick "
+            f"{base}..{args.source_branch}, review the result, and fast-forward the public mirror branch."
+        )
+    elif public_only and not source_only:
+        print(
+            f"1. Review the commits unique to {args.public_branch} before any sync; "
+            f"the public mirror is ahead of {args.source_branch}."
+        )
+    else:
+        print(
+            f"1. Compare the commits unique to each side from merge-base {base} before any push."
+        )
+        print(
+            f"2. Use the mirror worktree to preserve public commits while reconciling "
+            f"{args.source_branch} and {args.public_branch}."
+        )
     return 1
 
 

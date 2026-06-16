@@ -31,7 +31,7 @@ A Duplicate Reviewer change is done when the implementation, verification, and s
 
 ## Public-Safe Work
 
-- Public-safe changes are applied to `shareable` and pushed to the public mirror.
+- Public-safe changes are applied to `shareable` and published to the public mirror through the approved mirror worktree.
 - No local data, logs, generated output, credentials, org details, or machine-specific paths are committed.
 - `npm run check:shareable` passes on public-safe branches.
 
