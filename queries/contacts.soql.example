@@ -10,14 +10,11 @@ SELECT
   HomePhone,
   AssistantPhone,
   Account.Name,
-  AccountId,
   MailingStreet,
   MailingCity,
   MailingState,
   MailingPostalCode,
   MailingCountry,
-  Title,
-  Department,
   LeadSource,
   CreatedDate
 FROM Contact

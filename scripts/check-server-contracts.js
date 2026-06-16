@@ -118,7 +118,7 @@ async function main() {
     await assertSalesforcePullAuthPreflightRegression();
     await assertLauncherRuntimeAlignmentRegression();
     await assertCodexTrainingLaunchCommand(baseUrl);
-    await assertSalesforceExportSchemaUpgradeRegression();
+    await assertTrimmedContactExportSchemaRegression();
     await assertAccountScopeDivergenceRegression();
     await assertAccountExactWebsiteCorroborationRegression();
     await assertAccountCommentaryNormalizationRegression();
@@ -446,35 +446,38 @@ async function assertStaticApp(baseUrl) {
   }
 }
 
-async function assertSalesforceExportSchemaUpgradeRegression() {
-  const contactQueryPath = path.join(PROJECT_DIR, "queries", "report-00OVZ000003DjaH2AS.soql");
+async function assertTrimmedContactExportSchemaRegression() {
+  const contactQueryPaths = [
+    path.join(PROJECT_DIR, "queries", "report-00OVZ000003DjaH2AS.soql"),
+    path.join(PROJECT_DIR, "queries", "report-00OVq00000CxYd3MAF.soql")
+  ];
   const accountQueryPath = path.join(PROJECT_DIR, "queries", "report-00OVZ000003Dm572AC.soql");
-  const contactQuery = await fs.readFile(contactQueryPath, "utf8");
   const accountQuery = await fs.readFile(accountQueryPath, "utf8");
 
-  assertQueryContainsAll(contactQueryPath, contactQuery, [
-    "Id",
-    "Name",
-    "FirstName",
-    "LastName",
-    "Email",
-    "Phone",
-    "MobilePhone",
-    "OtherPhone",
-    "HomePhone",
-    "AssistantPhone",
-    "Account.Name",
-    "AccountId",
-    "MailingStreet",
-    "MailingCity",
-    "MailingState",
-    "MailingPostalCode",
-    "MailingCountry",
-    "Title",
-    "Department",
-    "LeadSource",
-    "CreatedDate"
-  ]);
+  for (const contactQueryPath of contactQueryPaths) {
+    const contactQuery = await fs.readFile(contactQueryPath, "utf8");
+    assertQueryContainsAll(contactQueryPath, contactQuery, [
+      "Id",
+      "Name",
+      "FirstName",
+      "LastName",
+      "Email",
+      "Phone",
+      "MobilePhone",
+      "OtherPhone",
+      "HomePhone",
+      "AssistantPhone",
+      "Account.Name",
+      "MailingStreet",
+      "MailingCity",
+      "MailingState",
+      "MailingPostalCode",
+      "MailingCountry",
+      "LeadSource",
+      "CreatedDate"
+    ]);
+    assertQueryExcludes(contactQueryPath, contactQuery, ["AccountId", "Title", "Department"]);
+  }
   assertQueryContainsAll(accountQueryPath, accountQuery, [
     "Id",
     "Name",
@@ -509,32 +512,30 @@ async function assertSalesforceExportSchemaUpgradeRegression() {
     "HomePhone",
     "AssistantPhone",
     "Account.Name",
-    "AccountId",
     "MailingStreet",
     "MailingCity",
     "MailingState",
     "MailingPostalCode",
     "MailingCountry",
-    "Title",
-    "Department",
     "LeadSource",
     "CreatedDate"
   ];
   const contactParsed = api.parseCsv([
     contactHeaders.join(","),
-    "003E00000000001,Taylor Mason,Taylor,Mason,taylor.mason@example.com,555-010-1000,555-010-1001,555-010-1002,555-010-1003,555-010-1004,Northstar Analytics,001E00000000001,1 Main St,Dallas,TX,75201,United States,Director,Sales,Web,2026-04-01T00:00:00.000+0000",
-    "003E00000000002,Taylor Mason,Taylor,Mason,taylor.mason@example.com,555-010-1000,555-010-1001,555-010-1002,555-010-1003,555-010-1004,Northstar Analytics,001E00000000001,9 Other St,Austin,TX,73301,United States,Director,Sales,Web,2026-04-01T00:00:00.000+0000"
+    "003E00000000001,Taylor Mason,Taylor,Mason,taylor.mason@example.com,555-010-1000,555-010-1001,555-010-1002,555-010-1003,555-010-1004,Northstar Analytics,1 Main St,Dallas,TX,75201,United States,Web,2026-04-01T00:00:00.000+0000",
+    "003E00000000002,Taylor Mason,Taylor,Mason,taylor.mason@example.com,555-010-1000,555-010-1001,555-010-1002,555-010-1003,555-010-1004,Northstar Analytics,9 Other St,Austin,TX,73301,United States,Web,2026-04-01T00:00:00.000+0000"
   ].join("\n"));
   const contactRows = contactParsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
   const contactMapping = api.autoMapHeaders(contactParsed.headers, api.OBJECT_CONFIG.contact.fields);
   const contactPrepared = api.prepareRows(contactRows, "contact", contactMapping);
   if (
-    contactMapping.accountId !== "AccountId" ||
     contactMapping.otherPhone !== "OtherPhone" ||
     contactMapping.mailingStreet !== "MailingStreet" ||
-    contactMapping.mailingPostalCode !== "MailingPostalCode"
+    contactMapping.mailingPostalCode !== "MailingPostalCode" ||
+    contactMapping.leadSource !== "LeadSource" ||
+    contactMapping.createdDate !== "CreatedDate"
   ) {
-    throw new Error(`Contact export schema upgrade auto-mapping failed: ${JSON.stringify(contactMapping)}`);
+    throw new Error(`Trimmed contact export schema auto-mapping failed: ${JSON.stringify(contactMapping)}`);
   }
   const contactAligned = api.scoreContactPair(contactPrepared[0], contactPrepared[0]);
   const contactConflict = api.scoreContactPair(contactPrepared[0], contactPrepared[1]);
@@ -591,6 +592,13 @@ function assertQueryContainsAll(queryPath, queryText, fields) {
   const missing = fields.filter((field) => !queryText.includes(field));
   if (missing.length) {
     throw new Error(`Query schema regression failed for ${queryPath}: missing ${missing.join(", ")}`);
+  }
+}
+
+function assertQueryExcludes(queryPath, queryText, fields) {
+  const present = fields.filter((field) => queryText.includes(field));
+  if (present.length) {
+    throw new Error(`Query schema regression failed for ${queryPath}: trimmed fields still present: ${present.join(", ")}`);
   }
 }
 
