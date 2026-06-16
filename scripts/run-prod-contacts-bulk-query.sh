@@ -48,9 +48,16 @@ if ! "${PROJECT_DIR}/scripts/run-salesforce-bulk-query.sh" "$@"; then
   exit 1
 fi
 
-reviewer_url="$("${PROJECT_DIR}/scripts/start-reviewer-server.sh" | tail -n 1)"
+reviewer_launch_output="$("${PROJECT_DIR}/scripts/start-reviewer-server.sh")"
+reviewer_url="$(printf '%s\n' "${reviewer_launch_output}" | tail -n 1)"
+printf '%s\n' "${reviewer_launch_output}"
 autoload_url="${reviewer_url}/?autoload=prod-contacts&object=contact&notify=1&sticky=1&name=${LATEST_JSON_NAME}"
 
-/usr/bin/open "${autoload_url}"
+if ! /usr/bin/open "${autoload_url}"; then
+  echo "Failed to open Salesforce Duplicate Reviewer at ${autoload_url}" >&2
+  notify_failure
+  exit 1
+fi
+
 echo "Opened Salesforce Duplicate Reviewer at ${autoload_url}"
 echo "The app will show a Notification Center alert after the latest prod JSON dataset is loaded and ready to review."

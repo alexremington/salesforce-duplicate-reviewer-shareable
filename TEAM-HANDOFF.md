@@ -14,7 +14,7 @@ Share a GitHub Release archive or a clean clone of the public-safe branch. Do no
 
 For duplicate-label exports, double-click `Launch Duplicate Labels Export - Mac.command` on macOS or `Launch Duplicate Labels Export - Windows.cmd` on Windows. Those launchers default to the canonical staging Contacts or Accounts CSV when it exists, fall back to prompting only if the file is missing, then write app-ready training labels under `Output/` by default.
 
-For prod Contacts review, run `scripts/run-prod-contacts-bulk-query.sh` after the prod pull completes. It opens Duplicate Reviewer on the `prod-contacts` autoload route with `object=contact`, `notify=1`, `sticky=1`, and `name=salesforce-prod-contacts-latest.json`, keeps the prod latest files separate from staging, and repairs any legacy download-prefixed prod output into `Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/` before the reviewer opens.
+For prod Contacts review, run `scripts/run-prod-contacts-bulk-query.sh` after the prod pull completes. It opens Duplicate Reviewer on the `prod-contacts` autoload route with `object=contact`, `notify=1`, `sticky=1`, and `name=salesforce-prod-contacts-latest.json`, keeps the prod latest files separate from staging, repairs any legacy download-prefixed prod output into `Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/` before the reviewer opens, and logs whether the reviewer server was reused or started fresh.
 
 If mirror reconciliation needs temporary worktrees, scratch repos, or helper links, treat them as disposable repair state and remove them before handoff.
 

@@ -433,6 +433,7 @@ async function run() {
     const staleFailureCardRefreshState = await captureStaleFailureCardRefreshFlow(page);
     const missingContactIdRefreshState = await captureMissingContactIdRefreshFlow(page, missingContactIdCsvPath, contactSmokeCsv());
     const missingContactIdFallbackRefreshState = await captureMissingContactIdFallbackRefreshFlow(page, missingContactIdCsvPath, contactSmokeCsv());
+    const authBlockedMergeState = await captureAuthBlockedMergeGate(browser, csvPath);
     if (
       !staleRefreshState.refreshCalled ||
       !staleRefreshState.datasetContractVersion ||
@@ -452,6 +453,9 @@ async function run() {
       staleFailureCardRefreshState.refreshEndpoint !== "/api/smoke/stale-failure-card-refresh/latest.json"
     ) {
       throw new Error(`Expected stale failure-card refresh to preserve the rollback-capable JSON contract: ${JSON.stringify(staleFailureCardRefreshState)}`);
+    }
+    if (!authBlockedMergeState.mergeSubmitDisabled || !authBlockedMergeState.warningVisible || !/Salesforce auth is blocked/i.test(authBlockedMergeState.warningText || "")) {
+      throw new Error(`Expected auth-blocked merge review to disable the merge action and show a warning: ${JSON.stringify(authBlockedMergeState)}`);
     }
     await page.locator(".group-item-main").first().click();
     await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
@@ -1900,6 +1904,37 @@ function toSalesforceCurrentRecord(record) {
     Account: { Name: String(fields.company || "") },
     AccountName: String(fields.company || "")
   };
+}
+
+async function captureAuthBlockedMergeGate(browser, csvPath) {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+  try {
+    await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+    await importContactsThroughMenu(page, csvPath);
+    await waitForFirstGroup(page, "Auth-blocked merge gate dataset load");
+    await page.locator(".group-item-main").first().click();
+    await page.getByLabel("Duplicate review workspace").getByRole("button", { name: "Duplicate", exact: true }).click();
+    await page.locator('[data-review-mode="merge"]').click();
+    await page.locator(".merge-master-choice").first().waitFor({ state: "visible", timeout: 5000 });
+    await page.evaluate(() => {
+      state.serverHealth = {
+        ok: true,
+        salesforceAuthFresh: false,
+        salesforceAuthFreshCheckedAt: new Date().toISOString(),
+        runtimeAligned: true,
+        runtimeAlignedCheckedAt: new Date().toISOString()
+      };
+      if (typeof renderDetail === "function") renderDetail();
+    });
+    const mergeSubmitDisabled = await page.locator(".merge-submit-button").isDisabled();
+    const warningLocator = page.locator(".merge-auth-warning");
+    await warningLocator.waitFor({ state: "visible", timeout: 5000 });
+    const warningVisible = await warningLocator.isVisible();
+    const warningText = (await warningLocator.textContent())?.trim() || "";
+    return { mergeSubmitDisabled, warningVisible, warningText };
+  } finally {
+    await page.close();
+  }
 }
 
 async function captureMergeReportDownload(page) {

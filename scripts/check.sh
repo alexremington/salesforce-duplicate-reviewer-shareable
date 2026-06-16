@@ -134,8 +134,12 @@ if ! grep -Fq 'prod-contacts-output-repair.js' scripts/run-prod-contacts-bulk-qu
   echo "Prod Contacts launcher did not invoke the canonical output repair helper."
   exit 1
 fi
-if ! grep -Fq 'reviewer_url="$("${PROJECT_DIR}/scripts/start-reviewer-server.sh" | tail -n 1)"' scripts/run-prod-contacts-bulk-query.sh; then
+if ! grep -Fq 'reviewer_launch_output="$("${PROJECT_DIR}/scripts/start-reviewer-server.sh")"' scripts/run-prod-contacts-bulk-query.sh; then
   echo "Prod Contacts launcher did not start or reuse the reviewer server before opening the URL."
+  exit 1
+fi
+if ! grep -Fq 'if ! /usr/bin/open "${autoload_url}"; then' scripts/run-prod-contacts-bulk-query.sh; then
+  echo "Prod Contacts launcher did not fail when Duplicate Reviewer could not be opened."
   exit 1
 fi
 if ! grep -Fq 'name=${LATEST_JSON_NAME}' scripts/run-prod-contacts-bulk-query.sh; then

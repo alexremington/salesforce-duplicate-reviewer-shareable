@@ -162,8 +162,11 @@ if ($prodLauncher -notmatch 'autoload_url="\$\{reviewer_url\}/\?autoload=prod-co
 if ($prodLauncher -notmatch 'prod-contacts-output-repair\.js') {
   throw 'Prod Contacts launcher did not invoke the canonical output repair helper.'
 }
-if ($prodLauncher -notmatch 'reviewer_url="\$\("\$\{PROJECT_DIR\}/scripts/start-reviewer-server.sh" \| tail -n 1\)"') {
+if ($prodLauncher -notmatch 'reviewer_launch_output="\$\("\$\{PROJECT_DIR\}/scripts/start-reviewer-server.sh"\)"') {
   throw 'Prod Contacts launcher did not start or reuse the reviewer server before opening the URL.'
+}
+if ($prodLauncher -notmatch 'if ! /usr/bin/open "\$\{autoload_url\}"; then') {
+  throw 'Prod Contacts launcher did not fail when Duplicate Reviewer could not be opened.'
 }
 if ($prodLauncher -notmatch 'name=\$\{LATEST_JSON_NAME\}') {
   throw 'Prod Contacts launcher did not target the prod latest JSON file.'

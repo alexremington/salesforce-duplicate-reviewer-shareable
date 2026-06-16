@@ -8365,7 +8365,11 @@ function renderSalesforceMergePanel(group, activeRecords, currentDecision) {
       <p class="merge-warning">
         Salesforce merge keeps the selected master Contact and reparents related records from duplicate Contacts. Lead Source changes still apply as Salesforce write-backs; other field choices remain review-only and will be shown in the read-only confirmation preview.
       </p>
-      ${renderMergeAuthBlockedNotice(authSupport)}
+      ${authBlocked ? `
+        <p class="merge-warning merge-auth-warning">
+          Salesforce auth is blocked. Refresh the Salesforce session before starting merge review${authSupport ? ` (${escapeHtml(authSupport)}).` : "."}
+        </p>
+      ` : ""}
       ${mergeState.invalidRecords.length ? renderMissingContactIdNotice(group, mergeState) : ""}
       ${result ? renderMergeResult(result) : ""}
       <div class="merge-actions">
