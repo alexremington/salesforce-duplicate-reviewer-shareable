@@ -5,9 +5,9 @@ This repo has two local/pushed branches with different purposes.
 ## Branches
 
 - `main`: private working branch. It may contain local paths, real report IDs, org defaults, and team-specific operating notes.
-- `shareable`: public-safe branch. It must not contain exported Salesforce data, real report IDs, tenant IDs, personal machine paths, tokens, or private team-specific config.
+- `shareable`: approved public-safe source branch. It must not contain exported Salesforce data, real report IDs, tenant IDs, personal machine paths, tokens, or private team-specific config.
 
-The public GitHub mirror is separate from the private repo:
+The public GitHub mirror is separate from the private repo. Publish `shareable` through the mirror worktree instead of pushing `main` directly to `public/main`:
 
 - Private remote: `origin`
 - Public mirror remote: `public`
@@ -32,12 +32,13 @@ Only update the public mirror deliberately:
 git switch shareable
 npm run check
 npm run check:shareable
-git push origin shareable
-git push public shareable:main
+git diff origin/shareable..shareable
+# In the public-mirror-sync worktree, start from public/main, cherry-pick the
+# commits after the merge-base, and push the resulting branch-based update.
 git switch main
 ```
 
-Do not merge `main` into `shareable` without reviewing the diff for private details first.
+Do not merge `main` into `shareable` without reviewing the diff for private details first, and do not push `main` directly to `public/main`.
 
 ## Branch Protection Decision
 
@@ -54,4 +55,4 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-Push the same tag to the public mirror only when the tagged commit is public-safe.
+Push the same tag to the public mirror only when the tagged commit is public-safe and has been published through the mirror worktree.

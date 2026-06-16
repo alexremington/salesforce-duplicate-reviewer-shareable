@@ -5,7 +5,7 @@ These instructions apply to this repository and its subdirectories.
 ## Product Goals
 
 - Build inside the existing app and preserve the current workflow unless the user explicitly asks for a separate prototype.
-- Keep the private branch and shareable branch in sync when changes are intended for both audiences.
+- When changes are intended for both audiences, keep the private branch and approved public-safe shareable branch aligned through the mirror worktree flow instead of direct `main -> public/main` pushes.
 - Keep the app portable for both macOS and Windows users.
 
 ## Front-End Design

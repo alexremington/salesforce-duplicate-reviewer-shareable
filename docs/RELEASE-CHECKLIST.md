@@ -18,4 +18,4 @@ Run this before committing or sharing Duplicate Reviewer changes.
    - Windows smoke: Windows launcher opens, Node and Salesforce CLI are discovered, import works, merge controls are reachable, and `Run now`/server actions use platform-safe process launching.
    - Fresh install smoke: no prior app-support state, one-click launcher creates runtime state, Recent files and demo/import paths still work.
    - Upgrade-path smoke: existing app-support state, recent files, saved labels/decisions, and runtime restart behavior survive the update.
-13. Commit private changes, apply public-safe changes to `shareable`, run the same checks there, and push the private and public/shareable branches together.
+13. Commit private changes, apply public-safe changes to `shareable`, publish through the approved mirror worktree, run the same checks there, and push the private changes before or alongside the mirror update as appropriate.
