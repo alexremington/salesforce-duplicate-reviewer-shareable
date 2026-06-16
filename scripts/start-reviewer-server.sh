@@ -44,7 +44,7 @@ fi
 
 export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export DUPLICATE_REVIEWER_PROD_ROOT="${DUPLICATE_REVIEWER_PROD_ROOT:-${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/prod}"
-export PROD_CONTACTS_CSV="${PROD_CONTACTS_CSV:-${DUPLICATE_REVIEWER_PROD_ROOT}/Output/prod-contacts/salesforce-prod-contacts-latest.csv}"
+export PROD_CONTACTS_CSV="${PROD_CONTACTS_CSV:-${DUPLICATE_REVIEWER_PROD_ROOT}/Output/prod-contacts/salesforce-report-latest.csv}"
 
 mkdir -p "${LOG_DIR}"
 

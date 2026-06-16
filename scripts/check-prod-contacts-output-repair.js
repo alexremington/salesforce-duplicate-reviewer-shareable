@@ -4,7 +4,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const {
-  repairLegacyProdContactsOutput,
+  validateCanonicalProdContactsOutput,
   resolveProdContactsPaths
 } = require("./prod-contacts-output-repair");
 
@@ -17,16 +17,16 @@ async function main() {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "duplicate-reviewer-prod-repair-"));
   try {
     const canonicalRoot = path.join(tempDir, "Salesforce Pulls", "Duplicate Reviewer", "prod");
-    const legacyRoot = path.join(tempDir, "Salesforce Pulls", "Duplicate Reviewer", "download-prod-contacts-for-duplicate-review");
-    const latestJsonPath = path.join(canonicalRoot, "Output", "prod-contacts", "salesforce-prod-contacts-latest.json");
-    const latestCsvPath = path.join(canonicalRoot, "Output", "prod-contacts", "salesforce-prod-contacts-latest.csv");
-    const legacyJsonPath = path.join(legacyRoot, "Output", "download-prod-contacts-for-duplicate-review", "salesforce-prod-contacts-latest.json");
-    const legacyCsvPath = path.join(legacyRoot, "Output", "download-prod-contacts-for-duplicate-review", "salesforce-prod-contacts-latest.csv");
-    const legacyPayload = {
+    const latestJsonPath = path.join(canonicalRoot, "Output", "prod-contacts", "salesforce-report-latest.json");
+    const latestCsvPath = path.join(canonicalRoot, "Output", "prod-contacts", "salesforce-report-latest.csv");
+    const legacyRoot = path.join(tempDir, "legacy-prod-contacts-tree");
+    const legacyJsonPath = path.join(legacyRoot, "Output", "prod-contacts", "salesforce-report-latest.json");
+    const legacyCsvPath = path.join(legacyRoot, "Output", "prod-contacts", "salesforce-report-latest.csv");
+    const canonicalPayload = {
       schema: "salesforce-duplicate-reviewer.dataset",
       schemaVersion: 1,
       objectType: "contact",
-      fileName: "salesforce-prod-contacts-latest.json",
+      fileName: "salesforce-report-latest.json",
       source: {
         system: "salesforce",
         name: "Latest Prod Contacts"
@@ -35,41 +35,55 @@ async function main() {
     };
 
     await fs.mkdir(path.dirname(legacyJsonPath), { recursive: true });
-    await fs.writeFile(legacyJsonPath, `${JSON.stringify(legacyPayload, null, 2)}\n`);
+    await fs.writeFile(legacyJsonPath, `${JSON.stringify(canonicalPayload, null, 2)}\n`);
     await fs.writeFile(legacyCsvPath, "Id,Name\n003000000000001AAA,Prod Contact\n");
 
-    const result = await repairLegacyProdContactsOutput({
+    const missingResult = await validateCanonicalProdContactsOutput({
       env: {
-        DUPLICATE_REVIEWER_PROD_ROOT: canonicalRoot,
-        LEGACY_DUPLICATE_REVIEWER_PROD_ROOT: legacyRoot
+        DUPLICATE_REVIEWER_PROD_ROOT: canonicalRoot
       }
     });
 
-    if (!result.repaired) {
-      throw new Error(`Expected legacy prod Contacts output repair to run: ${JSON.stringify(result)}`);
+    if (missingResult.validated || missingResult.reason !== "canonical-missing") {
+      throw new Error(`Expected canonical validation to fail before the canonical files exist: ${JSON.stringify(missingResult)}`);
     }
 
-    const repairedJson = JSON.parse(await fs.readFile(latestJsonPath, "utf8"));
-    const repairedCsv = await fs.readFile(latestCsvPath, "utf8");
-    if (repairedJson.fileName !== "salesforce-prod-contacts-latest.json" || !repairedCsv.includes("Prod Contact")) {
-      throw new Error(`Canonical prod Contacts output was not copied correctly: ${JSON.stringify({ repairedJson, repairedCsv })}`);
+    await fs.mkdir(path.dirname(latestJsonPath), { recursive: true });
+    await fs.writeFile(latestJsonPath, `${JSON.stringify(canonicalPayload, null, 2)}\n`);
+    await fs.writeFile(latestCsvPath, "Id,Name\n003000000000001AAA,Prod Contact\n");
+
+    const result = await validateCanonicalProdContactsOutput({
+      env: {
+        DUPLICATE_REVIEWER_PROD_ROOT: canonicalRoot
+      }
+    });
+
+    if (!result.validated) {
+      throw new Error(`Expected canonical prod Contacts output to validate: ${JSON.stringify(result)}`);
+    }
+
+    const canonicalJson = JSON.parse(await fs.readFile(latestJsonPath, "utf8"));
+    const canonicalCsv = await fs.readFile(latestCsvPath, "utf8");
+    if (canonicalJson.fileName !== "salesforce-report-latest.json" || !canonicalCsv.includes("Prod Contact")) {
+      throw new Error(`Canonical prod Contacts output was not validated correctly: ${JSON.stringify({ canonicalJson, canonicalCsv })}`);
     }
 
     const paths = resolveProdContactsPaths({
-      DUPLICATE_REVIEWER_PROD_ROOT: canonicalRoot,
-      LEGACY_DUPLICATE_REVIEWER_PROD_ROOT: legacyRoot
+      DUPLICATE_REVIEWER_PROD_ROOT: canonicalRoot
     });
     if (
       paths.canonicalJsonPath !== latestJsonPath ||
-      paths.canonicalCsvPath !== latestCsvPath ||
-      paths.legacyJsonPath !== legacyJsonPath ||
-      paths.legacyCsvPath !== legacyCsvPath
+      paths.canonicalCsvPath !== latestCsvPath
     ) {
       throw new Error(`Prod Contacts path resolution drifted: ${JSON.stringify(paths)}`);
+    }
+
+    if (legacyJsonPath === latestJsonPath || legacyCsvPath === latestCsvPath) {
+      throw new Error("Legacy validation paths should differ from the canonical prod Contacts paths.");
     }
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
   }
 
-  console.log("Prod Contacts output repair regression passed.");
+  console.log("Prod Contacts canonical output validation passed.");
 }

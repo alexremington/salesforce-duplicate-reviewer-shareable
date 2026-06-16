@@ -56,7 +56,7 @@ Opening `index.html` directly remains supported for manual JSON or CSV uploads. 
 
 For day-to-day review work, use `Launch Duplicate Reviewer - Mac.command` on macOS or `Launch Duplicate Reviewer - Windows.cmd` on Windows. PowerShell users can run `scripts\launch-duplicate-reviewer-windows.ps1` as a fallback. The server-backed app automatically adds the latest configured Contact and Account JSON datasets to `Recent files` when those exports exist, so the launcher is the single entry point for continuing work after downloads finish.
 
-For the prod Contacts handoff, use `scripts/run-prod-contacts-bulk-query.sh` to run the prod pull and open Duplicate Reviewer directly on the `prod-contacts` autoload route with `object=contact`, `notify=1`, `sticky=1`, and `name=salesforce-prod-contacts-latest.json`. The prod launcher keeps its latest output separate from staging, reads the canonical `Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/` tree, repairs any legacy download-prefixed prod output before the reviewer opens so the two recent-file entries do not collide, and prints whether the reviewer server was reused or started fresh before handing off the URL.
+For the prod Contacts handoff, use `scripts/run-prod-contacts-bulk-query.sh` to run the prod pull and open Duplicate Reviewer directly on the `prod-contacts` autoload route with `object=contact`, `notify=1`, `sticky=1`, and `name=salesforce-report-latest.json`. The prod launcher keeps its latest output in the canonical `Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/` tree, uses the raw Salesforce report file names for the on-disk JSON and CSV outputs, and prints whether the reviewer server was reused or started fresh before handing off the URL.
 
 On Windows, if OneDrive shows a notice that `Node.js JavaScript Runtime` is downloading `salesforce-report-latest.json`, Node is not being installed. The local app server is reading a cloud-only OneDrive dataset file. Right-click the app folder, `Output` folder, or latest export folder in File Explorer and choose `Always keep on this device` before loading recent datasets.
 
@@ -184,7 +184,7 @@ That helper creates a user LaunchAgent and refreshes a generated static cache un
 ```
 
 The project folder remains the source of truth. The cache only avoids transient OneDrive or cloud-file-provider read errors at runtime. The server exposes `salesforce-report-latest.json` as the native review dataset and keeps CSV endpoints available for compatibility. If one format cannot be read from OneDrive, the server falls back to the other format when possible.
-Prod Contacts follow the same pattern through `salesforce-prod-contacts-latest.json` under the `prod-contacts` route.
+Prod Contacts follow the same report-latest pattern under the `prod-contacts` route, with source metadata keeping the dataset label as `Latest Prod Contacts`.
 
 The Scheduler-launched staging reviewer scripts always force a fresh reviewer runtime before opening the browser. That path restarts any existing reviewer server and recopies the current static bundle so the opened app cannot reuse stale cached assets from an earlier launch.
 

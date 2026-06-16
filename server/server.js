@@ -160,7 +160,7 @@ const CSV_ENDPOINTS = new Map([
     {
       path: PROD_CONTACTS_CSV,
       jsonPath: PROD_CONTACTS_CSV.replace(/\.csv$/i, ".json"),
-      fileName: "salesforce-prod-contacts-latest.csv",
+      fileName: "salesforce-report-latest.csv",
       objectType: "contact",
       label: "Latest Prod Contacts",
       source: "prod-contacts",
@@ -191,7 +191,7 @@ function defaultProdContactsCsvPath() {
       "prod",
       "Output",
       "prod-contacts",
-      "salesforce-prod-contacts-latest.csv"
+      "salesforce-report-latest.csv"
     );
   }
 
@@ -206,7 +206,7 @@ function defaultProdContactsCsvPath() {
     "prod",
     "Output",
     "prod-contacts",
-    "salesforce-prod-contacts-latest.csv"
+    "salesforce-report-latest.csv"
   );
 }
 

@@ -6,22 +6,21 @@ The prod Contacts handoff MUST read and write the canonical `Salesforce Pulls/Du
 
 ### Scenario: Reviewer starts on the prod dataset
 
-- **GIVEN** a successful prod Contacts pull has written `salesforce-prod-contacts-latest.json` and `salesforce-prod-contacts-latest.csv`
+- **GIVEN** a successful prod Contacts pull has written `salesforce-report-latest.json` and `salesforce-report-latest.csv`
 - **WHEN** the launcher opens Duplicate Reviewer with `autoload=prod-contacts`
 - **THEN** the reviewer server reads the canonical prod Contacts CSV path from the `Duplicate Reviewer/prod` tree
 - **AND** the loaded dataset is the prod Contacts dataset.
 
-## Requirement: Legacy Prod Output Must Be Repaired Once
+## Requirement: Prod Contacts Must Use The Raw Report Filenames
 
-The prod Contacts launcher MUST copy any existing legacy prod output into the canonical prod root before the reviewer opens.
+The prod Contacts launcher MUST use the raw Salesforce report filenames in the canonical prod root.
 
-### Scenario: Legacy output exists in a download-prefixed folder
+### Scenario: Prod Contacts output uses the raw report file names
 
-- **GIVEN** a legacy `download-prod-contacts-for-duplicate-review` output tree exists
-- **AND** the canonical prod output tree does not yet contain the latest prod dataset
+- **GIVEN** the canonical prod output tree contains the latest prod dataset
 - **WHEN** the prod Contacts launcher starts
-- **THEN** the launcher copies the legacy prod output into the canonical `Duplicate Reviewer/prod/Output/prod-contacts/` tree
-- **AND** the reviewer opens against the canonical prod tree without needing a fallback path.
+- **THEN** the on-disk filenames are `salesforce-report-latest.json` and `salesforce-report-latest.csv`
+- **AND** the reviewer opens against the canonical prod tree without needing a synthetic prod-only filename.
 
 ## Requirement: Autoload Contract Stays Stable
 
@@ -31,5 +30,5 @@ The prod Contacts autoload URL MUST keep the existing route and query contract.
 
 - **GIVEN** the prod Contacts handoff completes successfully
 - **WHEN** the launcher opens Duplicate Reviewer
-- **THEN** the URL includes `autoload=prod-contacts`, `object=contact`, `notify=1`, `sticky=1`, and `name=salesforce-prod-contacts-latest.json`
+- **THEN** the URL includes `autoload=prod-contacts`, `object=contact`, `notify=1`, `sticky=1`, and `name=salesforce-report-latest.json`
 - **AND** the app keeps its existing prod latest-file endpoint contract.

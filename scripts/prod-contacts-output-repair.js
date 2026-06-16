@@ -5,57 +5,56 @@ const os = require("node:os");
 const path = require("node:path");
 
 const DEFAULT_CANONICAL_PROD_ROOT = defaultProdRoot();
-const DEFAULT_LEGACY_PROD_ROOT = path.join(
-  path.dirname(DEFAULT_CANONICAL_PROD_ROOT),
-  "download-prod-contacts-for-duplicate-review"
-);
 const DEFAULT_OUTPUT_KEY = "prod-contacts";
-const DEFAULT_LATEST_CSV_NAME = "salesforce-prod-contacts-latest.csv";
-const DEFAULT_LATEST_JSON_NAME = "salesforce-prod-contacts-latest.json";
+const DEFAULT_LATEST_CSV_NAME = "salesforce-report-latest.csv";
+const DEFAULT_LATEST_JSON_NAME = "salesforce-report-latest.json";
 
-main().catch((error) => {
-  console.error(error.message || error);
-  process.exitCode = 1;
-});
-
-async function main() {
-  const result = await repairLegacyProdContactsOutput();
-  if (result.repaired) {
-    console.log(`Repaired legacy prod Contacts output from ${result.from} to ${result.to}.`);
-  }
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error.message || error);
+    process.exitCode = 1;
+  });
 }
 
-async function repairLegacyProdContactsOutput(options = {}) {
+async function main() {
+  const result = await validateCanonicalProdContactsOutput();
+  if (!result.validated) {
+    console.error(
+      `Canonical prod Contacts output is incomplete: ${result.reason}. ` +
+      `Expected ${result.canonicalJsonPath} and ${result.canonicalCsvPath}.`
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(`Canonical prod Contacts output is ready at ${result.canonicalOutDir}.`);
+}
+
+async function validateCanonicalProdContactsOutput(options = {}) {
   const env = options.env || process.env;
   const fsApi = options.fs || fs;
   const paths = resolveProdContactsPaths(env);
 
-  if (await pathExists(fsApi, paths.canonicalJsonPath)) {
-    return { repaired: false, reason: "canonical-present", ...paths };
+  const canonicalJsonExists = await pathExists(fsApi, paths.canonicalJsonPath);
+  const canonicalCsvExists = await pathExists(fsApi, paths.canonicalCsvPath);
+
+  if (canonicalJsonExists && canonicalCsvExists) {
+    return { validated: true, reason: "canonical-present", ...paths };
   }
 
-  if (!(await pathExists(fsApi, paths.legacyOutDir))) {
-    return { repaired: false, reason: "legacy-missing", ...paths };
+  if (!canonicalJsonExists && !canonicalCsvExists) {
+    return { validated: false, reason: "canonical-missing", ...paths };
   }
 
-  await fsApi.mkdir(paths.canonicalOutDir, { recursive: true });
-  await fsApi.cp(paths.legacyOutDir, paths.canonicalOutDir, {
-    recursive: true,
-    force: true,
-    preserveTimestamps: true
-  });
+  if (!canonicalJsonExists) {
+    return { validated: false, reason: "canonical-json-missing", ...paths };
+  }
 
-  return {
-    repaired: true,
-    from: paths.legacyOutDir,
-    to: paths.canonicalOutDir,
-    ...paths
-  };
+  return { validated: false, reason: "canonical-csv-missing", ...paths };
 }
 
 function resolveProdContactsPaths(env = process.env) {
   const canonicalProdRoot = normalizeConfiguredPath(env.DUPLICATE_REVIEWER_PROD_ROOT || DEFAULT_CANONICAL_PROD_ROOT);
-  const legacyProdRoot = normalizeConfiguredPath(env.LEGACY_DUPLICATE_REVIEWER_PROD_ROOT || DEFAULT_LEGACY_PROD_ROOT);
   const outputKey = String(env.DUPLICATE_REVIEWER_PROD_OUTPUT_KEY || DEFAULT_OUTPUT_KEY).trim() || DEFAULT_OUTPUT_KEY;
   const latestCsvName = String(env.LATEST_CSV_NAME || DEFAULT_LATEST_CSV_NAME).trim() || DEFAULT_LATEST_CSV_NAME;
   const latestJsonName = String(env.LATEST_JSON_NAME || DEFAULT_LATEST_JSON_NAME).trim() || DEFAULT_LATEST_JSON_NAME;
@@ -64,11 +63,7 @@ function resolveProdContactsPaths(env = process.env) {
     canonicalProdRoot,
     canonicalOutDir: path.join(canonicalProdRoot, "Output", outputKey),
     canonicalCsvPath: path.join(canonicalProdRoot, "Output", outputKey, latestCsvName),
-    canonicalJsonPath: path.join(canonicalProdRoot, "Output", outputKey, latestJsonName),
-    legacyProdRoot,
-    legacyOutDir: path.join(legacyProdRoot, "Output", "download-prod-contacts-for-duplicate-review"),
-    legacyCsvPath: path.join(legacyProdRoot, "Output", "download-prod-contacts-for-duplicate-review", latestCsvName),
-    legacyJsonPath: path.join(legacyProdRoot, "Output", "download-prod-contacts-for-duplicate-review", latestJsonName)
+    canonicalJsonPath: path.join(canonicalProdRoot, "Output", outputKey, latestJsonName)
   };
 }
 
@@ -103,6 +98,6 @@ function defaultProdRoot() {
 }
 
 module.exports = {
-  repairLegacyProdContactsOutput,
+  validateCanonicalProdContactsOutput,
   resolveProdContactsPaths
 };

@@ -231,7 +231,7 @@ async function assertProdLatestEndpointCaching(baseUrl) {
 
   const payload = JSON.parse(response.body);
   if (
-    payload?.fileName !== "salesforce-prod-contacts-latest.json" ||
+    payload?.fileName !== "salesforce-report-latest.json" ||
     payload?.source?.name !== "Latest Prod Contacts" ||
     payload?.source?.orgAlias !== "smoke-prod" ||
     payload?.source?.instanceUrl !== fakeSalesforceServer.baseUrl
@@ -245,7 +245,7 @@ async function assertProdLatestEndpointCaching(baseUrl) {
   if (
     !prodContact ||
     prodContact.endpoint !== "/api/prod-contacts/latest.json" ||
-    prodContact.name !== "salesforce-prod-contacts-latest.json" ||
+    prodContact.name !== "salesforce-report-latest.json" ||
     prodContact.label !== "Latest Prod Contacts"
   ) {
     throw new Error(`Prod latest-files route failed: ${JSON.stringify(latestFiles)}`);

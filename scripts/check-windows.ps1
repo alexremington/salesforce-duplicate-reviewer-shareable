@@ -147,11 +147,11 @@ if ($prodContactsDryRun -notmatch 'SOQL file: .*/queries/report-00OVq00000CxYd3M
   Write-Host $prodContactsDryRun
   throw 'Prod Contacts did not use the canonical prod Contacts query file.'
 }
-if ($prodContactsDryRun -notmatch 'Latest JSON: .*/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/salesforce-prod-contacts-latest.json') {
+if ($prodContactsDryRun -notmatch 'Latest JSON: .*/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/salesforce-report-latest.json') {
   Write-Host $prodContactsDryRun
   throw 'Prod Contacts did not preserve the canonical prod latest JSON output flow.'
 }
-if ($prodContactsDryRun -notmatch 'Compatibility CSV: .*/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/salesforce-prod-contacts-latest.csv') {
+if ($prodContactsDryRun -notmatch 'Compatibility CSV: .*/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/salesforce-report-latest.csv') {
   Write-Host $prodContactsDryRun
   throw 'Prod Contacts did not preserve the canonical prod compatibility CSV output flow.'
 }
@@ -159,8 +159,8 @@ $prodLauncher = Get-Content scripts/run-prod-contacts-bulk-query.sh -Raw
 if ($prodLauncher -notmatch 'autoload_url="\$\{reviewer_url\}/\?autoload=prod-contacts&object=contact&notify=1&sticky=1&name=\$\{LATEST_JSON_NAME\}"') {
   throw 'Prod Contacts launcher did not open Duplicate Reviewer with the expected prod handoff URL.'
 }
-if ($prodLauncher -notmatch 'prod-contacts-output-repair\.js') {
-  throw 'Prod Contacts launcher did not invoke the canonical output repair helper.'
+if ($prodLauncher -match 'prod-contacts-output-repair\.js') {
+  throw 'Prod Contacts launcher still depends on the legacy repair helper.'
 }
 if ($prodLauncher -notmatch 'reviewer_launch_output="\$\("\$\{PROJECT_DIR\}/scripts/start-reviewer-server.sh"\)"') {
   throw 'Prod Contacts launcher did not start or reuse the reviewer server before opening the URL.'

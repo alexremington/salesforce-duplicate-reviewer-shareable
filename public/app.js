@@ -1783,7 +1783,7 @@ async function loadFromUrlIfRequested() {
     "prod-contacts": {
       endpoint: "/api/prod-contacts/latest.json",
       defaultObjectType: "contact",
-      defaultFileName: "salesforce-prod-contacts-latest.json",
+      defaultFileName: "salesforce-report-latest.json",
       label: "Latest Prod Contacts"
     },
     "staging-accounts": {
@@ -2072,7 +2072,7 @@ async function saveRecentFile(fileRecord) {
   if (!endpoint && !canStoreContent) return;
 
   const record = {
-    id: String(fileRecord.id || recentFileId(objectType, fileRecord.name, fileRecord.endpoint)),
+    id: recentFileId(objectType, fileRecord.name, fileRecord.endpoint),
     name: fileRecord.name,
     displayName: String(fileRecord.displayName || fileRecord.name),
     size: fileRecord.size || content.length,
@@ -2150,32 +2150,30 @@ async function compactOversizedRecentFiles(db, records) {
   return true;
 }
 
-function recentEndpointForName(name, objectType = "") {
-  const normalizedName = String(name || "");
+function recentEndpointForRecord(record) {
+  const normalizedName = String(record?.name || "");
+  const displayName = String(record?.displayName || "").toLowerCase();
+  const objectType = String(record?.objectType || "");
+  const isProdContacts = displayName.includes("prod");
+
   if (normalizedName === "salesforce-report-latest.json") {
-    return String(objectType || "").toLowerCase() === "account"
+    if (isProdContacts) return "/api/prod-contacts/latest.json";
+    return objectType.toLowerCase() === "account"
       ? "/api/staging-accounts/latest.json"
       : "/api/staging-contacts/latest.json";
   }
-  if (normalizedName === "salesforce-prod-contacts-latest.json") {
-    return "/api/prod-contacts/latest.json";
-  }
   if (normalizedName === "salesforce-report-latest.csv") {
-    return String(objectType || "").toLowerCase() === "account"
+    if (isProdContacts) return "/api/prod-contacts/latest.csv";
+    return objectType.toLowerCase() === "account"
       ? "/api/staging-accounts/latest.csv"
       : "/api/staging-contacts/latest.csv";
-  }
-  if (normalizedName === "salesforce-prod-contacts-latest.csv") {
-    return "/api/prod-contacts/latest.csv";
   }
 
   return {
     "salesforce-staging-contacts-latest.csv": "/api/staging-contacts/latest.csv",
     "salesforce-staging-accounts-latest.csv": "/api/staging-accounts/latest.csv",
     "salesforce-staging-contacts-latest.json": "/api/staging-contacts/latest.json",
-    "salesforce-staging-accounts-latest.json": "/api/staging-accounts/latest.json",
-    "salesforce-prod-contacts-latest.csv": "/api/prod-contacts/latest.csv",
-    "salesforce-prod-contacts-latest.json": "/api/prod-contacts/latest.json"
+    "salesforce-staging-accounts-latest.json": "/api/staging-accounts/latest.json"
   }[normalizedName] || "";
 }
 

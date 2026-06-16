@@ -1538,7 +1538,7 @@ async function assertProdContactsAutoload(browser) {
     schema: "salesforce-duplicate-reviewer.dataset",
     schemaVersion: 1,
     objectType: "contact",
-    fileName: "salesforce-prod-contacts-latest.json",
+    fileName: "salesforce-report-latest.json",
     source: {
       system: "salesforce",
       name: "Latest Prod Contacts",
@@ -1571,7 +1571,7 @@ async function assertProdContactsAutoload(browser) {
               source: "prod-contacts",
               objectType: "contact",
               label: "Latest Prod Contacts",
-              name: "salesforce-prod-contacts-latest.json",
+              name: "salesforce-report-latest.json",
               endpoint: "/api/prod-contacts/latest.json",
               size: 1,
               updatedAt: Date.now()
@@ -1588,7 +1588,7 @@ async function assertProdContactsAutoload(browser) {
       });
     });
 
-    await page.goto(`${baseUrl}/?autoload=prod-contacts&object=contact&notify=1&sticky=1&name=salesforce-prod-contacts-latest.json`, {
+    await page.goto(`${baseUrl}/?autoload=prod-contacts&object=contact&notify=1&sticky=1&name=salesforce-report-latest.json`, {
       waitUntil: "domcontentloaded"
     });
     await page.waitForFunction(() => state.rows.length === 2 && state.objectType === "contact", null, { timeout: 10000 });
@@ -1608,8 +1608,8 @@ async function assertProdContactsAutoload(browser) {
       url.searchParams.get("object") !== "contact" ||
       url.searchParams.get("notify") !== "1" ||
       url.searchParams.get("sticky") !== "1" ||
-      url.searchParams.get("name") !== "salesforce-prod-contacts-latest.json" ||
-      autoloadState.fileName !== "salesforce-prod-contacts-latest.json" ||
+      url.searchParams.get("name") !== "salesforce-report-latest.json" ||
+      autoloadState.fileName !== "salesforce-report-latest.json" ||
       autoloadState.sourceName !== "Latest Prod Contacts" ||
       autoloadState.rowCount !== 2 ||
       autoloadState.orgAlias !== "qa-prod-org" ||

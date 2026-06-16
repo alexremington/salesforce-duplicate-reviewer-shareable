@@ -2,20 +2,15 @@
 
 ## Why
 
-The prod Contacts handoff currently depends on two different path assumptions:
-
-- the Salesforce pull writes the dataset into the canonical `Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/` tree;
-- the reviewer server must also read that same canonical prod tree when `autoload=prod-contacts` opens the app.
-
-Earlier prod output may still exist in a legacy download-prefixed folder from before the canonical root was settled. Without a migration step, the reviewer can open successfully but fail to find the latest prod dataset.
+The prod Contacts handoff needs to use the same raw Salesforce report naming that the pull job already produces for every environment, instead of a synthetic prod-only filename or a legacy download-prefixed filesystem path.
 
 ## What Changes
 
 - pass the canonical prod Contacts CSV path through the reviewer startup flow so the server reads from `Duplicate Reviewer/prod/Output/prod-contacts/`;
-- add a one-time repair step that copies any existing legacy prod output into the canonical prod folder before the reviewer opens;
+- use `salesforce-report-latest.json` and `salesforce-report-latest.csv` as the canonical prod Contacts filenames on disk;
 - keep the prod autoload URL contract unchanged;
-- update the scheduler and reviewer docs/contracts to describe the canonical prod root and the repair behavior;
-- add regression coverage for the canonical prod path and the repair step.
+- update the scheduler and reviewer docs/contracts to describe the canonical prod root and the source-aware recent-file metadata;
+- add regression coverage for the canonical prod path and the raw report-latest filenames.
 
 ## Non-Goals
 

@@ -111,7 +111,7 @@ case "${prodContactsDryRun}" in
     ;;
 esac
 case "${prodContactsDryRun}" in
-  *"Latest JSON: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/salesforce-prod-contacts-latest.json"*) ;;
+  *"Latest JSON: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/salesforce-report-latest.json"*) ;;
   *)
     echo "${prodContactsDryRun}"
     echo "Prod Contacts did not preserve the canonical prod latest JSON output flow."
@@ -119,7 +119,7 @@ case "${prodContactsDryRun}" in
     ;;
 esac
 case "${prodContactsDryRun}" in
-  *"Compatibility CSV: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/salesforce-prod-contacts-latest.csv"*) ;;
+  *"Compatibility CSV: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/salesforce-report-latest.csv"*) ;;
   *)
     echo "${prodContactsDryRun}"
     echo "Prod Contacts did not preserve the canonical prod compatibility CSV output flow."
@@ -130,8 +130,8 @@ if ! grep -Fq 'autoload_url="${reviewer_url}/?autoload=prod-contacts&object=cont
   echo "Prod Contacts launcher did not open Duplicate Reviewer with the expected prod handoff URL."
   exit 1
 fi
-if ! grep -Fq 'prod-contacts-output-repair.js' scripts/run-prod-contacts-bulk-query.sh; then
-  echo "Prod Contacts launcher did not invoke the canonical output repair helper."
+if grep -Fq 'prod-contacts-output-repair.js' scripts/run-prod-contacts-bulk-query.sh; then
+  echo "Prod Contacts launcher still depends on the legacy repair helper."
   exit 1
 fi
 if ! grep -Fq 'reviewer_launch_output="$("${PROJECT_DIR}/scripts/start-reviewer-server.sh")"' scripts/run-prod-contacts-bulk-query.sh; then
