@@ -18,5 +18,4 @@
 - Keep Account merge disabled while Accounts remain evaluation-only.
 - Re-run UI smoke tests after visible workspace changes.
 - Re-run Windows portability checks after launcher or startup changes.
-- Keep public-safe docs and branches free of local data and private configuration.
-
+- Keep public-safe docs and branches free of local data, private configuration, and leftover mirror-repair scratch state.

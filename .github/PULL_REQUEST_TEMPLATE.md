@@ -1,6 +1,6 @@
 ## Summary
 
-- 
+-
 
 ## Feature Brief
 
@@ -17,4 +17,4 @@
 - [ ] I considered Windows startup/path behavior and relied on the Windows portability CI check.
 - [ ] I updated setup, maintenance, or handoff docs if behavior changed.
 - [ ] I confirmed public-safe changes do not include local data, logs, credentials, org details, or machine-specific paths.
-
+- [ ] I removed any temporary mirror-repair worktrees, scratch repos, or helper links before handoff.
