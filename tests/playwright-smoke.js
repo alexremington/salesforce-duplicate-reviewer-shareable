@@ -17,6 +17,7 @@ const {
   contactLastNameChangeSmokeCsv,
   contactMirrorRelationshipSmokeCsv,
   contactMissingIdSmokeCsv,
+  contactPairRegressionJson,
   contactSharedCompanyExactPhoneNameConflictSmokeCsv,
   contactSmokeCsv,
   largeContactSmokeCsv,
@@ -57,6 +58,7 @@ async function run() {
   const lastNameChangeCsvPath = path.join(outDir, "contacts-last-name-change.csv");
   const differentCompanyConflictCsvPath = path.join(outDir, "contacts-different-company-conflict.csv");
   const sharedCompanyExactPhoneNameConflictCsvPath = path.join(outDir, "contacts-shared-company-exact-phone-name-conflict.csv");
+  const pairRegressionJsonPath = path.join(outDir, "contacts-pair-regression.json");
   const mirrorRelationshipCsvPath = path.join(outDir, "contacts-mirror-relationship.csv");
   const accountCsvPath = path.join(outDir, "accounts-smoke.csv");
   const accountCompanyNormalizationCsvPath = path.join(outDir, "accounts-company-normalization.csv");
@@ -75,6 +77,7 @@ async function run() {
   await fs.writeFile(lastNameChangeCsvPath, contactLastNameChangeSmokeCsv());
   await fs.writeFile(differentCompanyConflictCsvPath, contactDifferentCompanyConflictSmokeCsv());
   await fs.writeFile(sharedCompanyExactPhoneNameConflictCsvPath, contactSharedCompanyExactPhoneNameConflictSmokeCsv());
+  await fs.writeFile(pairRegressionJsonPath, contactPairRegressionJson());
   await fs.writeFile(mirrorRelationshipCsvPath, contactMirrorRelationshipSmokeCsv());
   await fs.writeFile(accountCsvPath, accountSmokeCsv());
   await fs.writeFile(accountCompanyNormalizationCsvPath, accountCompanyNormalizationSmokeCsv());
@@ -132,6 +135,7 @@ async function run() {
     const lastNameChangeCandidateState = await assertLastNameChangeCandidateMatch(browser, lastNameChangeCsvPath);
     const differentCompanyConflictState = await assertDifferentCompanyConflictSeparated(browser, differentCompanyConflictCsvPath);
     const sharedCompanyExactPhoneNameConflictState = await assertSharedCompanyExactPhoneNameConflictSeparated(browser, sharedCompanyExactPhoneNameConflictCsvPath);
+    const pairRegressionState = await assertPairRegressionGroups(browser, pairRegressionJsonPath);
     await assertMirrorRelationshipSeparated(browser, mirrorRelationshipCsvPath);
     const largeContactPerformance = await assertLargeContactCsvPerformance(browser, largeContactCsvPath);
     const largeContactJsonDeferredState = await assertLargeContactJsonDeferredIngest(browser, largeContactJsonPath);
@@ -579,6 +583,15 @@ async function run() {
     ) {
       throw new Error(`Expected shared-company exact-phone Contact pair to stay below the duplicate threshold with the new name-conflict cap: ${JSON.stringify(sharedCompanyExactPhoneNameConflictState)}`);
     }
+    if (
+      pairRegressionState.rowCount !== 8 ||
+      pairRegressionState.groupCount !== 3 ||
+      pairRegressionState.processingMode !== "worker" ||
+      pairRegressionState.missingGroupedPairs.length !== 0 ||
+      pairRegressionState.groupedFalsePair
+    ) {
+      throw new Error(`Expected the pair regression fixture to load the three true-positive groups and keep the false pair separated: ${JSON.stringify(pairRegressionState)}`);
+    }
     assertPerformanceBudget("large Contact CSV worker import", largeContactPerformance.elapsedMs, PERFORMANCE_BUDGETS.largeContactCsvWorkerMs);
     if (!lightTheme.colorScheme.includes("light") || !darkTheme.colorScheme.includes("dark") || lightTheme.bodyBg === darkTheme.bodyBg) {
       throw new Error(`Expected the UI theme to follow system light/dark mode: ${JSON.stringify({ lightTheme, darkTheme })}`);
@@ -907,6 +920,7 @@ async function run() {
       lastNameChangeCandidateState,
       largeContactPerformance,
       sharedCompanyExactPhoneNameConflictState,
+      pairRegressionState,
       performanceBudgets: PERFORMANCE_BUDGETS,
       leftPaneSmallListLayout,
       humeRegionLayout,
@@ -1630,6 +1644,45 @@ async function assertProdContactsAutoload(browser) {
     }
 
     return autoloadState;
+  } finally {
+    await page.close();
+  }
+}
+
+async function assertPairRegressionGroups(browser, filePath) {
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await importContactsThroughMenu(page, filePath);
+    await waitForFirstGroup(page, "Pair regression load");
+
+    const loadState = await datasetLoadState(page);
+    const groupedState = await page.evaluate(() => ({
+      rowIds: state.rows.map((row) => row.Id),
+      groups: state.groups.map((group) => ({
+        ids: group.records.map((record) => record.Id).sort(),
+        score: group.score,
+        minPairScore: group.minPairScore
+      }))
+    }));
+
+    const expectedPairs = [
+      ["003Vq00000MVET7IAP", "003Vq00000MVET8IAP"],
+      ["003Vq00000zOGBrIAO", "003Vq00000zOGBsIAO"],
+      ["003Vq00000zOGBzIAO", "003Vq00000zOGC0IAO"]
+    ].map((pair) => pair.slice().sort().join("|"));
+    const falsePair = ["003Vq00000zOXKLIA4", "003Vq00000zOXKMIA4"].slice().sort().join("|");
+    const groupedKeys = groupedState.groups.map((group) => group.ids.join("|"));
+    const missingGroupedPairs = expectedPairs.filter((pairKey) => !groupedKeys.includes(pairKey));
+    const groupedFalsePair = groupedKeys.includes(falsePair);
+
+    return {
+      ...loadState,
+      rowIds: groupedState.rowIds,
+      groupedKeys,
+      missingGroupedPairs,
+      groupedFalsePair
+    };
   } finally {
     await page.close();
   }

@@ -116,6 +116,110 @@ function contactSharedCompanyExactPhoneNameConflictSmokeCsv() {
   ]);
 }
 
+function contactPairRegressionJson() {
+  return JSON.stringify({
+    schema: "salesforce-duplicate-reviewer.dataset",
+    schemaVersion: 1,
+    objectType: "contact",
+    fileName: "salesforce-report-latest.json",
+    source: {
+      system: "salesforce",
+      name: "Pair regression",
+      format: "salesforce-records-json",
+      orgAlias: "qa-prod-org",
+      instanceUrl: "https://qa-prod-org.example.invalid"
+    },
+    records: [
+      {
+        Id: "003Vq00000MVET7IAP",
+        Name: "Alpha One",
+        FirstName: "Alpha",
+        LastName: "One",
+        Email: "alpha.one@example.invalid",
+        Phone: "+1 555 010 0001",
+        Company: "Example Org A",
+        LeadSource: "Salesforce",
+        CreatedDate: "2024-01-09T19:22:04.000Z"
+      },
+      {
+        Id: "003Vq00000MVET8IAP",
+        Name: "Alpha One",
+        FirstName: "Alpha",
+        LastName: "One",
+        Email: "alpha.one@example.invalid",
+        Phone: "+1 555 010 0001",
+        Company: "Example Org A",
+        LeadSource: "Salesforce",
+        CreatedDate: "2024-02-10T14:31:37.000Z"
+      },
+      {
+        Id: "003Vq00000zOGBrIAO",
+        Name: "Beta Two",
+        FirstName: "Beta",
+        LastName: "Two",
+        Email: "beta.two@example.invalid",
+        Phone: "555-010-0002",
+        Company: "",
+        LeadSource: "",
+        CreatedDate: "2024-04-17T11:52:14.000Z"
+      },
+      {
+        Id: "003Vq00000zOGBsIAO",
+        Name: "Beta Two",
+        FirstName: "Beta",
+        LastName: "Two",
+        Email: "beta.two@example.invalid",
+        Phone: "555-010-0002",
+        Company: "",
+        LeadSource: "",
+        CreatedDate: "2024-04-17T11:52:14.000Z"
+      },
+      {
+        Id: "003Vq00000zOGBzIAO",
+        Name: "Gamma Three",
+        FirstName: "Gamma",
+        LastName: "Three",
+        Email: "gamma.three@example.invalid",
+        Phone: "",
+        Company: "",
+        LeadSource: "",
+        CreatedDate: "2024-04-23T17:17:30.000Z"
+      },
+      {
+        Id: "003Vq00000zOGC0IAO",
+        Name: "Gamma Three",
+        FirstName: "Gamma",
+        LastName: "Three",
+        Email: "gamma.three@example.invalid",
+        Phone: "",
+        Company: "",
+        LeadSource: "",
+        CreatedDate: "2024-04-23T17:17:30.000Z"
+      },
+      {
+        Id: "003Vq00000zOXKLIA4",
+        Name: "Delta Four",
+        FirstName: "Delta",
+        LastName: "Four",
+        Email: "delta.four@example.invalid",
+        Company: "Example Org B",
+        LeadSource: "Salesforce",
+        CreatedDate: "2024-12-22T16:13:31.000Z"
+      },
+      {
+        Id: "003Vq00000zOXKMIA4",
+        Name: "Echo Five",
+        FirstName: "Echo",
+        LastName: "Five",
+        Email: "delta.four@example.invalid",
+        Company: "Example Org B",
+        LeadSource: "Salesforce",
+        CreatedDate: "2025-01-06T12:14:09.000Z"
+      }
+    ]
+  });
+}
+
 function contactMirrorRelationshipSmokeCsv() {
   return csvRows([
     ["Id", "First Name", "Last Name", "Company", "Email", "Mirror of"],
@@ -123,6 +227,110 @@ function contactMirrorRelationshipSmokeCsv() {
     ["003R00000000002", "Taylor", "Mason", "Northstar Analytics", "taylor.mason@northstar.example", ""],
     ["003R00000000003", "Taylor", "Mason", "Northstar Analytics", "taylor.mason@northstar.example", ""]
   ]);
+}
+
+function contactPairRegressionJson() {
+  return JSON.stringify({
+    schema: "salesforce-duplicate-reviewer.dataset",
+    schemaVersion: 1,
+    objectType: "contact",
+    fileName: "salesforce-report-latest.json",
+    source: {
+      system: "salesforce",
+      name: "Pair regression",
+      format: "salesforce-records-json",
+      orgAlias: "qa-prod-org",
+      instanceUrl: "https://qa-prod-org.example.invalid"
+    },
+    records: [
+      {
+        Id: "003Vq00000MVET7IAP",
+        Name: "Alpha One",
+        FirstName: "Alpha",
+        LastName: "One",
+        Email: "alpha.one@example.invalid",
+        Phone: "+1 555 010 0001",
+        Company: "Example Org A",
+        LeadSource: "Salesforce",
+        CreatedDate: "2024-01-09T19:22:04.000Z"
+      },
+      {
+        Id: "003Vq00000MVET8IAP",
+        Name: "Alpha One",
+        FirstName: "Alpha",
+        LastName: "One",
+        Email: "alpha.one@example.invalid",
+        Phone: "+1 555 010 0001",
+        Company: "Example Org A",
+        LeadSource: "Salesforce",
+        CreatedDate: "2024-02-10T14:31:37.000Z"
+      },
+      {
+        Id: "003Vq00000zOGBrIAO",
+        Name: "Beta Two",
+        FirstName: "Beta",
+        LastName: "Two",
+        Email: "beta.two@example.invalid",
+        Phone: "555-010-0002",
+        Company: "",
+        LeadSource: "",
+        CreatedDate: "2024-04-17T11:52:14.000Z"
+      },
+      {
+        Id: "003Vq00000zOGBsIAO",
+        Name: "Beta Two",
+        FirstName: "Beta",
+        LastName: "Two",
+        Email: "beta.two@example.invalid",
+        Phone: "555-010-0002",
+        Company: "",
+        LeadSource: "",
+        CreatedDate: "2024-04-17T11:52:14.000Z"
+      },
+      {
+        Id: "003Vq00000zOGBzIAO",
+        Name: "Gamma Three",
+        FirstName: "Gamma",
+        LastName: "Three",
+        Email: "gamma.three@example.invalid",
+        Phone: "",
+        Company: "",
+        LeadSource: "",
+        CreatedDate: "2024-04-23T17:17:30.000Z"
+      },
+      {
+        Id: "003Vq00000zOGC0IAO",
+        Name: "Gamma Three",
+        FirstName: "Gamma",
+        LastName: "Three",
+        Email: "gamma.three@example.invalid",
+        Phone: "",
+        Company: "",
+        LeadSource: "",
+        CreatedDate: "2024-04-23T17:17:30.000Z"
+      },
+      {
+        Id: "003Vq00000zOXKLIA4",
+        Name: "Delta Four",
+        FirstName: "Delta",
+        LastName: "Four",
+        Email: "delta.four@example.invalid",
+        Company: "Example Org B",
+        LeadSource: "Salesforce",
+        CreatedDate: "2024-12-22T16:13:31.000Z"
+      },
+      {
+        Id: "003Vq00000zOXKMIA4",
+        Name: "Echo Five",
+        FirstName: "Echo",
+        LastName: "Five",
+        Email: "delta.four@example.invalid",
+        Company: "Example Org B",
+        LeadSource: "Salesforce",
+        CreatedDate: "2025-01-06T12:14:09.000Z"
+      }
+    ]
+  });
 }
 
 function accountSmokeCsv() {
@@ -219,6 +427,7 @@ module.exports = {
   contactLastNameChangeSmokeCsv,
   contactDifferentCompanyConflictSmokeCsv,
   contactSharedCompanyExactPhoneNameConflictSmokeCsv,
+  contactPairRegressionJson,
   contactMirrorRelationshipSmokeCsv,
   contactMissingIdSmokeCsv,
   contactSmokeCsv,
