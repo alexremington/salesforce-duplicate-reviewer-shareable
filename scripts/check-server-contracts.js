@@ -797,9 +797,9 @@ async function assertContactSparseExactNameFloorRegression() {
 }
 
 async function assertContactMirrorProvenanceGap() {
-  const metadataPath = path.join(PROJECT_DIR, "incoming", "staging-report-00OVZ000003DjaH2AS-metadata.json");
-  const csvPath = path.join(PROJECT_DIR, "Output", "staging-contacts", "salesforce-report-latest.csv");
-  const queryPath = path.join(PROJECT_DIR, "queries", "report-00OVZ000003DjaH2AS.soql");
+  const metadataPath = path.join(PROJECT_DIR, "tests", "fixtures", "contact-mirror-provenance-metadata.json");
+  const csvPath = path.join(PROJECT_DIR, "tests", "fixtures", "contact-mirror-provenance.csv");
+  const queryPath = path.join(PROJECT_DIR, "tests", "fixtures", "contact-mirror-provenance.soql");
   const metadata = JSON.parse(await fs.readFile(metadataPath, "utf8"));
   const csvHeaders = (await fs.readFile(csvPath, "utf8"))
     .split(/\r?\n/, 1)[0]
