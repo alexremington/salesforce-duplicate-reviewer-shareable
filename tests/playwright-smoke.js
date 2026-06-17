@@ -1416,6 +1416,18 @@ async function assertProdContactsAutoload(page, { closePage = true } = {}) {
       { Id: "003P00000000002", Name: "Prod Contact Two", Email: "prod.two@example.com" }
     ]
   };
+  const canonicalRecord = {
+    id: "contact:/api/prod-contacts/latest.json",
+    name: "salesforce-report-latest.json",
+    displayName: "Latest Prod Contacts",
+    size: 123,
+    objectType: "contact",
+    format: "json",
+    contractVersion: "",
+    content: "",
+    endpoint: "/api/prod-contacts/latest.json",
+    updatedAt: Date.now() - 1000
+  };
 
   try {
     await page.route("**/api/staging/latest-files", async (route) => {
@@ -1447,11 +1459,43 @@ async function assertProdContactsAutoload(page, { closePage = true } = {}) {
         body: `${JSON.stringify(prodDataset)}\n`
       });
     });
+    await clearRecentFilesStore(page);
+    await page.evaluate(async (record) => {
+      const openDb = () => new Promise((resolve, reject) => {
+        const request = indexedDB.open("salesforce-duplicate-reviewer", 2);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains("recentFiles")) {
+            db.createObjectStore("recentFiles", { keyPath: "id" });
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const transactionDone = (transaction) => new Promise((resolve, reject) => {
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+      const db = await openDb();
+      const transaction = db.transaction("recentFiles", "readwrite");
+      transaction.objectStore("recentFiles").put(record);
+      await transactionDone(transaction);
+      db.close();
+    }, canonicalRecord);
+
     await page.goto(`${baseUrl}/?autoload=prod-contacts&object=contact&notify=1&sticky=1&name=salesforce-report-latest.json`, {
       waitUntil: "domcontentloaded"
     });
-    await page.locator(".group-item-main").first().waitFor({ state: "visible", timeout: 20000 });
-    await page.waitForFunction(() => state.rows.length === 2 && state.objectType === "contact", null, { timeout: 20000 });
+    const recentFile = page.locator(".recent-file").filter({ hasText: "Latest Prod Contacts" }).first();
+    await recentFile.waitFor({ state: "visible", timeout: 5000 });
+    await recentFile.click();
+    await page.waitForFunction(() => (
+      state.fileName === "salesforce-report-latest.json" &&
+      state.rows.length === 2 &&
+      state.datasetSource?.endpoint === "/api/prod-contacts/latest.json" &&
+      state.datasetSource?.displayName === "Latest Prod Contacts"
+    ), null, { timeout: 10000 });
 
     const url = new URL(page.url());
     const autoloadState = await page.evaluate(() => ({
