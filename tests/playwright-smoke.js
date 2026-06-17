@@ -125,12 +125,15 @@ async function run() {
     }
   ];
   let context = null;
+  let prodContactsPage = null;
 
   try {
     const fileModeRedirect = await assertFileModeRedirect(browser);
-    const prodContactsAutoloadState = await assertProdContactsAutoload(browser);
-    await assertProdContactsRecentFileSourceMapping(browser);
-    await assertLegacyProdContactsRecentFileCompatibility(browser);
+    prodContactsPage = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+    const prodContactsAutoloadState = await assertProdContactsAutoload(prodContactsPage, { closePage: false });
+    await prodContactsPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
+    await assertProdContactsRecentFileSourceMapping(prodContactsPage);
+    await assertLegacyProdContactsRecentFileCompatibility(prodContactsPage);
     const emptyImportButtonState = await assertEmptyStateOmitsDuplicateImportAction(browser);
     const lastNameChangeCandidateState = await assertLastNameChangeCandidateMatch(browser, lastNameChangeCsvPath);
     const differentCompanyConflictState = await assertDifferentCompanyConflictSeparated(browser, differentCompanyConflictCsvPath);
@@ -971,6 +974,9 @@ async function run() {
     }
     throw error;
   } finally {
+    if (prodContactsPage) {
+      await prodContactsPage.close().catch(() => {});
+    }
     if (context) {
       await context.close();
     }
@@ -1556,8 +1562,7 @@ async function assertFileModeRedirect(browser) {
   }
 }
 
-async function assertProdContactsAutoload(browser) {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+async function assertProdContactsAutoload(page, { closePage = true } = {}) {
   const prodDataset = {
     schema: "salesforce-duplicate-reviewer.dataset",
     schemaVersion: 1,
@@ -1611,7 +1616,6 @@ async function assertProdContactsAutoload(browser) {
         body: `${JSON.stringify(prodDataset)}\n`
       });
     });
-
     await page.goto(`${baseUrl}/?autoload=prod-contacts&object=contact&notify=1&sticky=1&name=salesforce-report-latest.json`, {
       waitUntil: "domcontentloaded"
     });
@@ -1645,7 +1649,9 @@ async function assertProdContactsAutoload(browser) {
 
     return autoloadState;
   } finally {
-    await page.close();
+    if (closePage) {
+      await page.close();
+    }
   }
 }
 
@@ -1688,8 +1694,7 @@ async function assertPairRegressionGroups(browser, filePath) {
   }
 }
 
-async function assertProdContactsRecentFileSourceMapping(browser) {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+async function assertProdContactsRecentFileSourceMapping(page) {
   const prodDataset = {
     schema: "salesforce-duplicate-reviewer.dataset",
     schemaVersion: 1,
@@ -1752,7 +1757,7 @@ async function assertProdContactsRecentFileSourceMapping(browser) {
         body: `${JSON.stringify(prodDataset)}\n`
       });
     });
-    await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+    await clearRecentFilesStore(page);
     await page.evaluate(async (record) => {
       const openDb = () => new Promise((resolve, reject) => {
         const request = indexedDB.open("salesforce-duplicate-reviewer", 2);
@@ -1835,12 +1840,11 @@ async function assertProdContactsRecentFileSourceMapping(browser) {
 
     return sourceState;
   } finally {
-    await page.close();
+    // Caller owns the shared prod-contacts page lifecycle.
   }
 }
 
-async function assertLegacyProdContactsRecentFileCompatibility(browser) {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+async function assertLegacyProdContactsRecentFileCompatibility(page) {
   const prodDataset = {
     schema: "salesforce-duplicate-reviewer.dataset",
     schemaVersion: 1,
@@ -1890,8 +1894,8 @@ async function assertLegacyProdContactsRecentFileCompatibility(browser) {
         body: `${JSON.stringify(prodDataset)}\n`
       });
     });
+    await clearRecentFilesStore(page);
 
-    await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
     await page.evaluate(async (record) => {
       const openDb = () => new Promise((resolve, reject) => {
         const request = indexedDB.open("salesforce-duplicate-reviewer", 2);
@@ -1965,8 +1969,34 @@ async function assertLegacyProdContactsRecentFileCompatibility(browser) {
       throw new Error(`Legacy prod Contacts recent-file compatibility failed: ${JSON.stringify(sourceState)}`);
     }
   } finally {
-    await page.close();
+    // Caller owns the shared prod-contacts page lifecycle.
   }
+}
+
+async function clearRecentFilesStore(page) {
+  await page.evaluate(async () => {
+    const openDb = () => new Promise((resolve, reject) => {
+      const request = indexedDB.open("salesforce-duplicate-reviewer", 2);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains("recentFiles")) {
+          db.createObjectStore("recentFiles", { keyPath: "id" });
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const transactionDone = (transaction) => new Promise((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+    const db = await openDb();
+    const transaction = db.transaction("recentFiles", "readwrite");
+    transaction.objectStore("recentFiles").clear();
+    await transactionDone(transaction);
+    db.close();
+  });
 }
 
 async function mergeLeadSourceRuleState(page) {
