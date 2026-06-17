@@ -134,8 +134,16 @@ if grep -Fq 'prod-contacts-output-repair.js' scripts/run-prod-contacts-bulk-quer
   echo "Prod Contacts launcher still depends on the legacy repair helper."
   exit 1
 fi
-if ! grep -Fq 'reviewer_launch_output="$("${PROJECT_DIR}/scripts/start-reviewer-server.sh")"' scripts/run-prod-contacts-bulk-query.sh; then
-  echo "Prod Contacts launcher did not start or reuse the reviewer server before opening the URL."
+if ! grep -Fq 'reviewer_launch_output="$("${PROJECT_DIR}/scripts/start-reviewer-server.sh" --force-refresh)"' scripts/run-prod-contacts-bulk-query.sh; then
+  echo "Prod Contacts launcher did not force-refresh the reviewer server before opening the URL."
+  exit 1
+fi
+if ! grep -Fq 'start-reviewer-server.sh" --force-refresh' scripts/run-staging-contacts-bulk-query.sh; then
+  echo "Staging Contacts launcher did not force-refresh the reviewer server before opening the URL."
+  exit 1
+fi
+if ! grep -Fq 'start-reviewer-server.sh" --force-refresh' scripts/run-staging-accounts-bulk-query.sh; then
+  echo "Staging Accounts launcher did not force-refresh the reviewer server before opening the URL."
   exit 1
 fi
 if ! grep -Fq 'if ! /usr/bin/open "${autoload_url}"; then' scripts/run-prod-contacts-bulk-query.sh; then

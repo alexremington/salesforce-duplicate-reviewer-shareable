@@ -162,8 +162,17 @@ if ($prodLauncher -notmatch 'autoload_url="\$\{reviewer_url\}/\?autoload=prod-co
 if ($prodLauncher -match 'prod-contacts-output-repair\.js') {
   throw 'Prod Contacts launcher still depends on the legacy repair helper.'
 }
-if ($prodLauncher -notmatch 'reviewer_launch_output="\$\("\$\{PROJECT_DIR\}/scripts/start-reviewer-server.sh"\)"') {
-  throw 'Prod Contacts launcher did not start or reuse the reviewer server before opening the URL.'
+if ($prodLauncher -notmatch 'reviewer_launch_output="\$\("\$\{PROJECT_DIR\}/scripts/start-reviewer-server.sh" --force-refresh\)"') {
+  throw 'Prod Contacts launcher did not force-refresh the reviewer server before opening the URL.'
+}
+if ($prodLauncher -notmatch 'start-reviewer-server.sh" --force-refresh') {
+  throw 'Prod Contacts launcher did not pass the force-refresh flag to the reviewer server launcher.'
+}
+if ((Get-Content scripts/run-staging-contacts-bulk-query.sh -Raw) -notmatch 'start-reviewer-server.sh" --force-refresh') {
+  throw 'Staging Contacts launcher did not force-refresh the reviewer server before opening the URL.'
+}
+if ((Get-Content scripts/run-staging-accounts-bulk-query.sh -Raw) -notmatch 'start-reviewer-server.sh" --force-refresh') {
+  throw 'Staging Accounts launcher did not force-refresh the reviewer server before opening the URL.'
 }
 if ($prodLauncher -notmatch 'if ! /usr/bin/open "\$\{autoload_url\}"; then') {
   throw 'Prod Contacts launcher did not fail when Duplicate Reviewer could not be opened.'

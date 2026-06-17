@@ -46,7 +46,7 @@ if ! "${PROJECT_DIR}/scripts/run-salesforce-bulk-query.sh" "$@"; then
   exit 1
 fi
 
-reviewer_launch_output="$("${PROJECT_DIR}/scripts/start-reviewer-server.sh")"
+reviewer_launch_output="$("${PROJECT_DIR}/scripts/start-reviewer-server.sh" --force-refresh)"
 reviewer_url="$(printf '%s\n' "${reviewer_launch_output}" | tail -n 1)"
 printf '%s\n' "${reviewer_launch_output}"
 autoload_url="${reviewer_url}/?autoload=prod-contacts&object=contact&notify=1&sticky=1&name=${LATEST_JSON_NAME}"

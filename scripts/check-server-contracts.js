@@ -117,6 +117,9 @@ async function main() {
     await assertStaticApp(baseUrl);
     await assertLatestEndpointCaching(baseUrl);
     await assertProdLatestEndpointCaching(baseUrl);
+    if (process.platform === "darwin") {
+      await assertSchedulerReviewerForceRefreshRegression();
+    }
     await assertSalesforceOrgCatalogRoute(baseUrl);
     await assertSalesforcePullReuseRegression();
     await assertSalesforcePullAuthPreflightRegression();
@@ -255,6 +258,71 @@ async function assertProdLatestEndpointCaching(baseUrl) {
     prodContact.label !== "Latest Prod Contacts"
   ) {
     throw new Error(`Prod latest-files route failed: ${JSON.stringify(latestFiles)}`);
+  }
+}
+
+async function assertSchedulerReviewerForceRefreshRegression() {
+  const smokeRoot = path.join(tempDir, "scheduler-reviewer-force-refresh");
+  const homeDir = path.join(smokeRoot, "home");
+  const staticDir = path.join(homeDir, "Library", "Application Support", "salesforce-duplicate-reviewer", "static");
+  const logsDir = path.join(homeDir, "Library", "Logs", "salesforce-duplicate-reviewer");
+  const launchAgentsDir = path.join(homeDir, "Library", "LaunchAgents");
+  const stagingContactsCsv = path.join(smokeRoot, "staging", "Output", "staging-contacts", "salesforce-report-latest.csv");
+  const stagingAccountsCsv = path.join(smokeRoot, "staging", "Output", "staging-accounts", "salesforce-report-latest.csv");
+  const prodContactsCsv = path.join(smokeRoot, "prod", "Output", "prod-contacts", "salesforce-report-latest.csv");
+
+  await fs.mkdir(path.dirname(stagingContactsCsv), { recursive: true });
+  await fs.mkdir(path.dirname(stagingAccountsCsv), { recursive: true });
+  await fs.mkdir(path.dirname(prodContactsCsv), { recursive: true });
+  await fs.mkdir(launchAgentsDir, { recursive: true });
+  await fs.mkdir(logsDir, { recursive: true });
+  await fs.mkdir(staticDir, { recursive: true });
+  await writeSmokeDataset(stagingContactsCsv, "003S00000090001", "003S00000090002");
+  await writeSmokeDataset(stagingAccountsCsv, "001S00000090001", "001S00000090002");
+  await writeSmokeDataset(prodContactsCsv, "003P00000090011", "003P00000090012");
+
+  const env = {
+    ...process.env,
+    HOME: homeDir,
+    SF_CLI_BIN: fakeSalesforceCli,
+    SF_ORG_ALIAS: "smoke-org",
+    SF_INSTANCE_URL: fakeSalesforceServer.baseUrl,
+    PROD_SF_ORG_ALIAS: "smoke-prod",
+    PROD_SF_INSTANCE_URL: fakeSalesforceServer.baseUrl,
+    SF_API_VERSION: "v67.0",
+    DUPLICATE_REVIEWER_STATIC_DIR: staticDir,
+    DUPLICATE_REVIEWER_PROD_ROOT: path.join(smokeRoot, "prod"),
+    STAGING_CONTACTS_CSV: stagingContactsCsv,
+    STAGING_ACCOUNTS_CSV: stagingAccountsCsv,
+    PROD_CONTACTS_CSV: prodContactsCsv
+  };
+  const scriptPath = path.join(PROJECT_DIR, "scripts", "start-reviewer-server.sh");
+
+  try {
+    const firstLaunch = await runShellScript(scriptPath, [], env);
+    const baseUrl = firstLaunch.url;
+    if (!baseUrl) {
+      throw new Error(`Reviewer force-refresh regression did not return a launch URL: ${JSON.stringify(firstLaunch)}`);
+    }
+    const firstHealth = await requestJson(`${baseUrl}/api/health`);
+    if (!firstHealth?.pid || !firstHealth.runtimeAlignedCheckedAt) {
+      throw new Error(`Reviewer force-refresh regression did not expose startup health state: ${JSON.stringify(firstHealth)}`);
+    }
+
+    const secondLaunch = await runShellScript(scriptPath, ["--force-refresh"], env);
+    const secondHealth = await requestJson(`${baseUrl}/api/health`);
+    if (
+      !secondLaunch.stdout.includes("Force-refreshing Salesforce Duplicate Reviewer server at") ||
+      secondHealth.pid === firstHealth.pid ||
+      secondHealth.runtimeAlignedCheckedAt <= firstHealth.runtimeAlignedCheckedAt
+    ) {
+      throw new Error(
+        `Reviewer force-refresh regression failed: ${JSON.stringify({ firstHealth, secondHealth, secondLaunch: secondLaunch.stdout })}`
+      );
+    }
+  } finally {
+    await unloadReviewerLaunchAgent();
+    await fs.rm(smokeRoot, { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -1382,6 +1450,37 @@ function smokeMergePayload() {
       }
     ]
   };
+}
+
+async function runShellScript(scriptPath, args, env) {
+  return new Promise((resolve, reject) => {
+    const processHandle = childProcess.spawn("/bin/zsh", [scriptPath, ...args], {
+      cwd: PROJECT_DIR,
+      env,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    const logs = captureProcessLogs(processHandle);
+    let stdout = "";
+    processHandle.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    processHandle.on("error", reject);
+    processHandle.on("exit", (code, signal) => {
+      if (code !== 0) {
+        reject(new Error(`Reviewer launcher script failed (${code ?? signal}).\n${logs.join("\n")}`));
+        return;
+      }
+      const url = stdout.trim().split(/\r?\n/).filter(Boolean).pop() || "";
+      resolve({ stdout, url, logs });
+    });
+  });
+}
+
+async function unloadReviewerLaunchAgent() {
+  if (process.platform !== "darwin") return;
+  const label = "com.salesforce-duplicate-reviewer.server";
+  const serviceTarget = `gui/${process.getuid()}/${label}`;
+  childProcess.spawnSync("/bin/launchctl", ["bootout", serviceTarget], { stdio: "ignore" });
 }
 
 function assertErrorCode(response, expectedCode, label) {
