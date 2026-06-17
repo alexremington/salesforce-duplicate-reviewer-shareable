@@ -1926,6 +1926,7 @@ async function initializeFileHistory() {
   }
 
   try {
+    await migrateLegacyProdContactsRecentFiles();
     await refreshRecentFiles();
   } catch {
     renderRecentFiles("Recent files could not be loaded");
@@ -2148,6 +2149,60 @@ async function compactOversizedRecentFiles(db, records) {
 
   await transactionDone(transaction);
   return true;
+}
+
+async function migrateLegacyProdContactsRecentFiles() {
+  const db = await openFileHistoryDb();
+  const records = await getAllRecentFiles(db);
+  const prodContactRecords = records.filter((record) => {
+    const name = String(record?.name || "");
+    const endpoint = String(record?.endpoint || "");
+    const displayName = String(record?.displayName || "").toLowerCase();
+    return (
+      record?.objectType === "contact" &&
+      !endpoint &&
+      (
+        name === "salesforce-prod-contacts-latest.json" ||
+        name === "salesforce-prod-contacts-latest.csv" ||
+        (name === "salesforce-report-latest.json" && displayName.includes("prod")) ||
+        (name === "salesforce-report-latest.csv" && displayName.includes("prod"))
+      )
+    );
+  });
+
+  if (!prodContactRecords.length) return false;
+
+  const transaction = db.transaction(FILE_HISTORY_STORE, "readwrite");
+  const store = transaction.objectStore(FILE_HISTORY_STORE);
+  let migrated = false;
+
+  for (const record of prodContactRecords) {
+    const endpoint = legacyProdContactsEndpointForRecord(record);
+    if (!endpoint) continue;
+
+    store.delete(record.id);
+    store.put({
+      ...record,
+      id: recentFileId(record.objectType, record.name, endpoint),
+      endpoint,
+      displayName: record.displayName || "Latest Prod Contacts"
+    });
+    migrated = true;
+  }
+
+  await transactionDone(transaction);
+  return migrated;
+}
+
+function legacyProdContactsEndpointForRecord(record) {
+  const name = String(record?.name || "");
+  if (name === "salesforce-prod-contacts-latest.csv" || name === "salesforce-report-latest.csv") {
+    return "/api/prod-contacts/latest.csv";
+  }
+  if (name === "salesforce-prod-contacts-latest.json" || name === "salesforce-report-latest.json") {
+    return "/api/prod-contacts/latest.json";
+  }
+  return "";
 }
 
 function recentEndpointForRecord(record) {

@@ -126,6 +126,7 @@ async function run() {
   try {
     const fileModeRedirect = await assertFileModeRedirect(browser);
     const prodContactsAutoloadState = await assertProdContactsAutoload(browser);
+    const legacyProdContactsRecentFileMigrationState = await assertLegacyProdContactsRecentFileMigration(browser);
     const emptyImportButtonState = await assertEmptyStateOmitsDuplicateImportAction(browser);
     const lastNameChangeCandidateState = await assertLastNameChangeCandidateMatch(browser, lastNameChangeCsvPath);
     const differentCompanyConflictState = await assertDifferentCompanyConflictSeparated(browser, differentCompanyConflictCsvPath);
@@ -1620,6 +1621,94 @@ async function assertProdContactsAutoload(browser) {
     }
 
     return autoloadState;
+  } finally {
+    await page.close();
+  }
+}
+
+async function assertLegacyProdContactsRecentFileMigration(browser) {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+  const staleRecord = {
+    id: "contact:salesforce-prod-contacts-latest.json",
+    name: "salesforce-prod-contacts-latest.json",
+    displayName: "Latest Prod Contacts",
+    size: 123,
+    objectType: "contact",
+    format: "json",
+    contractVersion: "",
+    content: "",
+    endpoint: "",
+    updatedAt: Date.now() - 1000
+  };
+
+  try {
+    await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+    await page.evaluate(async (record) => {
+      const openDb = () => new Promise((resolve, reject) => {
+        const request = indexedDB.open("salesforce-duplicate-reviewer", 2);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains("recentFiles")) {
+            db.createObjectStore("recentFiles", { keyPath: "id" });
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const transactionDone = (transaction) => new Promise((resolve, reject) => {
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+      const db = await openDb();
+      const transaction = db.transaction("recentFiles", "readwrite");
+      transaction.objectStore("recentFiles").put(record);
+      await transactionDone(transaction);
+      db.close();
+    }, staleRecord);
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.locator(".recent-file").filter({ hasText: "Latest Prod Contacts" }).first().waitFor({ state: "visible", timeout: 5000 });
+
+    const migrationState = await page.evaluate(async () => {
+      const openDb = () => new Promise((resolve, reject) => {
+        const request = indexedDB.open("salesforce-duplicate-reviewer", 2);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains("recentFiles")) {
+            db.createObjectStore("recentFiles", { keyPath: "id" });
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const db = await openDb();
+      const transaction = db.transaction("recentFiles", "readonly");
+      const records = await new Promise((resolve, reject) => {
+        const request = transaction.objectStore("recentFiles").getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      db.close();
+      const prodRecords = records.filter((record) => String(record.displayName || "").includes("Prod Contacts"));
+      return {
+        records,
+        prodRecords,
+        rendered: [...document.querySelectorAll(".recent-file")].map((node) => node.textContent.trim())
+      };
+    });
+
+    if (
+      migrationState.prodRecords.length !== 1 ||
+      migrationState.prodRecords[0].id !== "contact:/api/prod-contacts/latest.json" ||
+      migrationState.prodRecords[0].endpoint !== "/api/prod-contacts/latest.json" ||
+      migrationState.prodRecords[0].name !== "salesforce-prod-contacts-latest.json" ||
+      !migrationState.rendered.some((text) => text.includes("Latest Prod Contacts"))
+    ) {
+      throw new Error(`Legacy prod Contacts recent-file migration failed: ${JSON.stringify(migrationState)}`);
+    }
+
+    return migrationState;
   } finally {
     await page.close();
   }
