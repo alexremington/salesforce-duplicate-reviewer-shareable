@@ -1989,30 +1989,36 @@ async function loadRecentFile(fileId) {
     }
 
     const objectType = recentRecordObjectType(record, state.objectType);
-    const fileName = canonicalRecentFileName(record);
-    const displayName = canonicalRecentDisplayName(record);
+    const endpoint = canonicalRecentEndpoint(record) || String(record.endpoint || "");
+    const normalizedRecord = {
+      ...record,
+      endpoint
+    };
+    const fileName = canonicalRecentFileName(normalizedRecord);
+    const displayName = canonicalRecentDisplayName(normalizedRecord);
     state.loadingFileName = fileName;
     if (!isCurrentLoadRequest(loadRequestId)) return;
     showLoadingModal("Loading Recent Dataset", `Parsing ${fileName}.`, 0, true);
     await nextPaint();
-    const datasetText = await recentFileDatasetText(record);
+    const datasetText = await recentFileDatasetText(normalizedRecord);
     if (!isCurrentLoadRequest(loadRequestId)) return;
     await loadDatasetText(datasetText, {
       fileName,
       objectType,
-      format: record.format || datasetFormatFromFileName(fileName || record.endpoint),
+      format: record.format || datasetFormatFromFileName(fileName || endpoint),
       size: record.size || datasetText.length,
       saveRecent: false,
       displayName,
-      endpoint: record.endpoint || "",
+      endpoint,
       loadRequestId
     });
     saveRecentFileInBackground({
+      id: record.id,
       name: fileName,
       displayName,
       size: record.size || datasetText.length,
       objectType: normalizeObjectType(state.objectType),
-      format: record.format || datasetFormatFromFileName(fileName || record.endpoint),
+      format: record.format || datasetFormatFromFileName(fileName || endpoint),
       contractVersion: record.contractVersion || "",
       content: record.content || "",
       endpoint
@@ -2030,9 +2036,9 @@ async function loadRecentFile(fileId) {
   }
 }
 
-async function recentFileDatasetText(record) {
-  if (record.endpoint) {
-    const response = await fetch(record.endpoint, {
+async function recentFileDatasetText(record, endpoint = record.endpoint) {
+  if (endpoint) {
+    const response = await fetch(endpoint, {
       cache: "no-store",
       signal: activeLoadAbortController?.signal
     });
@@ -2043,8 +2049,27 @@ async function recentFileDatasetText(record) {
   return record.content || "";
 }
 
-function canonicalRecentFileName(record) {
+function canonicalRecentEndpoint(record) {
   const endpoint = String(record?.endpoint || "").toLowerCase();
+  if (endpoint === "/api/prod-contacts/latest.json" || endpoint === "/api/prod-contacts/latest.csv") {
+    return endpoint;
+  }
+  if (
+    endpoint === "/api/staging-contacts/latest.json" ||
+    endpoint === "/api/staging-contacts/latest.csv" ||
+    endpoint === "/api/staging-accounts/latest.json" ||
+    endpoint === "/api/staging-accounts/latest.csv"
+  ) {
+    return endpoint;
+  }
+  if (isProdContactsRecentRecord(record)) {
+    return "/api/prod-contacts/latest.json";
+  }
+  return recentEndpointForRecord(record);
+}
+
+function canonicalRecentFileName(record) {
+  const endpoint = String(canonicalRecentEndpoint(record) || "").toLowerCase();
   if (
     endpoint === "/api/staging-contacts/latest.csv" ||
     endpoint === "/api/staging-accounts/latest.csv" ||
@@ -2063,9 +2088,12 @@ function canonicalRecentFileName(record) {
 }
 
 function canonicalRecentDisplayName(record) {
-  const endpoint = String(record?.endpoint || "").toLowerCase();
+  if (isProdContactsRecentRecord(record)) {
+    return "Latest Prod Contacts";
+  }
+  const endpoint = String(canonicalRecentEndpoint(record) || "").toLowerCase();
   if (endpoint === "/api/prod-contacts/latest.json" || endpoint === "/api/prod-contacts/latest.csv") {
-    return String(record?.displayName || "Latest Prod Contacts");
+    return "Latest Prod Contacts";
   }
   if (
     endpoint === "/api/staging-contacts/latest.json" ||
@@ -2076,6 +2104,24 @@ function canonicalRecentDisplayName(record) {
     return String(record?.displayName || "Latest Contacts");
   }
   return String(record?.displayName || record?.name || "");
+}
+
+function isProdContactsRecentRecord(record) {
+  const endpoint = String(record?.endpoint || "").toLowerCase();
+  if (endpoint === "/api/prod-contacts/latest.json" || endpoint === "/api/prod-contacts/latest.csv") {
+    return true;
+  }
+
+  const id = String(record?.id || "").toLowerCase();
+  const name = String(record?.name || "").toLowerCase();
+  const displayName = String(record?.displayName || "").toLowerCase();
+  return (
+    id.includes("prod-contacts") ||
+    name.includes("prod-contacts") ||
+    name.includes("prod contacts") ||
+    displayName.includes("prod contacts") ||
+    displayName.includes("latest prod contacts")
+  );
 }
 
 function setLoadedDatasetSource({ endpoint = "", fileName = "", displayName = "", objectType = state.objectType, format = "", contractVersion = "", metadata = {}, orgAlias = "", instanceUrl = "" } = {}) {
@@ -2108,7 +2154,7 @@ async function saveRecentFile(fileRecord) {
   if (!endpoint && !canStoreContent) return;
 
   const record = {
-    id: recentFileId(objectType, fileRecord.name, fileRecord.endpoint),
+    id: String(fileRecord.id || recentFileId(objectType, fileRecord.name, fileRecord.endpoint)),
     name: fileRecord.name,
     displayName: String(fileRecord.displayName || fileRecord.name),
     size: fileRecord.size || content.length,
@@ -2190,7 +2236,7 @@ function recentEndpointForRecord(record) {
   const normalizedName = String(record?.name || "");
   const displayName = String(record?.displayName || "").toLowerCase();
   const objectType = String(record?.objectType || "");
-  const isProdContacts = displayName.includes("prod");
+  const isProdContacts = isProdContactsRecentRecord(record);
 
   if (normalizedName === "salesforce-report-latest.json") {
     if (isProdContacts) return "/api/prod-contacts/latest.json";
@@ -2209,7 +2255,9 @@ function recentEndpointForRecord(record) {
     "salesforce-staging-contacts-latest.csv": "/api/staging-contacts/latest.csv",
     "salesforce-staging-accounts-latest.csv": "/api/staging-accounts/latest.csv",
     "salesforce-staging-contacts-latest.json": "/api/staging-contacts/latest.json",
-    "salesforce-staging-accounts-latest.json": "/api/staging-accounts/latest.json"
+    "salesforce-staging-accounts-latest.json": "/api/staging-accounts/latest.json",
+    "salesforce-prod-contacts-latest.csv": "/api/prod-contacts/latest.json",
+    "salesforce-prod-contacts-latest.json": "/api/prod-contacts/latest.json"
   }[normalizedName] || "";
 }
 

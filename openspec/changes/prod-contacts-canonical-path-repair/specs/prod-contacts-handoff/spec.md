@@ -32,3 +32,11 @@ The prod Contacts autoload URL MUST keep the existing route and query contract.
 - **WHEN** the launcher opens Duplicate Reviewer
 - **THEN** the URL includes `autoload=prod-contacts`, `object=contact`, `notify=1`, `sticky=1`, and `name=salesforce-report-latest.json`
 - **AND** the app keeps its existing prod latest-file endpoint contract.
+
+### Scenario: Legacy prod recent-file rows reopen through the canonical endpoint
+
+- **GIVEN** a browser already has a legacy prod Contacts recent-file row whose stored metadata still points at the retired prod-only name or lacks an endpoint
+- **WHEN** the user reopens that recent file
+- **THEN** Duplicate Reviewer resolves it to `/api/prod-contacts/latest.json`
+- **AND** the source label remains `Latest Prod Contacts`
+- **AND** the user can reopen the dataset without restoring the retired filesystem path.

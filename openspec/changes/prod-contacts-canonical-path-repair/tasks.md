@@ -5,5 +5,6 @@
 - [x] Add regression coverage for the canonical prod path and source-aware recent-file metadata.
 - [x] Update reviewer docs and handoff notes to describe the canonical prod root and raw report filenames.
 - [x] Update scheduler docs and feature coverage to describe the canonical prod root and prod launch URL.
+- [x] Add regression coverage for legacy prod recent-file rows reopening through the canonical endpoint and label.
 - [x] Run `npm run check`, `npm run check:windows`, and `npm run smoke:ui:local` in the reviewer repo.
 - [x] Run the scheduler repo checks that cover the prod job wiring.
