@@ -1,2 +1,21 @@
-SELECT DuplicateRecordSetId, RecordId
-FROM DuplicateRecordItem
+SELECT
+  Id,
+  Name,
+  Website,
+  Phone,
+  BillingStreet,
+  BillingCity,
+  BillingState,
+  BillingPostalCode,
+  BillingCountry,
+  CurrencyIsoCode,
+  Parent.Name,
+  Industry,
+  Ultimate_Parent_Account__c,
+  Type,
+  NumberOfEmployees,
+  AnnualRevenue,
+  DUNSNumber
+FROM Account
+WHERE Name != null
+LIMIT 1000

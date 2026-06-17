@@ -691,6 +691,15 @@ async function assertContactExactPhoneLinkedInDivergenceRegression() {
   }
 }
 
+function normalizeQueryText(queryText) {
+  return String(queryText || "")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
 async function assertContactSharedCompanyExactPhoneNameConflictRegression() {
   const api = loadAppApi();
   const csv = [

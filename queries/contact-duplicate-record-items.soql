@@ -1,2 +1,19 @@
-SELECT DuplicateRecordSetId, RecordId
-FROM DuplicateRecordItem
+SELECT
+  Id,
+  Name,
+  FirstName,
+  LastName,
+  Email,
+  Phone,
+  MobilePhone,
+  Account.Name,
+  MailingStreet,
+  MailingCity,
+  MailingState,
+  MailingPostalCode,
+  MailingCountry,
+  LeadSource,
+  CreatedDate,
+  ziPersonDirectPhone__c,
+  ZI_Person_LinkedIn_URL__c
+FROM Contact

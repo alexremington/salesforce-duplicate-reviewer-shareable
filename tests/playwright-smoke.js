@@ -105,12 +105,12 @@ async function run() {
       instanceUrl: "https://qa-fifth-org.example.invalid"
     },
     {
-      orgAlias: "politico-staging",
-      instanceUrl: "https://politico--staging.sandbox.my.salesforce.com"
+      orgAlias: "qa-staging-org",
+      instanceUrl: "https://qa-staging-org.example.invalid"
     },
     {
-      orgAlias: "staging",
-      instanceUrl: "https://politico--staging.sandbox.my.salesforce.com"
+      orgAlias: "qa-staging",
+      instanceUrl: "https://qa-staging.example.invalid"
     }
   ];
   let context = null;
