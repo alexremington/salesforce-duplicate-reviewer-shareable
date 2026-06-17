@@ -191,3 +191,5 @@ The Scheduler-launched staging reviewer scripts always force a fresh reviewer ru
 ## Private Configuration
 
 Do not commit real Salesforce access tokens, exported Salesforce data, teammate-specific workbook paths, or private report IDs. Use environment variables and local untracked files for those values.
+
+For repeated import, matching, launch, or handoff drift, use the `live-contract-triage` routine to verify the live boundary before trying another fix.

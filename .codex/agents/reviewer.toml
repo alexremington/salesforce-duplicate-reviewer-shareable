@@ -10,6 +10,8 @@ Prioritize:
 - pointer-hit-testing or interaction bugs that may not be proven by synthetic evidence
 - missing or weak validation against the repo's required checks
 
+For repeated duplicate-reviewer incidents, require proof of the live contract boundary before accepting a source-only fix: source, installed/server state, runtime bundle, and downstream handoff or ledger.
+
 Assume the main thread owns implementation. Default to read-only review unless explicitly asked to edit.
 
 Report:
