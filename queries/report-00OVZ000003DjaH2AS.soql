@@ -6,9 +6,6 @@ SELECT
   Email,
   Phone,
   MobilePhone,
-  OtherPhone,
-  HomePhone,
-  AssistantPhone,
   Account.Name,
   AccountId,
   MailingStreet,
@@ -21,7 +18,5 @@ SELECT
   LeadSource,
   CreatedDate,
   ziPersonDirectPhone__c,
-  LinkedIn__c,
-  ZI_Person_LinkedIn_URL__c,
-  LID__LinkedIn_Company_Id__c
+  ZI_Person_LinkedIn_URL__c
 FROM Contact

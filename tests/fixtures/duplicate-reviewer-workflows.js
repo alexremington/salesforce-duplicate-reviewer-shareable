@@ -60,7 +60,7 @@ function contactLastNameChangeSmokeCsv() {
 
 function contactDifferentCompanyConflictSmokeCsv() {
   return csvRows([
-    ["Id", "First Name", "Last Name", "Company", "Email", "Lead Source", "Created Date", "Phone", "Mobile", "LinkedIn__c", "ZI_Person_LinkedIn_URL__c"],
+    ["Id", "First Name", "Last Name", "Company", "Email", "Lead Source", "Created Date", "Phone", "Mobile", "ZI_Person_LinkedIn_URL__c"],
     [
       "003L00000000011",
       "Taylor",
@@ -71,7 +71,6 @@ function contactDifferentCompanyConflictSmokeCsv() {
       "2024-04-01",
       "(555) 010-4321",
       "",
-      "https://www.linkedin.com/in/taylor-mason-1010",
       "https://www.linkedin.com/in/taylor-mason-1010/"
     ],
     [
@@ -84,7 +83,6 @@ function contactDifferentCompanyConflictSmokeCsv() {
       "2025-04-01",
       "(555) 010-4321",
       "",
-      "https://www.linkedin.com/in/taylor-mason-1010",
       "https://www.linkedin.com/in/taylor-mason-1010/"
     ]
   ]);
