@@ -13,6 +13,7 @@ const {
 const {
   accountCommentaryNormalizationSmokeCsv,
   accountSmokeCsv,
+  accountCompanyNormalizationSmokeCsv,
   contactDifferentCompanyConflictSmokeCsv,
   contactLastNameChangeSmokeCsv,
   contactMirrorRelationshipSmokeCsv,
@@ -62,7 +63,6 @@ async function run() {
   const mirrorRelationshipCsvPath = path.join(outDir, "contacts-mirror-relationship.csv");
   const accountCsvPath = path.join(outDir, "accounts-smoke.csv");
   const accountCompanyNormalizationCsvPath = path.join(outDir, "accounts-company-normalization.csv");
-  const accountCommentaryNormalizationCsvPath = path.join(outDir, "accounts-commentary-normalization.csv");
   const largeContactCsvPath = path.join(outDir, "contacts-large-smoke.csv");
   const largeContactJsonPath = path.join(outDir, "contacts-large-smoke.json");
   const datasetExportPath = path.join(outDir, "dataset-export.csv");
@@ -81,7 +81,6 @@ async function run() {
   await fs.writeFile(mirrorRelationshipCsvPath, contactMirrorRelationshipSmokeCsv());
   await fs.writeFile(accountCsvPath, accountSmokeCsv());
   await fs.writeFile(accountCompanyNormalizationCsvPath, accountCompanyNormalizationSmokeCsv());
-  await fs.writeFile(accountCommentaryNormalizationCsvPath, accountCommentaryNormalizationSmokeCsv());
   await fs.writeFile(largeContactCsvPath, largeContactCsv);
   await fs.writeFile(largeContactJsonPath, largeContactJson);
 
@@ -139,6 +138,7 @@ async function run() {
     const differentCompanyConflictState = await assertDifferentCompanyConflictSeparated(browser, differentCompanyConflictCsvPath);
     const sharedCompanyExactPhoneNameConflictState = await assertSharedCompanyExactPhoneNameConflictSeparated(browser, sharedCompanyExactPhoneNameConflictCsvPath);
     const pairRegressionState = await assertPairRegressionGroups(browser, pairRegressionJsonPath);
+    const accountCompanyNormalizationState = await assertAccountCompanyNormalizationSeparated(browser, accountCompanyNormalizationCsvPath);
     await assertMirrorRelationshipSeparated(browser, mirrorRelationshipCsvPath);
     const largeContactPerformance = await assertLargeContactCsvPerformance(browser, largeContactCsvPath);
     const largeContactJsonDeferredState = await assertLargeContactJsonDeferredIngest(browser, largeContactJsonPath);
@@ -595,6 +595,15 @@ async function run() {
     ) {
       throw new Error(`Expected the pair regression fixture to load the three true-positive groups and keep the false pair separated: ${JSON.stringify(pairRegressionState)}`);
     }
+    if (
+      accountCompanyNormalizationState.rowCount !== 2 ||
+      accountCompanyNormalizationState.groupCount !== 1 ||
+      accountCompanyNormalizationState.runtimeScore < 70 ||
+      !accountCompanyNormalizationState.reasons.includes("Exact account name") ||
+      !accountCompanyNormalizationState.reasons.includes("Exact phone")
+    ) {
+      throw new Error(`Expected the account company normalization fixture to group the canonical alias pair: ${JSON.stringify(accountCompanyNormalizationState)}`);
+    }
     assertPerformanceBudget("large Contact CSV worker import", largeContactPerformance.elapsedMs, PERFORMANCE_BUDGETS.largeContactCsvWorkerMs);
     if (!lightTheme.colorScheme.includes("light") || !darkTheme.colorScheme.includes("dark") || lightTheme.bodyBg === darkTheme.bodyBg) {
       throw new Error(`Expected the UI theme to follow system light/dark mode: ${JSON.stringify({ lightTheme, darkTheme })}`);
@@ -924,6 +933,7 @@ async function run() {
       largeContactPerformance,
       sharedCompanyExactPhoneNameConflictState,
       pairRegressionState,
+      accountCompanyNormalizationState,
       performanceBudgets: PERFORMANCE_BUDGETS,
       leftPaneSmallListLayout,
       humeRegionLayout,
@@ -1037,6 +1047,52 @@ async function assertLastNameChangeCandidateMatch(browser, filePath) {
         firstGroupScore: state.groups[0]?.score || 0,
         firstGroupReasons: state.groups[0]?.reasons || []
       })))
+    };
+  } finally {
+    await page.close();
+  }
+}
+
+async function assertAccountCompanyNormalizationSeparated(browser, filePath) {
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const diagnostics = [];
+  page.on("console", (message) => {
+    if (["error", "warning"].includes(message.type())) {
+      diagnostics.push(`${message.type()}: ${message.text()}`);
+    }
+  });
+  page.on("pageerror", (error) => diagnostics.push(`pageerror: ${error.message}`));
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator("#chooseCsvButton").click();
+    await page.getByRole("menuitem", { name: "Accounts" }).waitFor({ state: "visible", timeout: 5000 });
+    const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
+    await page.getByRole("menuitem", { name: "Accounts" }).click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles(filePath);
+    await waitForLoadingModalHidden(page, "Account company normalization load", diagnostics);
+    await waitForFirstGroup(page, "Account company normalization load");
+    const loadState = await datasetLoadState(page);
+    const runtimeScore = await page.evaluate(() => {
+      const preparedRows = prepareRows(state.rows, state.objectType, state.mapping);
+      const score = scoreAccountPair(preparedRows[0], preparedRows[1]);
+      return {
+        score: Math.round(score.value),
+        reasons: score.reasons
+      };
+    });
+
+    if (loadState.groupCount !== 1) {
+      throw new Error(`Expected the account scorer to normalize company aliases and group the pair: ${JSON.stringify({ loadState, runtimeScore, diagnostics })}`);
+    }
+    if (!runtimeScore.reasons.includes("Exact account name") || !runtimeScore.reasons.includes("Exact phone")) {
+      throw new Error(`Expected the canonical company match to surface exact-name and exact-phone reasons: ${JSON.stringify({ loadState, runtimeScore, diagnostics })}`);
+    }
+
+    return {
+      ...loadState,
+      runtimeScore: runtimeScore.score,
+      reasons: runtimeScore.reasons
     };
   } finally {
     await page.close();

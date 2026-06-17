@@ -1,53 +1,59 @@
 {
   "version": 1,
   "app": "salesforce-duplicate-reviewer",
-  "updatedAt": "2026-06-15T19:26:08.550Z",
+  "updatedAt": "2026-06-17T22:02:31Z",
   "features": [
     {
-      "id": "prod-contacts-autoload",
-      "title": "Prod Contacts Autoload",
+      "id": "account-company-normalization-alignment",
+      "title": "Account Company Normalization Alignment",
       "app": "salesforce-duplicate-reviewer",
       "status": "complete",
-      "visibleUi": false,
-      "brief": "docs/features/prod-contacts-autoload.md",
+      "visibleUi": true,
+      "brief": "docs/features/account-company-normalization-alignment.md",
       "requirements": [
-        "Add a prod Contacts autoload source alongside the existing staging autoload source.",
-        "Expose the prod latest Contacts JSON and CSV endpoints from the server.",
-        "Route the reviewer server to the canonical Duplicate Reviewer/prod output tree when the prod launcher starts.",
-        "Repair any legacy download-prefixed prod output into the canonical prod tree before the reviewer opens.",
-        "Seed the prod latest file into Recent files when the reviewer launches server-backed.",
-        "Keep staging Contacts and Accounts autoload behavior unchanged."
+        "Reuse the canonical company normalization behavior already used by Contact matching.",
+        "Keep Account-specific weights, caps, and corroboration logic intact unless regression evidence shows a real breakage.",
+        "Preserve existing account smoke coverage while adding a focused regression for company alias normalization.",
+        "Keep the change compatible with the existing private and shareable branch workflow."
       ],
       "acceptanceCriteria": [
-        "autoload=prod-contacts loads the expected prod latest Contacts dataset and labels it as the prod latest file.",
-        "The app can fetch /api/prod-contacts/latest.json and /api/prod-contacts/latest.csv.",
-        "The prod launcher and server both resolve the canonical Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts path.",
-        "The prod launcher repairs any legacy download-prefixed prod output before opening the reviewer.",
-        "The prod latest file is available in recent files with a clear prod label.",
-        "The staging autoload path still works."
+        "Account matching uses the same canonical company alias logic as Contact matching.",
+        "A sparse Account pair that differs only by a company alias and exact phone groups as a duplicate pair.",
+        "The existing near-exact name-only Account smoke regression still stays separated.",
+        "npm run check, npm run check:windows, and npm run smoke:ui:local pass after the change."
       ],
+      "humeDesign": {
+        "reviewed": true,
+        "notes": "No visible UI redesign is expected for this change."
+      },
       "fixtures": [
-        "A prod Contacts JSON export with Contact rows.",
-        "A prod Contacts CSV fallback for the same dataset."
+        "One sparse Account pair using an alias-style company name plus exact phone.",
+        "The existing near-exact account smoke fixture."
       ],
       "tests": [
         {
           "name": "Fast checks",
           "command": "npm run check",
           "status": "passed",
-          "evidence": "npm run check passed on 2026-06-16."
-        },
-        {
-          "name": "Cross-platform check",
-          "command": "npm run check:windows",
-          "status": "passed",
-          "evidence": "npm run check:windows passed on 2026-06-16."
+          "evidence": "npm run check passed on 2026-06-17."
         },
         {
           "name": "Targeted Playwright smoke",
           "command": "npm run smoke:ui:local",
           "status": "passed",
-          "evidence": "npm run smoke:ui:local passed on 2026-06-16."
+          "evidence": "npm run smoke:ui:local passed on 2026-06-17."
+        },
+        {
+          "name": "Cross-platform check",
+          "command": "npm run check:windows",
+          "status": "passed",
+          "evidence": "npm run check:windows passed on 2026-06-17."
+        },
+        {
+          "name": "Release pipeline",
+          "command": "npm run verify:release",
+          "status": "not-applicable",
+          "evidence": "Repo closeout now owns release-pipeline verification."
         }
       ],
       "crossPlatform": {
@@ -55,14 +61,10 @@
         "windows": "passed"
       },
       "risks": [
-        "The new prod source must stay isolated from the existing staging dataset labels and endpoints."
+        "The alias map is intentionally narrow; future broadening should be justified by labeled data."
       ],
-      "humeDesign": {
-        "reviewed": false,
-        "notes": "No visible UI redesign; preserve the existing loading and review layout."
-      },
-      "createdAt": "2026-06-15T00:00:00.000Z",
-      "updatedAt": "2026-06-15T00:00:00.000Z"
+      "createdAt": "2026-06-17T21:55:02.698Z",
+      "updatedAt": "2026-06-17T21:55:02.698Z"
     },
     {
       "id": "dataset-export-with-scores",
@@ -245,6 +247,67 @@
       "risks": [],
       "createdAt": "2026-06-03T21:15:03.021Z",
       "updatedAt": "2026-06-09T16:00:00Z"
+    },
+    {
+      "id": "prod-contacts-autoload",
+      "title": "Prod Contacts Autoload",
+      "app": "salesforce-duplicate-reviewer",
+      "status": "complete",
+      "visibleUi": false,
+      "brief": "docs/features/prod-contacts-autoload.md",
+      "requirements": [
+        "Add a prod Contacts autoload source alongside the existing staging autoload source.",
+        "Expose the prod latest Contacts JSON and CSV endpoints from the server.",
+        "Route the reviewer server to the canonical Duplicate Reviewer/prod output tree when the prod launcher starts.",
+        "Repair any legacy download-prefixed prod output into the canonical prod tree before the reviewer opens.",
+        "Seed the prod latest file into Recent files when the reviewer launches server-backed.",
+        "Keep staging Contacts and Accounts autoload behavior unchanged."
+      ],
+      "acceptanceCriteria": [
+        "autoload=prod-contacts loads the expected prod latest Contacts dataset and labels it as the prod latest file.",
+        "The app can fetch /api/prod-contacts/latest.json and /api/prod-contacts/latest.csv.",
+        "The prod launcher and server both resolve the canonical Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts path.",
+        "The prod launcher repairs any legacy download-prefixed prod output before opening the reviewer.",
+        "The prod latest file is available in recent files with a clear prod label.",
+        "The staging autoload path still works."
+      ],
+      "fixtures": [
+        "A prod Contacts JSON export with Contact rows.",
+        "A prod Contacts CSV fallback for the same dataset."
+      ],
+      "tests": [
+        {
+          "name": "Fast checks",
+          "command": "npm run check",
+          "status": "passed",
+          "evidence": "npm run check passed on 2026-06-16."
+        },
+        {
+          "name": "Cross-platform check",
+          "command": "npm run check:windows",
+          "status": "passed",
+          "evidence": "npm run check:windows passed on 2026-06-16."
+        },
+        {
+          "name": "Targeted Playwright smoke",
+          "command": "npm run smoke:ui:local",
+          "status": "passed",
+          "evidence": "npm run smoke:ui:local passed on 2026-06-16."
+        }
+      ],
+      "crossPlatform": {
+        "mac": "passed",
+        "windows": "passed"
+      },
+      "risks": [
+        "The new prod source must stay isolated from the existing staging dataset labels and endpoints."
+      ],
+      "humeDesign": {
+        "reviewed": false,
+        "notes": "No visible UI redesign; preserve the existing loading and review layout."
+      },
+      "createdAt": "2026-06-15T00:00:00.000Z",
+      "updatedAt": "2026-06-15T00:00:00.000Z"
     },
     {
       "id": "salesforce-org-selector-reflow",

@@ -4370,7 +4370,7 @@ function prepareContactRow(row, mapping, index, cache) {
     recordNameKey,
     mirrorOfKey,
     company: cachedTransform(cache.companies, getValue(row, mapping.company), normalizeCompany),
-    organization: cachedTransform(cache.organizations, getValue(row, mapping.company), resolveContactOrganizationKey),
+    organization: cachedTransform(cache.organizations, getValue(row, mapping.company), resolveCanonicalCompanyKey),
     email,
     domain: emailDomain(email),
     linkedIn: cachedTransform(cache.linkedIn, getValue(row, mapping.ziPersonLinkedInUrl), normalizeLinkedInUrl),
@@ -4397,6 +4397,7 @@ function normalizeContactReferenceKey(value) {
 function prepareAccountRow(row, mapping, index, cache) {
   const rawName = getValue(row, mapping.name);
   const name = cachedTransform(cache.companies, rawName, normalizeCompany);
+  const organization = cachedTransform(cache.organizations, rawName, resolveCanonicalCompanyKey);
   const phone = cachedTransform(cache.phones, getValue(row, mapping.phone), normalizePhone);
   const billingStreet = cachedTransform(cache.addresses, getValue(row, mapping.billingStreet), normalizeAddress);
   const billingCity = cachedTransform(cache.text, getValue(row, mapping.billingCity), normalizeText);
@@ -5504,6 +5505,7 @@ function shouldApplyAccountParentBranchDivergenceCap(fieldScores, left, right) {
 function hasAccountScopeDivergence(fieldScores, left, right) {
   const nameScore = fieldScores.name;
   if (nameScore == null || nameScore < 0.9 || nameScore >= 1) return false;
+  if (left.hasStatusMarker || right.hasStatusMarker) return false;
   if (!hasEntityTokenContainment(accountCompanyValue(left), accountCompanyValue(right))) return false;
   if (hasStrongAccountIdentityCorroboration(fieldScores, left, right)) return false;
 
@@ -5940,10 +5942,18 @@ function normalizeCompany(value) {
     .replace(/\s+/g, " ");
 }
 
-function resolveContactOrganizationKey(value) {
+function resolveCanonicalCompanyKey(value) {
   const normalized = normalizeCompany(value);
   if (!normalized) return "";
   return CONTACT_ORGANIZATION_ALIASES.get(normalized) || normalized;
+}
+
+function resolveContactOrganizationKey(value) {
+  return resolveCanonicalCompanyKey(value);
+}
+
+function accountCompanyValue(row) {
+  return row.organization || row.name;
 }
 
 function stripCompanyStatusMarkers(value) {
