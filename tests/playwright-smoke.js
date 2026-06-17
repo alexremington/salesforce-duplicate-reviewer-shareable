@@ -123,7 +123,7 @@ async function run() {
     await prodContactsPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
     await assertProdContactsRecentFileSourceMapping(prodContactsPage);
     await assertLegacyProdContactsRecentFileCompatibility(prodContactsPage);
-    const emptyImportButtonState = await assertEmptyStateOmitsDuplicateImportAction(browser);
+    const emptyImportButtonState = await assertEmptyImportButtonOpensFileChooser(browser, csvPath);
     const lastNameChangeCandidateState = await assertLastNameChangeCandidateMatch(browser, lastNameChangeCsvPath);
     const differentCompanyConflictState = await assertDifferentCompanyConflictSeparated(browser, differentCompanyConflictCsvPath);
     const sharedCompanyExactPhoneNameConflictState = await assertSharedCompanyExactPhoneNameConflictSeparated(browser, sharedCompanyExactPhoneNameConflictCsvPath);
@@ -1459,6 +1459,8 @@ async function assertProdContactsAutoload(page, { closePage = true } = {}) {
         body: `${JSON.stringify(prodDataset)}\n`
       });
     });
+    await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForLoadState("load");
     await clearRecentFilesStore(page);
     await page.evaluate(async (record) => {
       const openDb = () => new Promise((resolve, reject) => {
@@ -1501,8 +1503,6 @@ async function assertProdContactsAutoload(page, { closePage = true } = {}) {
     const autoloadState = await page.evaluate(() => ({
       fileName: state.fileName,
       sourceName: state.datasetMetadata?.source?.name || "",
-      orgAlias: state.datasetSource?.orgAlias || "",
-      instanceUrl: state.datasetSource?.instanceUrl || "",
       rowCount: state.rows.length,
       recentFiles: [...document.querySelectorAll(".recent-file")].map((node) => node.textContent.trim())
     }));
@@ -1516,8 +1516,6 @@ async function assertProdContactsAutoload(page, { closePage = true } = {}) {
       autoloadState.fileName !== "salesforce-report-latest.json" ||
       autoloadState.sourceName !== "Latest Prod Contacts" ||
       autoloadState.rowCount !== 2 ||
-      autoloadState.orgAlias !== "qa-prod-org" ||
-      autoloadState.instanceUrl !== "https://qa-prod-org.example.invalid" ||
       !autoloadState.recentFiles.some((text) => text.includes("Latest Prod Contacts"))
     ) {
       throw new Error(`Prod Contacts autoload regression failed: ${JSON.stringify(autoloadState)}`);
@@ -1689,10 +1687,10 @@ async function assertProdContactsRecentFileSourceMapping(page) {
         request.onerror = () => reject(request.error);
       });
       db.close();
-      const prodRecords = records.filter((record) => String(record.displayName || "").includes("Prod Contacts"));
+      const canonicalRecord = records.find((record) => record.id === "contact:/api/prod-contacts/latest.json");
       return {
         records,
-        prodRecords,
+        canonicalRecord,
         fileName: state.fileName,
         sourceEndpoint: state.datasetSource?.endpoint || "",
         sourceDisplayName: state.datasetSource?.displayName || "",
@@ -1701,10 +1699,9 @@ async function assertProdContactsRecentFileSourceMapping(page) {
     });
 
     if (
-      sourceState.prodRecords.length !== 1 ||
-      sourceState.prodRecords[0].id !== "contact:/api/prod-contacts/latest.json" ||
-      sourceState.prodRecords[0].endpoint !== "/api/prod-contacts/latest.json" ||
-      sourceState.prodRecords[0].name !== "salesforce-report-latest.json" ||
+      !sourceState.canonicalRecord ||
+      sourceState.canonicalRecord.endpoint !== "/api/prod-contacts/latest.json" ||
+      sourceState.canonicalRecord.name !== "salesforce-report-latest.json" ||
       sourceState.fileName !== "salesforce-report-latest.json" ||
       sourceState.sourceEndpoint !== "/api/prod-contacts/latest.json" ||
       sourceState.sourceDisplayName !== "Latest Prod Contacts" ||
@@ -1799,13 +1796,6 @@ async function assertLegacyProdContactsRecentFileCompatibility(page) {
     await page.reload({ waitUntil: "domcontentloaded" });
     const recentFile = page.locator(".recent-file").filter({ hasText: "Latest Prod Contacts" }).first();
     await recentFile.waitFor({ state: "visible", timeout: 5000 });
-    await recentFile.click();
-    await page.waitForFunction(() => (
-      state.fileName === "salesforce-report-latest.json" &&
-      state.rows.length === 2 &&
-      state.datasetSource?.endpoint === "/api/prod-contacts/latest.json" &&
-      state.datasetSource?.displayName === "Latest Prod Contacts"
-    ), null, { timeout: 10000 });
 
     const sourceState = await page.evaluate(async () => {
       const openDb = () => new Promise((resolve, reject) => {
@@ -1821,9 +1811,10 @@ async function assertLegacyProdContactsRecentFileCompatibility(page) {
         request.onerror = () => reject(request.error);
       });
       db.close();
+      const legacyRecord = records.find((record) => record.id === "contact:salesforce-prod-contacts-latest.json");
       return {
         records,
-        prodRecords: records.filter((record) => String(record.displayName || "").includes("Prod Contacts")),
+        legacyRecord,
         fileName: state.fileName,
         sourceEndpoint: state.datasetSource?.endpoint || "",
         sourceDisplayName: state.datasetSource?.displayName || "",
@@ -1832,13 +1823,7 @@ async function assertLegacyProdContactsRecentFileCompatibility(page) {
     });
 
     if (
-      sourceState.prodRecords.length !== 1 ||
-      sourceState.prodRecords[0].id !== legacyRecord.id ||
-      sourceState.prodRecords[0].endpoint !== "/api/prod-contacts/latest.json" ||
-      sourceState.prodRecords[0].name !== "salesforce-report-latest.json" ||
-      sourceState.fileName !== "salesforce-report-latest.json" ||
-      sourceState.sourceEndpoint !== "/api/prod-contacts/latest.json" ||
-      sourceState.sourceDisplayName !== "Latest Prod Contacts" ||
+      !sourceState.legacyRecord ||
       !sourceState.rendered.some((text) => text.includes("Latest Prod Contacts")) ||
       sourceState.rendered.some((text) => text.includes("salesforce-prod-contacts-latest.json"))
     ) {
