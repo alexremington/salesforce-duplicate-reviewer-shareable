@@ -124,6 +124,7 @@ async function main() {
     await assertAccountCommentaryNormalizationRegression();
     await assertContactSparseExactNameFloorRegression();
     await assertContactCompanyDifferenceVetoRegression();
+    await assertContactLegacyComparisonRegression();
     await assertContactExactPhoneLinkedInDivergenceRegression();
     await assertContactSharedCompanyExactPhoneNameConflictRegression();
     await assertContactMirrorRelationshipRegression();
@@ -835,9 +836,16 @@ async function assertContactCompanyDifferenceVetoRegression() {
   api.state.mapping = mapping;
 
   const score = api.scoreContactPair(preparedRows[0], preparedRows[1]);
-  if (Math.round(score.value) !== 0 || !score.reasons.includes("Different company")) {
+  if (Math.round(score.value) !== 79 || !score.reasons.includes("Exact contact data with conflicting company")) {
     throw new Error(
-      `Contact company-veto regression failed: expected company mismatch to force a zero score, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
+      `Contact company-veto regression failed: expected company mismatch to cap the pair below threshold without hard-zeroing it, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
+    );
+  }
+
+  const legacyScore = api.scoreContactPairLegacy(preparedRows[0], preparedRows[1]);
+  if (Math.round(legacyScore.value) !== 0 || !legacyScore.reasons.includes("Different company")) {
+    throw new Error(
+      `Contact legacy comparison regression failed: expected the legacy scorer to remain a hard veto, got ${Math.round(legacyScore.value)} (${legacyScore.reasons.join("; ")})`
     );
   }
 }
@@ -891,6 +899,45 @@ async function assertContactSharedCompanyExactPhoneNameConflictRegression() {
     throw new Error(
       `Contact shared-company exact-phone regression failed: expected the divergent-name pair to stay below the duplicate threshold, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
     );
+  }
+}
+
+async function assertContactLegacyComparisonRegression() {
+  const api = loadAppApi();
+  const csv = [
+    "Id,Name,First Name,Last Name,Account.Name,Email,Phone,MobilePhone,Lead Source,Created Date,ziPersonDirectPhone__c,ZI_Person_LinkedIn_URL__c",
+    "003C00000000001,Abby Simmons,Abby,Simmons,Crop Life International,abby.simmons@croplife.org,+1 202 555 0199,,Web,2024-04-01,+1 202 555 0199,https://www.linkedin.com/in/abby-simmons/",
+    "003C00000000002,Abby Simmons,Abby,Simmons,CropLife International,abby.simmons@croplife.org,+1 202 555 0199,,Web,2024-04-01,+1 202 555 0199,https://www.linkedin.com/in/abby-simmons/",
+    "003C00000000003,Robin Quill,Robin,Quill,Civic Harbor,robin.quill@civic.example,,,,Web,2024-04-01,,"
+  ].join("\n");
+  const parsed = api.parseCsv(csv);
+  const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
+  const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
+  const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.contact.fields);
+  const preparedRows = api.prepareRows(rows, "contact", mapping);
+
+  api.state.objectType = "contact";
+  api.state.rows = rows;
+  api.state.headers = headers;
+  api.state.mapping = mapping;
+
+  const newScore = api.scoreContactPair(preparedRows[0], preparedRows[1]);
+  const legacyScore = api.scoreContactPairLegacy(preparedRows[0], preparedRows[1]);
+  if (Math.round(newScore.value) < 86 || Math.round(legacyScore.value) !== 0) {
+    throw new Error(
+      `Contact legacy-vs-new score regression failed: new=${Math.round(newScore.value)} legacy=${Math.round(legacyScore.value)}`
+    );
+  }
+
+  const result = await api.buildGroupsAsync(rows, "contact", mapping, 86, true);
+  if (!result.matchComparison) {
+    throw new Error(`Contact comparison regression failed: matcher did not return comparison stats`);
+  }
+  if (result.matchComparison.redFlagged) {
+    throw new Error(`Contact comparison regression failed: expected the new model to keep or improve the >=70 group count, got ${JSON.stringify(result.matchComparison)}`);
+  }
+  if (result.matchComparison.newGroupCount < result.matchComparison.legacyGroupCount) {
+    throw new Error(`Contact comparison regression failed: new model lost >=70 groups: ${JSON.stringify(result.matchComparison)}`);
   }
 }
 
@@ -1077,6 +1124,7 @@ globalThis.__api = {
   buildContactMirrorConflictMap,
   collectPairGroups,
   scoreAccountPair,
+  scoreContactPairLegacy,
   scoreContactPair,
   getValue
 };`,

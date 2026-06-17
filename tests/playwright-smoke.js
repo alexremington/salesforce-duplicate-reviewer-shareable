@@ -324,6 +324,22 @@ async function run() {
     await page.locator("#loadingModal").waitFor({ state: "hidden", timeout: 10000 });
     await waitForFirstGroup(page, "Threshold-filtered Contact load");
     const thresholdFilteredScores = await visibleGroupScores(page);
+    const thresholdComparisonSummary = await reportSummaryState(page);
+    if (
+      thresholdComparisonSummary.values.legacyGroupsAt70 === undefined ||
+      thresholdComparisonSummary.values.newGroupsAt70 === undefined ||
+      thresholdComparisonSummary.values.comparisonFlag !== "OK"
+    ) {
+      throw new Error(`Expected the contact comparison metrics to render without a red flag: ${JSON.stringify(thresholdComparisonSummary.values)}`);
+    }
+    const thresholdComparisonState = await duplicateReviewerDebugState(page);
+    if (
+      !thresholdComparisonState.matchComparison ||
+      thresholdComparisonState.matchComparison.redFlagged ||
+      thresholdComparisonState.matchComparison.newGroupCount < thresholdComparisonState.matchComparison.legacyGroupCount
+    ) {
+      throw new Error(`Expected the live contact comparison summary to keep or improve the >=70 group count: ${JSON.stringify(thresholdComparisonState.matchComparison)}`);
+    }
     await setRangeValue(page, "#maxThreshold", "100");
     await page.locator("#applyControlsButton").click();
     await waitForFirstGroup(page, "Cached threshold-filtered Contact load");
@@ -644,7 +660,7 @@ async function run() {
       throw new Error(`Expected latest JSON dataset to load through Recent files: ${JSON.stringify(latestJsonLoad)}`);
     }
     assertPerformanceBudget("Latest Contacts JSON load", latestJsonLoadElapsedMs, PERFORMANCE_BUDGETS.latestContactsJsonMs);
-    if (latestReportSummary.labels.join("|") !== "Total Records|Match Groups|Reviewed" || latestReportSummary.values.records !== "2" || latestReportSummary.values.groups !== "1" || latestReportSummary.values.reviewed !== "0%" || /Exact|Near/.test(latestReportSummary.text)) {
+    if (latestReportSummary.labels.slice(0, 3).join("|") !== "Total Records|Match Groups|Reviewed" || latestReportSummary.values.records !== "2" || latestReportSummary.values.groups !== "1" || latestReportSummary.values.reviewed !== "0%" || /Exact|Near/.test(latestReportSummary.text)) {
       throw new Error(`Expected compact Hume report summary with records, groups, and reviewed progress: ${JSON.stringify(latestReportSummary)}`);
     }
     if (latestReportSummary.typography.valueSize < 22 || latestReportSummary.typography.titleSize < 20 || fontWeightNumber(latestReportSummary.typography.titleWeight) < 700 || fontWeightNumber(latestReportSummary.typography.valueWeight) < 700) {
@@ -1453,6 +1469,13 @@ async function duplicateReviewerDebugState(page) {
     pendingLabelStatusFilters: [...state.pendingLabelStatusFilters],
     loadError: state.loadError,
     reviewStateStatus: state.reviewStateStatus,
+    matchComparison: state.matchComparison ? {
+      threshold: state.matchComparison.threshold,
+      legacyGroupCount: state.matchComparison.legacyGroupCount,
+      newGroupCount: state.matchComparison.newGroupCount,
+      deltaGroupCount: state.matchComparison.deltaGroupCount,
+      redFlagged: state.matchComparison.redFlagged
+    } : null,
     groupListText: document.querySelector("#groupList")?.textContent?.trim().slice(0, 400) || ""
   }));
 }

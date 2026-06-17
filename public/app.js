@@ -501,6 +501,12 @@ const CONTACT_SHARED_COMPANY_EXACT_PHONE_NAME_CONFLICT_REASON = "Shared company 
 const CONTACT_EMAIL_CONTEXT_CORROBORATION_MIN = 0.5;
 const CONTACT_MIRROR_RELATIONSHIP_REASON = "Entitled Contact mirror";
 const CONTACT_EXCLUDED_MERGE_BLOCK_MESSAGE = "This Contact pair is excluded by the Entitled Contact mirror rule and cannot enter the Salesforce merge queue.";
+const CONTACT_MODEL_COMPARISON_THRESHOLD = 70;
+const CONTACT_ORGANIZATION_ALIASES = new Map([
+  ["osu", "ohio state university"],
+  ["the ohio state university", "ohio state university"],
+  ["ohio state", "ohio state university"]
+]);
 const TRAINING_LABELS = {
   match: "Match",
   not_match: "Not Match",
@@ -850,6 +856,7 @@ const state = {
   trainingPairIndexes: new Map(),
   fieldResolutions: new Map(),
   separatedRecords: new Map(),
+  matchComparison: null,
   threshold: 86,
   maxThreshold: 100,
   highRecallMode: true,
@@ -2958,6 +2965,7 @@ function stageRowsForReview({ rows, fileName, fromObjects, headers, mapping, obj
   state.trainingLabels.clear();
   state.trainingPairIndexes.clear();
   state.lastMatchingStats = null;
+  state.matchComparison = null;
   matchingArtifactsCache = null;
   matchingArtifactsWarmCacheJob = null;
   mergeMasterSelections.clear();
@@ -3044,6 +3052,7 @@ function cacheMatchingArtifacts(artifacts, groups = []) {
     fieldStats: artifacts.fieldStats || null,
     pairScores: artifacts.pairScores,
     matchingStats: artifacts.matchingStats || null,
+    matchComparison: artifacts.matchComparison || null,
     groups: Array.isArray(groups) ? groups : []
   };
   scheduleMatchingArtifactsWarmCache();
@@ -3111,6 +3120,7 @@ async function rebuildMatchesFromCachedArtifacts({ title = "Matching Records", m
     const result = await rebuildGroupsFromMatchingArtifacts(matchingArtifactsCache, state.threshold, updateLoadingProgress);
     state.lastProcessingMode = result.processingMode || "";
     state.lastMatchingStats = result.matchingStats || null;
+    state.matchComparison = result.matchComparison || matchingArtifactsCache.matchComparison || null;
     await updateLoadingProgress("Rendering duplicate groups.", 98);
     applyComputedGroups(result.groups || [], result.matchingStats || null);
     await updateLoadingProgress("Ready.", 100);
@@ -3703,6 +3713,7 @@ async function buildGroupsAsync(
 ) {
   const startedAt = performance.now();
   if (!rows.length) {
+    state.matchComparison = null;
     await progress("No records to match.", 100);
     return {
       groups: [],
@@ -3722,7 +3733,7 @@ async function buildGroupsAsync(
   }
 
   await progress("Preparing records.", 8);
-  const { preparedRows, fieldStats, scorer } = await getScoringContextAsync(rows, objectType, mapping, progress);
+  const { preparedRows, fieldStats, scorer, legacyScorer } = await getScoringContextAsync(rows, objectType, mapping, progress);
 
   await progress("Finding candidate pairs.", 22);
   const pairKeys = objectType === "contact"
@@ -3732,6 +3743,9 @@ async function buildGroupsAsync(
   await progress(`Scoring ${formatNumber(pairKeys.size)} candidate pairs.`, 44);
   const comparisonThreshold = objectType === "contact" ? CONTACT_MODEL_COMPARISON_THRESHOLD : artifactThreshold;
   const pairs = await scoreCandidatePairsAsync(pairKeys, preparedRows, scorer, comparisonThreshold, progress);
+  const legacyPairs = objectType === "contact"
+    ? await scoreCandidatePairsAsync(pairKeys, preparedRows, legacyScorer, comparisonThreshold, async () => {})
+    : null;
   const currentPairs = pairs.filter((pair) => pair.value >= threshold);
 
   await progress("Building match groups.", 82);
@@ -3743,6 +3757,16 @@ async function buildGroupsAsync(
     .map((group) => summarizeGroup(group, preparedRows, scorer))
     .filter((group) => group.score >= threshold)
     .sort(compareGroups);
+  const legacyComparison = objectType === "contact"
+    ? buildContactComparisonSummary(
+      legacyPairs || [],
+      pairs,
+      preparedRows,
+      mirrorConflicts,
+      comparisonThreshold,
+      threshold
+    )
+    : null;
   const excludedGroups = objectType === "contact"
     ? buildExplicitExcludedGroups(pairs.excludedPairs || [])
     : [];
@@ -3751,6 +3775,7 @@ async function buildGroupsAsync(
     .map((group, index) => ({ ...group, id: index + 1 }));
 
   await progress("Rendering duplicate groups.", 96);
+  state.matchComparison = legacyComparison;
   return {
     groups,
     matchingStats: {
@@ -3770,6 +3795,7 @@ async function buildGroupsAsync(
       retainedPairs: currentPairs.length,
       resultGroups: groups.length
     },
+    matchComparison: legacyComparison,
     ...(includeMatchingArtifacts
       ? {
           matchingArtifacts: {
@@ -3781,6 +3807,7 @@ async function buildGroupsAsync(
             fieldStats,
             pairScores: pairs.map(serializePairScore),
             excludedPairScores: (pairs.excludedPairs || []).map(serializePairScore),
+            matchComparison: legacyComparison,
             matchingStats: {
               objectType,
               rowCount: rows.length,
@@ -3818,6 +3845,7 @@ function getScoringContext(rows, objectType, mapping) {
   const fieldStats = buildFieldStats(preparedRows, objectType);
   const mirrorConflicts = objectType === "contact" ? buildContactMirrorConflictMap(preparedRows) : null;
   const scorer = createPairScorer(objectType, fieldStats);
+  const legacyScorer = createLegacyPairScorer(objectType, fieldStats);
   scoringContextCache = {
     rows,
     objectType,
@@ -3825,7 +3853,8 @@ function getScoringContext(rows, objectType, mapping) {
     preparedRows,
     fieldStats,
     mirrorConflicts,
-    scorer
+    scorer,
+    legacyScorer
   };
   return scoringContextCache;
 }
@@ -3844,6 +3873,7 @@ async function getScoringContextAsync(rows, objectType, mapping, progress = asyn
   const fieldStats = await buildFieldStatsAsync(preparedRows, objectType, progress);
   const mirrorConflicts = objectType === "contact" ? buildContactMirrorConflictMap(preparedRows) : null;
   const scorer = createPairScorer(objectType, fieldStats);
+  const legacyScorer = createLegacyPairScorer(objectType, fieldStats);
   scoringContextCache = {
     rows,
     objectType,
@@ -3851,7 +3881,8 @@ async function getScoringContextAsync(rows, objectType, mapping, progress = asyn
     preparedRows,
     fieldStats,
     mirrorConflicts,
-    scorer
+    scorer,
+    legacyScorer
   };
   return scoringContextCache;
 }
@@ -4058,6 +4089,7 @@ async function rebuildGroupsFromMatchingArtifacts(cache, threshold, progress = a
       retainedPairs: currentPairs.length,
       resultGroups: groups.length
     },
+    matchComparison: cache.matchComparison || null,
     processingMode: "cache"
   };
 }
@@ -4095,6 +4127,40 @@ function collectPairGroups(pairs, rowCount, conflictMap = null) {
   });
 
   return groupsByRoot;
+}
+
+function buildContactComparisonSummary(
+  legacyPairs,
+  newPairs,
+  preparedRows,
+  mirrorConflicts,
+  comparisonThreshold = CONTACT_MODEL_COMPARISON_THRESHOLD,
+  currentThreshold = CONTACT_MODEL_COMPARISON_THRESHOLD
+) {
+  const legacyComparisonPairs = legacyPairs.filter((pair) => pair.value >= comparisonThreshold);
+  const newComparisonPairs = newPairs.filter((pair) => pair.value >= comparisonThreshold);
+  const legacyComparisonGroups = [...collectPairGroups(legacyComparisonPairs, preparedRows.length, mirrorConflicts).values()]
+    .map((group) => summarizeGroup(group, preparedRows, createLegacyPairScorer("contact")))
+    .filter((group) => group.score >= comparisonThreshold);
+  const newComparisonGroups = [...collectPairGroups(newComparisonPairs, preparedRows.length, mirrorConflicts).values()]
+    .map((group) => summarizeGroup(group, preparedRows, createPairScorer("contact")))
+    .filter((group) => group.score >= comparisonThreshold);
+  const legacyGroupKeys = new Set(legacyComparisonGroups.map((group) => group.key));
+  const newGroupKeys = new Set(newComparisonGroups.map((group) => group.key));
+
+  return {
+    threshold: comparisonThreshold,
+    currentThreshold,
+    legacyPairCount: legacyComparisonPairs.length,
+    newPairCount: newComparisonPairs.length,
+    deltaPairCount: newComparisonPairs.length - legacyComparisonPairs.length,
+    legacyGroupCount: legacyComparisonGroups.length,
+    newGroupCount: newComparisonGroups.length,
+    deltaGroupCount: newComparisonGroups.length - legacyComparisonGroups.length,
+    lostGroupCount: [...legacyGroupKeys].filter((key) => !newGroupKeys.has(key)).length,
+    gainedGroupCount: [...newGroupKeys].filter((key) => !legacyGroupKeys.has(key)).length,
+    redFlagged: newComparisonGroups.length < legacyComparisonGroups.length
+  };
 }
 
 function buildContactMirrorConflictMap(preparedRows) {
@@ -4334,6 +4400,7 @@ function prepareContactRow(row, mapping, index, cache) {
     recordNameKey,
     mirrorOfKey,
     company: cachedTransform(cache.companies, getValue(row, mapping.company), normalizeCompany),
+    organization: cachedTransform(cache.organizations, getValue(row, mapping.company), resolveContactOrganizationKey),
     email,
     domain: emailDomain(email),
     linkedIn: cachedTransform(cache.linkedIn, getValue(row, mapping.ziPersonLinkedInUrl), normalizeLinkedInUrl),
@@ -4836,7 +4903,11 @@ function pairKey(left, right) {
   return left < right ? `${left}|${right}` : `${right}|${left}`;
 }
 
-function scoreContactPair(left, right, cache = null) {
+function scoreContactPairLegacy(left, right, cache = null) {
+  return scoreContactPair(left, right, cache, "legacy");
+}
+
+function scoreContactPair(left, right, cache = null, model = "new") {
   if (hasMirrorContactRelationship(left, right)) {
     return {
       left: left.row,
@@ -4891,7 +4962,7 @@ function scoreContactPair(left, right, cache = null) {
   const exactAnyPhone = bestPhoneSimilarity === 1;
   const exactFullName = fullNameSimilarity === 1;
   const companyConflict = hasContactCompanyConflict(left, right, companySimilarity);
-  if (companyConflict) {
+  if (model === "legacy" && companyConflict) {
     return {
       left: left.row,
       right: right.row,
@@ -5899,45 +5970,10 @@ function normalizeCompany(value) {
     .replace(/\s+/g, " ");
 }
 
-function resolveCanonicalCompanyKey(value) {
+function resolveContactOrganizationKey(value) {
   const normalized = normalizeCompany(value);
   if (!normalized) return "";
   return CONTACT_ORGANIZATION_ALIASES.get(normalized) || normalized;
-}
-
-function resolveContactOrganizationKey(value) {
-  return resolveCanonicalCompanyKey(value);
-}
-
-function accountCompanyValue(row) {
-  return row.organization || row.name;
-}
-
-const COMPANY_COMMENTARY_PATTERNS = [
-  /\(\s*(?:f\s*\.?\s*k\s*\.?\s*a|formerly known as|d\s*\.?\s*b\s*\.?\s*a|doing business as)\b[^)]*\)/gi,
-  /\[\s*(?:f\s*\.?\s*k\s*\.?\s*a|formerly known as|d\s*\.?\s*b\s*\.?\s*a|doing business as)\b[^\]]*\]/gi,
-  /\s[-/:|]\s*(?:f\s*\.?\s*k\s*\.?\s*a|d\s*\.?\s*b\s*\.?\s*a)\b.*$/gi,
-  /\s(?:formerly known as|doing business as)\b.*$/gi
-];
-
-const COMPANY_STATUS_MARKER_PATTERNS = [
-  "do not use",
-  "donotuse",
-  "inactive",
-  "obsolete",
-  "deprecated",
-  "duplicate",
-  "dupe"
-];
-
-function stripCompanyCommentary(value) {
-  let normalized = String(value || "");
-  COMPANY_COMMENTARY_PATTERNS.forEach((pattern) => {
-    normalized = normalized.replace(pattern, " ");
-  });
-  return normalized
-    .trim()
-    .replace(/\s+/g, " ");
 }
 
 function stripCompanyStatusMarkers(value) {
@@ -6663,6 +6699,14 @@ function renderMetrics() {
     ["groups", "Match Groups", state.groups.length],
     ["reviewed", "Reviewed", `${reviewedPercent}%`]
   ];
+  if (state.matchComparison && state.objectType === "contact") {
+    metrics.push(
+      ["legacyGroupsAt70", "Legacy Groups ≥70", state.matchComparison.legacyGroupCount],
+      ["newGroupsAt70", "New Groups ≥70", state.matchComparison.newGroupCount],
+      ["groupDeltaAt70", "Delta ≥70", state.matchComparison.deltaGroupCount],
+      ["comparisonFlag", "Comparison", state.matchComparison.redFlagged ? "Red flag" : "OK"]
+    );
+  }
 
   els.metrics.innerHTML = metrics
     .map(
