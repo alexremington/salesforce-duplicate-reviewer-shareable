@@ -343,6 +343,14 @@ function accountSmokeCsv() {
   ]);
 }
 
+function accountCompanyNormalizationSmokeCsv() {
+  return csvRows([
+    ["Id", "Name", "Website", "Phone", "Billing Street", "Billing City", "Billing State", "Billing Postal Code", "Billing Country"],
+    ["001N00000000001", "The Ohio State University", "", "(614) 292-0000", "", "", "", "", "United States"],
+    ["001N00000000002", "OSU", "", "(614) 292-0000", "", "", "", "", "United States"]
+  ]);
+}
+
 function largeContactSmokeCsv(groupCount = 300) {
   const rows = [["Id", "First Name", "Last Name", "Company", "Email", "Lead Source", "Created Date", "Phone", "Mobile"]];
   for (let index = 1; index <= groupCount; index += 1) {
@@ -369,6 +377,7 @@ function csvCell(value) {
 
 module.exports = {
   accountSmokeCsv,
+  accountCompanyNormalizationSmokeCsv,
   contactLastNameChangeSmokeCsv,
   contactDifferentCompanyConflictSmokeCsv,
   contactSharedCompanyExactPhoneNameConflictSmokeCsv,
