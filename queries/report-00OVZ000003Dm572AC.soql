@@ -11,9 +11,5 @@ SELECT
   CurrencyIsoCode,
   Parent.Name,
   Industry,
-  Type,
-  NumberOfEmployees,
-  AnnualRevenue,
-  DUNSNumber,
   Ultimate_Parent_Account__c
 FROM Account
