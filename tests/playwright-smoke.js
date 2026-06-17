@@ -326,19 +326,11 @@ async function run() {
     const thresholdFilteredScores = await visibleGroupScores(page);
     const thresholdComparisonSummary = await reportSummaryState(page);
     if (
-      thresholdComparisonSummary.values.legacyGroupsAt70 === undefined ||
-      thresholdComparisonSummary.values.newGroupsAt70 === undefined ||
-      thresholdComparisonSummary.values.comparisonFlag !== "OK"
+      thresholdComparisonSummary.values.legacyGroupsAt70 !== undefined ||
+      thresholdComparisonSummary.values.newGroupsAt70 !== undefined ||
+      thresholdComparisonSummary.values.comparisonFlag !== undefined
     ) {
-      throw new Error(`Expected the contact comparison metrics to render without a red flag: ${JSON.stringify(thresholdComparisonSummary.values)}`);
-    }
-    const thresholdComparisonState = await duplicateReviewerDebugState(page);
-    if (
-      !thresholdComparisonState.matchComparison ||
-      thresholdComparisonState.matchComparison.redFlagged ||
-      thresholdComparisonState.matchComparison.newGroupCount < thresholdComparisonState.matchComparison.legacyGroupCount
-    ) {
-      throw new Error(`Expected the live contact comparison summary to keep or improve the >=70 group count: ${JSON.stringify(thresholdComparisonState.matchComparison)}`);
+      throw new Error(`Expected the contact UI to omit the retired comparison metrics: ${JSON.stringify(thresholdComparisonSummary.values)}`);
     }
     await setRangeValue(page, "#maxThreshold", "100");
     await page.locator("#applyControlsButton").click();
@@ -1469,13 +1461,6 @@ async function duplicateReviewerDebugState(page) {
     pendingLabelStatusFilters: [...state.pendingLabelStatusFilters],
     loadError: state.loadError,
     reviewStateStatus: state.reviewStateStatus,
-    matchComparison: state.matchComparison ? {
-      threshold: state.matchComparison.threshold,
-      legacyGroupCount: state.matchComparison.legacyGroupCount,
-      newGroupCount: state.matchComparison.newGroupCount,
-      deltaGroupCount: state.matchComparison.deltaGroupCount,
-      redFlagged: state.matchComparison.redFlagged
-    } : null,
     groupListText: document.querySelector("#groupList")?.textContent?.trim().slice(0, 400) || ""
   }));
 }

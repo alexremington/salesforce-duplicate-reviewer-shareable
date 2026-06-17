@@ -15,6 +15,7 @@
     "export:duplicate-labels": "node scripts/run-salesforce-duplicate-label-export.js",
     "feature:sync-status": "node scripts/sync-feature-status.js",
     "feature:new": "node ../automation-shared-resources/scripts/feature-new.js .",
+    "report:contact-model-evaluation": "node scripts/contact-model-evaluation-report.js",
     "sync:shared": "node ../automation-shared-resources/scripts/sync-shared-resources.js .",
     "verify:all": "node ../automation-shared-resources/scripts/managed-app-pipeline.js --tier smoke",
     "verify:fast": "node ../automation-shared-resources/scripts/managed-app-pipeline.js --tier fast --app .",

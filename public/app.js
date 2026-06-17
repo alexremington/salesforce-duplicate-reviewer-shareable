@@ -856,7 +856,6 @@ const state = {
   trainingPairIndexes: new Map(),
   fieldResolutions: new Map(),
   separatedRecords: new Map(),
-  matchComparison: null,
   threshold: 86,
   maxThreshold: 100,
   highRecallMode: true,
@@ -2965,7 +2964,6 @@ function stageRowsForReview({ rows, fileName, fromObjects, headers, mapping, obj
   state.trainingLabels.clear();
   state.trainingPairIndexes.clear();
   state.lastMatchingStats = null;
-  state.matchComparison = null;
   matchingArtifactsCache = null;
   matchingArtifactsWarmCacheJob = null;
   mergeMasterSelections.clear();
@@ -3052,7 +3050,6 @@ function cacheMatchingArtifacts(artifacts, groups = []) {
     fieldStats: artifacts.fieldStats || null,
     pairScores: artifacts.pairScores,
     matchingStats: artifacts.matchingStats || null,
-    matchComparison: artifacts.matchComparison || null,
     groups: Array.isArray(groups) ? groups : []
   };
   scheduleMatchingArtifactsWarmCache();
@@ -3120,7 +3117,6 @@ async function rebuildMatchesFromCachedArtifacts({ title = "Matching Records", m
     const result = await rebuildGroupsFromMatchingArtifacts(matchingArtifactsCache, state.threshold, updateLoadingProgress);
     state.lastProcessingMode = result.processingMode || "";
     state.lastMatchingStats = result.matchingStats || null;
-    state.matchComparison = result.matchComparison || matchingArtifactsCache.matchComparison || null;
     await updateLoadingProgress("Rendering duplicate groups.", 98);
     applyComputedGroups(result.groups || [], result.matchingStats || null);
     await updateLoadingProgress("Ready.", 100);
@@ -3713,7 +3709,6 @@ async function buildGroupsAsync(
 ) {
   const startedAt = performance.now();
   if (!rows.length) {
-    state.matchComparison = null;
     await progress("No records to match.", 100);
     return {
       groups: [],
@@ -3733,7 +3728,7 @@ async function buildGroupsAsync(
   }
 
   await progress("Preparing records.", 8);
-  const { preparedRows, fieldStats, scorer, legacyScorer } = await getScoringContextAsync(rows, objectType, mapping, progress);
+  const { preparedRows, fieldStats, scorer } = await getScoringContextAsync(rows, objectType, mapping, progress);
 
   await progress("Finding candidate pairs.", 22);
   const pairKeys = objectType === "contact"
@@ -3743,9 +3738,6 @@ async function buildGroupsAsync(
   await progress(`Scoring ${formatNumber(pairKeys.size)} candidate pairs.`, 44);
   const comparisonThreshold = objectType === "contact" ? CONTACT_MODEL_COMPARISON_THRESHOLD : artifactThreshold;
   const pairs = await scoreCandidatePairsAsync(pairKeys, preparedRows, scorer, comparisonThreshold, progress);
-  const legacyPairs = objectType === "contact"
-    ? await scoreCandidatePairsAsync(pairKeys, preparedRows, legacyScorer, comparisonThreshold, async () => {})
-    : null;
   const currentPairs = pairs.filter((pair) => pair.value >= threshold);
 
   await progress("Building match groups.", 82);
@@ -3757,16 +3749,6 @@ async function buildGroupsAsync(
     .map((group) => summarizeGroup(group, preparedRows, scorer))
     .filter((group) => group.score >= threshold)
     .sort(compareGroups);
-  const legacyComparison = objectType === "contact"
-    ? buildContactComparisonSummary(
-      legacyPairs || [],
-      pairs,
-      preparedRows,
-      mirrorConflicts,
-      comparisonThreshold,
-      threshold
-    )
-    : null;
   const excludedGroups = objectType === "contact"
     ? buildExplicitExcludedGroups(pairs.excludedPairs || [])
     : [];
@@ -3775,7 +3757,6 @@ async function buildGroupsAsync(
     .map((group, index) => ({ ...group, id: index + 1 }));
 
   await progress("Rendering duplicate groups.", 96);
-  state.matchComparison = legacyComparison;
   return {
     groups,
     matchingStats: {
@@ -3795,7 +3776,6 @@ async function buildGroupsAsync(
       retainedPairs: currentPairs.length,
       resultGroups: groups.length
     },
-    matchComparison: legacyComparison,
     ...(includeMatchingArtifacts
       ? {
           matchingArtifacts: {
@@ -3807,7 +3787,6 @@ async function buildGroupsAsync(
             fieldStats,
             pairScores: pairs.map(serializePairScore),
             excludedPairScores: (pairs.excludedPairs || []).map(serializePairScore),
-            matchComparison: legacyComparison,
             matchingStats: {
               objectType,
               rowCount: rows.length,
@@ -3843,18 +3822,14 @@ function getScoringContext(rows, objectType, mapping) {
 
   const preparedRows = prepareRows(rows, objectType, mapping);
   const fieldStats = buildFieldStats(preparedRows, objectType);
-  const mirrorConflicts = objectType === "contact" ? buildContactMirrorConflictMap(preparedRows) : null;
   const scorer = createPairScorer(objectType, fieldStats);
-  const legacyScorer = createLegacyPairScorer(objectType, fieldStats);
   scoringContextCache = {
     rows,
     objectType,
     mapping,
     preparedRows,
     fieldStats,
-    mirrorConflicts,
-    scorer,
-    legacyScorer
+    scorer
   };
   return scoringContextCache;
 }
@@ -3871,18 +3846,14 @@ async function getScoringContextAsync(rows, objectType, mapping, progress = asyn
 
   const preparedRows = await prepareRowsAsync(rows, objectType, mapping, progress);
   const fieldStats = await buildFieldStatsAsync(preparedRows, objectType, progress);
-  const mirrorConflicts = objectType === "contact" ? buildContactMirrorConflictMap(preparedRows) : null;
   const scorer = createPairScorer(objectType, fieldStats);
-  const legacyScorer = createLegacyPairScorer(objectType, fieldStats);
   scoringContextCache = {
     rows,
     objectType,
     mapping,
     preparedRows,
     fieldStats,
-    mirrorConflicts,
-    scorer,
-    legacyScorer
+    scorer
   };
   return scoringContextCache;
 }
@@ -4089,7 +4060,6 @@ async function rebuildGroupsFromMatchingArtifacts(cache, threshold, progress = a
       retainedPairs: currentPairs.length,
       resultGroups: groups.length
     },
-    matchComparison: cache.matchComparison || null,
     processingMode: "cache"
   };
 }
@@ -6699,14 +6669,6 @@ function renderMetrics() {
     ["groups", "Match Groups", state.groups.length],
     ["reviewed", "Reviewed", `${reviewedPercent}%`]
   ];
-  if (state.matchComparison && state.objectType === "contact") {
-    metrics.push(
-      ["legacyGroupsAt70", "Legacy Groups ≥70", state.matchComparison.legacyGroupCount],
-      ["newGroupsAt70", "New Groups ≥70", state.matchComparison.newGroupCount],
-      ["groupDeltaAt70", "Delta ≥70", state.matchComparison.deltaGroupCount],
-      ["comparisonFlag", "Comparison", state.matchComparison.redFlagged ? "Red flag" : "OK"]
-    );
-  }
 
   els.metrics.innerHTML = metrics
     .map(

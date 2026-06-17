@@ -10,6 +10,10 @@ const path = require("node:path");
 const { performance } = require("node:perf_hooks");
 const vm = require("node:vm");
 const { buildCodexTrainingCommand } = require("../server/codex-training");
+const {
+  DEFAULT_BENCHMARKS,
+  generateContactModelEvaluationReport
+} = require("./contact-model-evaluation-report");
 
 const PROJECT_DIR = path.resolve(__dirname, "..");
 const SERVER_SCRIPT = path.join("server", "server.js");
@@ -125,6 +129,7 @@ async function main() {
     await assertContactSparseExactNameFloorRegression();
     await assertContactCompanyDifferenceVetoRegression();
     await assertContactLegacyComparisonRegression();
+    await assertContactModelEvaluationReportRegression();
     await assertContactExactPhoneLinkedInDivergenceRegression();
     await assertContactSharedCompanyExactPhoneNameConflictRegression();
     await assertContactMirrorRelationshipRegression();
@@ -930,14 +935,31 @@ async function assertContactLegacyComparisonRegression() {
   }
 
   const result = await api.buildGroupsAsync(rows, "contact", mapping, 86, true);
-  if (!result.matchComparison) {
-    throw new Error(`Contact comparison regression failed: matcher did not return comparison stats`);
+  if ("matchComparison" in result) {
+    throw new Error(`Contact comparison regression failed: the runtime matcher should no longer emit legacy comparison stats, got ${JSON.stringify(result.matchComparison)}`);
   }
-  if (result.matchComparison.redFlagged) {
-    throw new Error(`Contact comparison regression failed: expected the new model to keep or improve the >=70 group count, got ${JSON.stringify(result.matchComparison)}`);
+}
+
+async function assertContactModelEvaluationReportRegression() {
+  const report = await generateContactModelEvaluationReport({
+    benchmarks: DEFAULT_BENCHMARKS.filter((benchmark) => benchmark.source === "fixture"),
+    progress: async () => {}
+  });
+
+  if (!report || !Array.isArray(report.datasets) || !report.datasets.length) {
+    throw new Error(`Contact model evaluation report regression failed: report generation returned no datasets`);
   }
-  if (result.matchComparison.newGroupCount < result.matchComparison.legacyGroupCount) {
-    throw new Error(`Contact comparison regression failed: new model lost >=70 groups: ${JSON.stringify(result.matchComparison)}`);
+  if (!report.analysis?.samePersonSameCompanyVariants?.pass) {
+    throw new Error(`Contact model evaluation report regression failed: same-person analysis did not pass: ${JSON.stringify(report.analysis)}`);
+  }
+  if (!report.analysis?.differentCompanySuppression?.pass) {
+    throw new Error(`Contact model evaluation report regression failed: different-company analysis did not pass: ${JSON.stringify(report.analysis)}`);
+  }
+  if (!report.analysis?.mirrorZeroExclusion?.pass) {
+    throw new Error(`Contact model evaluation report regression failed: mirror exclusion analysis did not pass: ${JSON.stringify(report.analysis)}`);
+  }
+  if (!report.summary?.overallPass) {
+    throw new Error(`Contact model evaluation report regression failed: overall report analysis did not pass: ${JSON.stringify(report.summary)}`);
   }
 }
 
