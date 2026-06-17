@@ -411,11 +411,11 @@ async function assertSalesforceExportSchemaUpgradeRegression() {
       ].join("\n")
     ],
     [
-      path.join(PROJECT_DIR, "queries", "report-00OVZ000003DjaH2AS.soql"),
+      path.join(PROJECT_DIR, "queries", "contact-duplicate-record-items.soql"),
       approvedContactQuery
     ]
   ]);
-  const accountQueryPath = path.join(PROJECT_DIR, "queries", "report-00OVZ000003Dm572AC.soql");
+  const accountQueryPath = path.join(PROJECT_DIR, "queries", "account-duplicate-record-items.soql");
   const accountQuery = await fs.readFile(accountQueryPath, "utf8");
 
   for (const [contactQueryPath, expectedContactQuery] of contactQueryExpectations.entries()) {
