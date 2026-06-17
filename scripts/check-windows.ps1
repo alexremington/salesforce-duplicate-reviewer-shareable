@@ -88,7 +88,7 @@ $labelsDryRun = (& node scripts/run-salesforce-duplicate-label-export.js --objec
 $expectedLabelsSource = if ($IsWindows) {
   'Source CSV: $env:APPDATA\Salesforce Pulls\Duplicate Reviewer\staging\Output\staging-contacts\salesforce-report-latest.csv'
 } else {
-  "Source CSV: $HOME/Library/Application Support/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.csv"
+  "Source CSV: $HOME/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.csv"
 }
 if ($labelsDryRun -notmatch [regex]::Escape($expectedLabelsSource)) {
   Write-Host $labelsDryRun
@@ -96,8 +96,13 @@ if ($labelsDryRun -notmatch [regex]::Escape($expectedLabelsSource)) {
 }
 
 Write-Host 'Checking staging routing defaults...'
-$contactsOutDir = Join-Path $env:APPDATA 'Salesforce Pulls\Duplicate Reviewer\staging\Output\staging-contacts'
-$accountsOutDir = Join-Path $env:APPDATA 'Salesforce Pulls\Duplicate Reviewer\staging\Output\staging-accounts'
+$canonicalRoot = if ($IsWindows -and $env:APPDATA) {
+  $env:APPDATA
+} else {
+  $HOME
+}
+$contactsOutDir = Join-Path $canonicalRoot 'Salesforce Pulls\Duplicate Reviewer\staging\Output\staging-contacts'
+$accountsOutDir = Join-Path $canonicalRoot 'Salesforce Pulls\Duplicate Reviewer\staging\Output\staging-accounts'
 $env:OUT_DIR = $contactsOutDir
 $contactsDryRun = (& scripts/run-staging-contacts-bulk-query.sh --dry-run) -join "`n"
 if ($contactsDryRun -notmatch '/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts') {
@@ -115,6 +120,10 @@ if ($contactsDryRun -notmatch 'Latest JSON: .*[\\/]Salesforce Pulls[\\/]Duplicat
 if ($contactsDryRun -notmatch 'Compatibility CSV: .*[\\/]Salesforce Pulls[\\/]Duplicate Reviewer[\\/]staging[\\/]Output[\\/]staging-contacts[\\/]salesforce-report-latest.csv') {
   Write-Host $contactsDryRun
   throw 'Staging Contacts did not preserve the canonical compatibility CSV output flow.'
+}
+$stagingContactsLauncher = Get-Content scripts/run-staging-contacts-bulk-query.sh -Raw
+if ($stagingContactsLauncher -notmatch 'start-reviewer-server.sh" --force-refresh') {
+  throw 'Staging Contacts launcher did not force-refresh the reviewer server before opening the URL.'
 }
 $bulkQueryWrapper = Get-Content scripts/run-salesforce-bulk-query.sh -Raw
 if ($bulkQueryWrapper -notmatch 'sf org display') {
@@ -137,6 +146,14 @@ if ($accountsDryRun -notmatch 'Latest JSON: .*[\\/]Salesforce Pulls[\\/]Duplicat
 if ($accountsDryRun -notmatch 'Compatibility CSV: .*[\\/]Salesforce Pulls[\\/]Duplicate Reviewer[\\/]staging[\\/]Output[\\/]staging-accounts[\\/]salesforce-report-latest.csv') {
   Write-Host $accountsDryRun
   throw 'Staging Accounts did not preserve the canonical compatibility CSV output flow.'
+}
+$stagingAccountsLauncher = Get-Content scripts/run-staging-accounts-bulk-query.sh -Raw
+if ($stagingAccountsLauncher -notmatch 'start-reviewer-server.sh" --force-refresh') {
+  throw 'Staging Accounts launcher did not force-refresh the reviewer server before opening the URL.'
+}
+$startServer = Get-Content scripts/start-reviewer-server.sh -Raw
+if ($startServer -notmatch 'FORCE_REFRESH=0' -or $startServer -notmatch '--force-refresh') {
+  throw 'Reviewer launcher did not add a force-refresh mode.'
 }
 
 Write-Host 'Checking Windows server startup...'

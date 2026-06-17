@@ -184,6 +184,8 @@ That helper creates a user LaunchAgent and refreshes a generated static cache un
 
 The project folder remains the source of truth. The cache only avoids transient OneDrive or cloud-file-provider read errors at runtime. The server exposes `salesforce-report-latest.json` as the native review dataset and keeps CSV endpoints available for compatibility. If one format cannot be read from OneDrive, the server falls back to the other format when possible.
 
+The Scheduler-launched staging reviewer scripts always force a fresh reviewer runtime before opening the browser. That path restarts any existing reviewer server and recopies the current static bundle so the opened app cannot reuse stale cached assets from an earlier launch.
+
 ## Private Configuration
 
 Do not commit real Salesforce access tokens, exported Salesforce data, teammate-specific workbook paths, or private report IDs. Use environment variables and local untracked files for those values.

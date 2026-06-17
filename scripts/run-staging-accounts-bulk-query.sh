@@ -45,7 +45,7 @@ if ! "${PROJECT_DIR}/scripts/run-salesforce-bulk-query.sh" "$@"; then
   exit 1
 fi
 
-reviewer_url="$("${PROJECT_DIR}/scripts/start-reviewer-server.sh" | tail -n 1)"
+reviewer_url="$("${PROJECT_DIR}/scripts/start-reviewer-server.sh" --force-refresh | tail -n 1)"
 autoload_url="${reviewer_url}/?autoload=staging-accounts&object=account&notify=1&sticky=1&name=${LATEST_JSON_NAME}"
 
 /usr/bin/open "${autoload_url}"

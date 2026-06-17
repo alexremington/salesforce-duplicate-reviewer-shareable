@@ -18,6 +18,29 @@ PLIST_PATH="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 USER_DOMAIN="gui/$(/usr/bin/id -u)"
 SERVICE_TARGET="${USER_DOMAIN}/${LABEL}"
 SERVER_SCRIPT="${PROJECT_DIR}/scripts/run-reviewer-server.sh"
+FORCE_REFRESH=0
+
+while [[ "${1:-}" == --* ]]; do
+  case "${1}" in
+    --force-refresh)
+      FORCE_REFRESH=1
+      shift
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      echo "Unknown option: ${1}" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ $# -gt 0 ]]; then
+  echo "Unexpected positional arguments: $*" >&2
+  exit 1
+fi
 
 export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
@@ -113,6 +136,11 @@ sync_static_assets() {
   copy_static_asset "${PROJECT_DIR}/public/vendor/managed-app/scripts/managed-worker-client.js" "${STATIC_DIR}/vendor/managed-app/scripts/managed-worker-client.js"
 }
 
+clear_static_assets() {
+  /bin/rm -rf "${STATIC_DIR}"
+  /bin/mkdir -p "${STATIC_DIR}"
+}
+
 copy_static_asset() {
   local source="$1"
   local target="$2"
@@ -142,13 +170,27 @@ start_server_agent() {
 }
 
 pid="$(server_pid)"
-sync_static_assets
 if [[ -n "${pid}" ]] && ! server_is_duplicate_reviewer; then
   echo "Port ${PORT} is already in use by a different local process. Stop that process or set DUPLICATE_REVIEWER_PORT in .env." >&2
   exit 1
 fi
 
-if [[ -n "${pid}" ]] && ! server_supports_required_features; then
+if [[ "${FORCE_REFRESH}" -eq 1 ]]; then
+  if [[ -n "${pid}" ]]; then
+    echo "Force-refreshing Salesforce Duplicate Reviewer server at ${URL}"
+    /bin/launchctl bootout "${SERVICE_TARGET}" >/dev/null 2>&1 || true
+    /bin/kill "${pid}" >/dev/null 2>&1 || true
+    for attempt in {1..40}; do
+      if [[ -z "$(server_pid)" ]]; then
+        break
+      fi
+      sleep 0.25
+    done
+  else
+    echo "Starting Salesforce Duplicate Reviewer server at ${URL} with a fresh runtime"
+  fi
+  clear_static_assets
+elif [[ -n "${pid}" ]] && ! server_supports_required_features; then
   echo "Restarting Salesforce Duplicate Reviewer server at ${URL} to enable current features"
   /bin/launchctl bootout "${SERVICE_TARGET}" >/dev/null 2>&1 || true
   /bin/kill "${pid}" >/dev/null 2>&1 || true
@@ -159,6 +201,8 @@ if [[ -n "${pid}" ]] && ! server_supports_required_features; then
     sleep 0.25
   done
 fi
+
+sync_static_assets
 
 if [[ -z "$(server_pid)" ]]; then
   echo "Starting Salesforce Duplicate Reviewer server at ${URL} via ${LABEL}"

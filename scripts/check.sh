@@ -45,6 +45,10 @@ if ! grep -Fq "sf org display" scripts/run-salesforce-bulk-query.sh; then
   echo "Bulk query wrapper did not use sf org display."
   exit 1
 fi
+if ! grep -Fq 'start-reviewer-server.sh" --force-refresh' scripts/run-staging-contacts-bulk-query.sh; then
+  echo "Staging Contacts launcher did not force-refresh the reviewer server before opening the URL."
+  exit 1
+fi
 labelsDryRun="$(node scripts/run-salesforce-duplicate-label-export.js --object contact --dry-run)"
 shareableStagingRoot="${HOME}/Salesforce Pulls/Duplicate Reviewer/staging"
 case "${labelsDryRun}" in
@@ -72,6 +76,18 @@ case "${accountsDryRun}" in
     exit 1
     ;;
 esac
+if ! grep -Fq 'start-reviewer-server.sh" --force-refresh' scripts/run-staging-accounts-bulk-query.sh; then
+  echo "Staging Accounts launcher did not force-refresh the reviewer server before opening the URL."
+  exit 1
+fi
+if ! grep -Fq 'FORCE_REFRESH=0' scripts/start-reviewer-server.sh; then
+  echo "Reviewer launcher did not add a force-refresh mode."
+  exit 1
+fi
+if ! grep -Fq -- '--force-refresh' scripts/start-reviewer-server.sh; then
+  echo "Reviewer launcher did not accept the force-refresh flag."
+  exit 1
+fi
 
 if git rev-parse --verify shareable >/dev/null 2>&1; then
   echo "Checking shareable branch safety..."
