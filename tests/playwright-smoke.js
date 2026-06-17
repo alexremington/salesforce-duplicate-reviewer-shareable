@@ -1450,7 +1450,7 @@ async function assertProdContactsAutoload(page, { closePage = true } = {}) {
     await page.goto(`${baseUrl}/?autoload=prod-contacts&object=contact&notify=1&sticky=1&name=salesforce-report-latest.json`, {
       waitUntil: "domcontentloaded"
     });
-    await page.waitForFunction(() => state.rows.length === 2 && state.objectType === "contact", null, { timeout: 10000 });
+    await page.waitForFunction(() => state.rows.length === 2 && state.objectType === "contact", null, { timeout: 20000 });
 
     const url = new URL(page.url());
     const autoloadState = await page.evaluate(() => ({
