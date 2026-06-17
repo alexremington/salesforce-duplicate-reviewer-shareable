@@ -139,7 +139,7 @@ if ($prodContactsDryRun -notmatch 'Org alias: politico') {
   Write-Host $prodContactsDryRun
   throw 'Prod Contacts did not use the canonical prod Salesforce org alias.'
 }
-if ($prodContactsDryRun -notmatch 'Instance: https://login.salesforce.com') {
+if ($prodContactsDryRun -notmatch 'Instance: https://politico.my.salesforce.com') {
   Write-Host $prodContactsDryRun
   throw 'Prod Contacts did not use the canonical prod Salesforce instance URL.'
 }

@@ -95,7 +95,7 @@ case "${prodContactsDryRun}" in
     ;;
 esac
 case "${prodContactsDryRun}" in
-  *"Instance: https://login.salesforce.com"*) ;;
+  *"Instance: https://politico.my.salesforce.com"*) ;;
   *)
     echo "${prodContactsDryRun}"
     echo "Prod Contacts did not use the canonical prod Salesforce instance URL."

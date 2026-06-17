@@ -10,7 +10,7 @@ load_project_env "${PROJECT_DIR}/.env"
 
 export SF_USE_GENERIC_UNIX_KEYCHAIN="${SF_USE_GENERIC_UNIX_KEYCHAIN:-true}"
 export SF_ORG_ALIAS="${SF_ORG_ALIAS:-politico}"
-export SF_INSTANCE_URL="${SF_INSTANCE_URL:-https://login.salesforce.com}"
+export SF_INSTANCE_URL="${SF_INSTANCE_URL:-https://politico.my.salesforce.com}"
 export SF_API_VERSION="${SF_API_VERSION:-v67.0}"
 export SF_REPORT_ID="${SF_REPORT_ID:-00OVq00000CxYd3MAF}"
 export SF_SOQL_FILE="${SF_SOQL_FILE:-${PROJECT_DIR}/queries/report-${SF_REPORT_ID}.soql}"

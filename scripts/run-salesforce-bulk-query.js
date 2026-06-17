@@ -234,9 +234,6 @@ async function fetchSalesforceOrgList() {
 }
 
 async function fetchAccessToken(orgAlias) {
-  await execFileJson(salesforceCliCommand(), ["org", "display", "--target-org", orgAlias, "--json"], {
-    env: salesforceCliEnv()
-  });
   const result = await execFileJson(salesforceCliCommand(), ["org", "auth", "show-access-token", "--target-org", orgAlias, "--json"], {
     env: salesforceCliEnv()
   });
