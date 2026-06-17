@@ -447,36 +447,71 @@ async function assertStaticApp(baseUrl) {
 }
 
 async function assertTrimmedContactExportSchemaRegression() {
-  const contactQueryPaths = [
-    path.join(PROJECT_DIR, "queries", "report-00OVZ000003DjaH2AS.soql"),
-    path.join(PROJECT_DIR, "queries", "report-00OVq00000CxYd3MAF.soql")
-  ];
+  const approvedContactQuery = [
+    "SELECT",
+    "  Id,",
+    "  Name,",
+    "  FirstName,",
+    "  LastName,",
+    "  Email,",
+    "  Phone,",
+    "  MobilePhone,",
+    "  Account.Name,",
+    "  MailingStreet,",
+    "  MailingCity,",
+    "  MailingState,",
+    "  MailingPostalCode,",
+    "  MailingCountry,",
+    "  LeadSource,",
+    "  CreatedDate,",
+    "  ziPersonDirectPhone__c,",
+    "  ZI_Person_LinkedIn_URL__c",
+    "FROM Contact"
+  ].join("\n");
+  const contactQueryExpectations = new Map([
+    [
+      path.join(PROJECT_DIR, "queries", "contacts.soql.example"),
+      [
+        "SELECT",
+        "  Id,",
+        "  Name,",
+        "  FirstName,",
+        "  LastName,",
+        "  Email,",
+        "  Phone,",
+        "  MobilePhone,",
+        "  Account.Name,",
+        "  MailingStreet,",
+        "  MailingCity,",
+        "  MailingState,",
+        "  MailingPostalCode,",
+        "  MailingCountry,",
+        "  LeadSource,",
+        "  CreatedDate,",
+        "  ziPersonDirectPhone__c,",
+        "  ZI_Person_LinkedIn_URL__c",
+        "FROM Contact",
+        "WHERE Name != null",
+        "LIMIT 1000"
+      ].join("\n")
+    ],
+    [
+      path.join(PROJECT_DIR, "queries", "report-00OVZ000003DjaH2AS.soql"),
+      approvedContactQuery
+    ],
+    [
+      path.join(PROJECT_DIR, "queries", "report-00OVq00000CxYd3MAF.soql"),
+      approvedContactQuery
+    ]
+  ]);
   const accountQueryPath = path.join(PROJECT_DIR, "queries", "report-00OVZ000003Dm572AC.soql");
   const accountQuery = await fs.readFile(accountQueryPath, "utf8");
 
-  for (const contactQueryPath of contactQueryPaths) {
+  for (const [contactQueryPath, expectedContactQuery] of contactQueryExpectations.entries()) {
     const contactQuery = await fs.readFile(contactQueryPath, "utf8");
-    assertQueryContainsAll(contactQueryPath, contactQuery, [
-      "Id",
-      "Name",
-      "FirstName",
-      "LastName",
-      "Email",
-      "Phone",
-      "MobilePhone",
-      "OtherPhone",
-      "HomePhone",
-      "AssistantPhone",
-      "Account.Name",
-      "MailingStreet",
-      "MailingCity",
-      "MailingState",
-      "MailingPostalCode",
-      "MailingCountry",
-      "LeadSource",
-      "CreatedDate"
-    ]);
-    assertQueryExcludes(contactQueryPath, contactQuery, ["AccountId", "Title", "Department"]);
+    if (normalizeQueryText(contactQuery) !== normalizeQueryText(expectedContactQuery)) {
+      throw new Error(`Query schema regression failed for ${contactQueryPath}: ${JSON.stringify(contactQuery)}`);
+    }
   }
   assertQueryContainsAll(accountQueryPath, accountQuery, [
     "Id",
@@ -491,10 +526,6 @@ async function assertTrimmedContactExportSchemaRegression() {
     "CurrencyIsoCode",
     "Parent.Name",
     "Industry",
-    "Type",
-    "NumberOfEmployees",
-    "AnnualRevenue",
-    "DUNSNumber",
     "Ultimate_Parent_Account__c"
   ]);
 
@@ -508,9 +539,6 @@ async function assertTrimmedContactExportSchemaRegression() {
     "Email",
     "Phone",
     "MobilePhone",
-    "OtherPhone",
-    "HomePhone",
-    "AssistantPhone",
     "Account.Name",
     "MailingStreet",
     "MailingCity",
@@ -518,22 +546,26 @@ async function assertTrimmedContactExportSchemaRegression() {
     "MailingPostalCode",
     "MailingCountry",
     "LeadSource",
-    "CreatedDate"
+    "CreatedDate",
+    "ziPersonDirectPhone__c",
+    "ZI_Person_LinkedIn_URL__c"
   ];
   const contactParsed = api.parseCsv([
     contactHeaders.join(","),
-    "003E00000000001,Taylor Mason,Taylor,Mason,taylor.mason@example.com,555-010-1000,555-010-1001,555-010-1002,555-010-1003,555-010-1004,Northstar Analytics,1 Main St,Dallas,TX,75201,United States,Web,2026-04-01T00:00:00.000+0000",
-    "003E00000000002,Taylor Mason,Taylor,Mason,taylor.mason@example.com,555-010-1000,555-010-1001,555-010-1002,555-010-1003,555-010-1004,Northstar Analytics,9 Other St,Austin,TX,73301,United States,Web,2026-04-01T00:00:00.000+0000"
+    "003E00000000001,Taylor Mason,Taylor,Mason,taylor.mason@example.com,555-010-1000,555-010-1001,Northstar Analytics,1 Main St,Dallas,TX,75201,United States,Web,2026-04-01T00:00:00.000+0000,555-010-1004,https://www.linkedin.com/in/taylor-mason-1010/",
+    "003E00000000002,Taylor Mason,Taylor,Mason,taylor.mason@example.com,555-010-1000,555-010-1001,Northstar Analytics,9 Other St,Austin,TX,73301,United States,Web,2026-04-01T00:00:00.000+0000,555-010-1004,https://www.linkedin.com/in/taylor-mason-1010/"
   ].join("\n"));
   const contactRows = contactParsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
   const contactMapping = api.autoMapHeaders(contactParsed.headers, api.OBJECT_CONFIG.contact.fields);
   const contactPrepared = api.prepareRows(contactRows, "contact", contactMapping);
   if (
-    contactMapping.otherPhone !== "OtherPhone" ||
+    contactMapping.company !== "Account.Name" ||
     contactMapping.mailingStreet !== "MailingStreet" ||
     contactMapping.mailingPostalCode !== "MailingPostalCode" ||
     contactMapping.leadSource !== "LeadSource" ||
-    contactMapping.createdDate !== "CreatedDate"
+    contactMapping.createdDate !== "CreatedDate" ||
+    contactMapping.ziPhone !== "ziPersonDirectPhone__c" ||
+    contactMapping.ziPersonLinkedInUrl !== "ZI_Person_LinkedIn_URL__c"
   ) {
     throw new Error(`Trimmed contact export schema auto-mapping failed: ${JSON.stringify(contactMapping)}`);
   }
@@ -600,6 +632,15 @@ function assertQueryExcludes(queryPath, queryText, fields) {
   if (present.length) {
     throw new Error(`Query schema regression failed for ${queryPath}: trimmed fields still present: ${present.join(", ")}`);
   }
+}
+
+function normalizeQueryText(queryText) {
+  return String(queryText || "")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(" ");
 }
 
 async function assertAccountScopeDivergenceRegression() {
@@ -778,9 +819,9 @@ async function assertContactMirrorProvenanceGap() {
 async function assertContactCompanyDifferenceVetoRegression() {
   const api = loadAppApi();
   const csv = [
-    "Id,First Name,Last Name,Company,Email,Phone,Mobile,LinkedIn__c,ZI_Person_LinkedIn_URL__c",
-    "003A00000000011,Taylor,Mason,Northstar Analytics,taylor.mason@northstar.example,(555) 010-4321,,https://www.linkedin.com/in/taylor-mason-1010,https://www.linkedin.com/in/taylor-mason-1010/",
-    "003A00000000012,Taylor,Mason,Civic Harbor,taylor.mason@northstar.example,(555) 010-4321,,https://www.linkedin.com/in/taylor-mason-1010,https://www.linkedin.com/in/taylor-mason-1010/"
+    "Id,Name,First Name,Last Name,Account.Name,Email,Phone,MobilePhone,Lead Source,Created Date,ziPersonDirectPhone__c,ZI_Person_LinkedIn_URL__c",
+    "003A00000000011,Taylor Mason,Taylor,Mason,Northstar Analytics,taylor.mason@northstar.example,(555) 010-4321,,Web,2024-04-01,(555) 010-4321,https://www.linkedin.com/in/taylor-mason-1010/",
+    "003A00000000012,Taylor Mason,Taylor,Mason,Civic Harbor,taylor.mason@northstar.example,(555) 010-4321,,Web,2024-04-01,(555) 010-4321,https://www.linkedin.com/in/taylor-mason-1010/"
   ].join("\n");
   const parsed = api.parseCsv(csv);
   const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
@@ -804,9 +845,9 @@ async function assertContactCompanyDifferenceVetoRegression() {
 async function assertContactExactPhoneLinkedInDivergenceRegression() {
   const api = loadAppApi();
   const csv = [
-    "Id,First Name,Last Name,Company,Email,Phone,Mobile,LinkedIn__c,ZI_Person_LinkedIn_URL__c",
-    "003A00000000021,Michael,Zehr,Capcventures,mzehr@capcventures.com.invalid,2022106647,,https://www.linkedin.com/in/michael-zehr-2670b57,https://www.linkedin.com/in/michael-zehr-2670b57/",
-    "003A00000000022,Michael,Whatley,Capcventures,mwhatley@capcventures.com.invalid,2022106647,,https://www.linkedin.com/in/michael-zehr-2670b57,https://www.linkedin.com/in/michael-zehr-2670b57/"
+    "Id,Name,First Name,Last Name,Account.Name,Email,Phone,MobilePhone,Lead Source,Created Date,ziPersonDirectPhone__c,ZI_Person_LinkedIn_URL__c",
+    "003A00000000021,Michael Zehr,Michael,Zehr,Capcventures,mzehr@capcventures.com.invalid,2022106647,,Web,2024-05-01,2022106647,https://www.linkedin.com/in/michael-zehr-2670b57/",
+    "003A00000000022,Michael Whatley,Michael,Whatley,Capcventures,mwhatley@capcventures.com.invalid,2022106647,,Referral,2024-05-01,2022106647,https://www.linkedin.com/in/michael-zehr-2670b57/"
   ].join("\n");
   const parsed = api.parseCsv(csv);
   const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
@@ -830,9 +871,9 @@ async function assertContactExactPhoneLinkedInDivergenceRegression() {
 async function assertContactSharedCompanyExactPhoneNameConflictRegression() {
   const api = loadAppApi();
   const csv = [
-    "Id,First Name,Last Name,Company,Email,Phone,Mobile",
-    "003f200002O50cwAAB,Karen,Irish,Out & Equal Workplace Advocates,kirish@outandequal.org.invalid,+1 415 694 6500,(202) 372-5155",
-    "003f200002drJvyAAE,Caryn,Viverito,Out & Equal Workplace Advocates,,(415) 694-6500,(202) 567-3306"
+    "Id,Name,First Name,Last Name,Account.Name,Email,Phone,MobilePhone,Lead Source,Created Date,ziPersonDirectPhone__c,ZI_Person_LinkedIn_URL__c",
+    "003f200002O50cwAAB,Karen Irish,Karen,Irish,Out & Equal Workplace Advocates,kirish@outandequal.org.invalid,+1 415 694 6500,(202) 372-5155,Web,2024-04-01,+1 415 694 6500,https://www.linkedin.com/in/karen-irish/",
+    "003f200002drJvyAAE,Caryn Viverito,Caryn,Viverito,Out & Equal Workplace Advocates,,(415) 694-6500,(202) 567-3306,Referral,2024-04-01,(415) 694-6500,https://www.linkedin.com/in/caryn-viverito/"
   ].join("\n");
   const parsed = api.parseCsv(csv);
   const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));

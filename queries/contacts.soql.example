@@ -6,9 +6,6 @@ SELECT
   Email,
   Phone,
   MobilePhone,
-  OtherPhone,
-  HomePhone,
-  AssistantPhone,
   Account.Name,
   MailingStreet,
   MailingCity,
@@ -16,7 +13,9 @@ SELECT
   MailingPostalCode,
   MailingCountry,
   LeadSource,
-  CreatedDate
+  CreatedDate,
+  ziPersonDirectPhone__c,
+  ZI_Person_LinkedIn_URL__c
 FROM Contact
 WHERE Name != null
 LIMIT 1000
