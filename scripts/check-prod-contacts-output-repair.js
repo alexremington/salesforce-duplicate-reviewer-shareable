@@ -19,9 +19,6 @@ async function main() {
     const canonicalRoot = path.join(tempDir, "Salesforce Pulls", "Duplicate Reviewer", "prod");
     const latestJsonPath = path.join(canonicalRoot, "Output", "prod-contacts", "salesforce-report-latest.json");
     const latestCsvPath = path.join(canonicalRoot, "Output", "prod-contacts", "salesforce-report-latest.csv");
-    const legacyRoot = path.join(tempDir, "legacy-prod-contacts-tree");
-    const legacyJsonPath = path.join(legacyRoot, "Output", "prod-contacts", "salesforce-report-latest.json");
-    const legacyCsvPath = path.join(legacyRoot, "Output", "prod-contacts", "salesforce-report-latest.csv");
     const canonicalPayload = {
       schema: "salesforce-duplicate-reviewer.dataset",
       schemaVersion: 1,
@@ -33,10 +30,6 @@ async function main() {
       },
       rows: [["003000000000001AAA", "Prod Contact"]]
     };
-
-    await fs.mkdir(path.dirname(legacyJsonPath), { recursive: true });
-    await fs.writeFile(legacyJsonPath, `${JSON.stringify(canonicalPayload, null, 2)}\n`);
-    await fs.writeFile(legacyCsvPath, "Id,Name\n003000000000001AAA,Prod Contact\n");
 
     const missingResult = await validateCanonicalProdContactsOutput({
       env: {
@@ -76,10 +69,6 @@ async function main() {
       paths.canonicalCsvPath !== latestCsvPath
     ) {
       throw new Error(`Prod Contacts path resolution drifted: ${JSON.stringify(paths)}`);
-    }
-
-    if (legacyJsonPath === latestJsonPath || legacyCsvPath === latestCsvPath) {
-      throw new Error("Legacy validation paths should differ from the canonical prod Contacts paths.");
     }
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});

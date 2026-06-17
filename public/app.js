@@ -1926,7 +1926,6 @@ async function initializeFileHistory() {
   }
 
   try {
-    await migrateLegacyProdContactsRecentFiles();
     await refreshRecentFiles();
   } catch {
     renderRecentFiles("Recent files could not be loaded");
@@ -1990,29 +1989,30 @@ async function loadRecentFile(fileId) {
     }
 
     const objectType = recentRecordObjectType(record, state.objectType);
-    state.loadingFileName = record.name;
+    const fileName = canonicalRecentFileName(record);
+    const displayName = canonicalRecentDisplayName(record);
+    state.loadingFileName = fileName;
     if (!isCurrentLoadRequest(loadRequestId)) return;
-    showLoadingModal("Loading Recent Dataset", `Parsing ${record.name}.`, 0, true);
+    showLoadingModal("Loading Recent Dataset", `Parsing ${fileName}.`, 0, true);
     await nextPaint();
     const datasetText = await recentFileDatasetText(record);
     if (!isCurrentLoadRequest(loadRequestId)) return;
     await loadDatasetText(datasetText, {
       fileName,
       objectType,
-      format: record.format || datasetFormatFromFileName(fileName || endpoint),
+      format: record.format || datasetFormatFromFileName(fileName || record.endpoint),
       size: record.size || datasetText.length,
       saveRecent: false,
-      displayName: record.displayName || record.name,
+      displayName,
       endpoint: record.endpoint || "",
       loadRequestId
     });
     saveRecentFileInBackground({
-      id: record.id,
       name: fileName,
       displayName,
       size: record.size || datasetText.length,
       objectType: normalizeObjectType(state.objectType),
-      format: record.format || datasetFormatFromFileName(record.name || record.endpoint),
+      format: record.format || datasetFormatFromFileName(fileName || record.endpoint),
       contractVersion: record.contractVersion || "",
       content: record.content || "",
       endpoint
@@ -2041,6 +2041,41 @@ async function recentFileDatasetText(record) {
   }
 
   return record.content || "";
+}
+
+function canonicalRecentFileName(record) {
+  const endpoint = String(record?.endpoint || "").toLowerCase();
+  if (
+    endpoint === "/api/staging-contacts/latest.csv" ||
+    endpoint === "/api/staging-accounts/latest.csv" ||
+    endpoint === "/api/prod-contacts/latest.csv"
+  ) {
+    return "salesforce-report-latest.csv";
+  }
+  if (
+    endpoint === "/api/staging-contacts/latest.json" ||
+    endpoint === "/api/staging-accounts/latest.json" ||
+    endpoint === "/api/prod-contacts/latest.json"
+  ) {
+    return "salesforce-report-latest.json";
+  }
+  return String(record?.name || datasetFileNameForFormat(record?.format || datasetFormatFromFileName(record?.endpoint || record?.name || "salesforce-report-latest.json")));
+}
+
+function canonicalRecentDisplayName(record) {
+  const endpoint = String(record?.endpoint || "").toLowerCase();
+  if (endpoint === "/api/prod-contacts/latest.json" || endpoint === "/api/prod-contacts/latest.csv") {
+    return String(record?.displayName || "Latest Prod Contacts");
+  }
+  if (
+    endpoint === "/api/staging-contacts/latest.json" ||
+    endpoint === "/api/staging-contacts/latest.csv" ||
+    endpoint === "/api/staging-accounts/latest.json" ||
+    endpoint === "/api/staging-accounts/latest.csv"
+  ) {
+    return String(record?.displayName || "Latest Contacts");
+  }
+  return String(record?.displayName || record?.name || "");
 }
 
 function setLoadedDatasetSource({ endpoint = "", fileName = "", displayName = "", objectType = state.objectType, format = "", contractVersion = "", metadata = {}, orgAlias = "", instanceUrl = "" } = {}) {
@@ -2149,60 +2184,6 @@ async function compactOversizedRecentFiles(db, records) {
 
   await transactionDone(transaction);
   return true;
-}
-
-async function migrateLegacyProdContactsRecentFiles() {
-  const db = await openFileHistoryDb();
-  const records = await getAllRecentFiles(db);
-  const prodContactRecords = records.filter((record) => {
-    const name = String(record?.name || "");
-    const endpoint = String(record?.endpoint || "");
-    const displayName = String(record?.displayName || "").toLowerCase();
-    return (
-      record?.objectType === "contact" &&
-      !endpoint &&
-      (
-        name === "salesforce-prod-contacts-latest.json" ||
-        name === "salesforce-prod-contacts-latest.csv" ||
-        (name === "salesforce-report-latest.json" && displayName.includes("prod")) ||
-        (name === "salesforce-report-latest.csv" && displayName.includes("prod"))
-      )
-    );
-  });
-
-  if (!prodContactRecords.length) return false;
-
-  const transaction = db.transaction(FILE_HISTORY_STORE, "readwrite");
-  const store = transaction.objectStore(FILE_HISTORY_STORE);
-  let migrated = false;
-
-  for (const record of prodContactRecords) {
-    const endpoint = legacyProdContactsEndpointForRecord(record);
-    if (!endpoint) continue;
-
-    store.delete(record.id);
-    store.put({
-      ...record,
-      id: recentFileId(record.objectType, record.name, endpoint),
-      endpoint,
-      displayName: record.displayName || "Latest Prod Contacts"
-    });
-    migrated = true;
-  }
-
-  await transactionDone(transaction);
-  return migrated;
-}
-
-function legacyProdContactsEndpointForRecord(record) {
-  const name = String(record?.name || "");
-  if (name === "salesforce-prod-contacts-latest.csv" || name === "salesforce-report-latest.csv") {
-    return "/api/prod-contacts/latest.csv";
-  }
-  if (name === "salesforce-prod-contacts-latest.json" || name === "salesforce-report-latest.json") {
-    return "/api/prod-contacts/latest.json";
-  }
-  return "";
 }
 
 function recentEndpointForRecord(record) {
@@ -9844,8 +9825,13 @@ function latestContactsSourceFromRecentFiles() {
   const recent = (state.recentFiles || [])
     .filter((record) => {
       if (!record?.endpoint || normalizeObjectType(record.objectType) !== "contact") return false;
-      const text = `${record.endpoint} ${record.displayName || ""} ${record.name || ""}`.toLowerCase();
-      return text.includes("staging-contacts") || text.includes("prod-contacts") || text.includes("latest contacts");
+      const endpoint = String(record.endpoint || "").toLowerCase();
+      return (
+        endpoint === "/api/staging-contacts/latest.json" ||
+        endpoint === "/api/staging-contacts/latest.csv" ||
+        endpoint === "/api/prod-contacts/latest.json" ||
+        endpoint === "/api/prod-contacts/latest.csv"
+      );
     })
     .sort((left, right) => {
       const leftJson = String(left.format || left.name || left.endpoint || "").toLowerCase().endsWith(".json") || String(left.format || "").toLowerCase() === "json";
