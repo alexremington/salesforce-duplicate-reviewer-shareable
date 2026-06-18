@@ -61,6 +61,10 @@ The repo-local custom agents live under `.codex/agents/`, and the reusable workf
 
 New development-task prompts are hook-enforced through `.codex/config.toml`, so no special `agentic-delivery` prefix is required. For visible UI work, mention `Hume` only when design direction is still unresolved or you want design review.
 
+OpenSpec follows the workspace-level policy in `/Users/aremington/codex-workspace/AGENTS.md`. For user-visible, behavior-changing, cross-cutting, launcher/runtime, or multi-session work, create or update the required OpenSpec proposal, spec delta or capability spec, implementation tasks, and any behavior-affecting technical decisions before coding.
+
+For plan-to-implementation work that moves to a fresh session, use the shared handoff format in `/Users/aremington/codex-workspace/apps/automation-shared-resources/docs/SESSION-HANDOFF.md` and keep the packet concise enough that the next session can restate the plan without rereading the full thread.
+
 ## Testing Ladder
 
 Use the shortest proof that still matches the failure mode, then escalate only if the first layer is insufficient.
