@@ -313,7 +313,7 @@
       "id": "prod-accounts-autoload",
       "title": "Prod Accounts Autoload",
       "app": "salesforce-duplicate-reviewer",
-      "status": "in-progress",
+      "status": "complete",
       "visibleUi": false,
       "brief": "docs/features/prod-accounts-autoload.md",
       "requirements": [
@@ -338,22 +338,25 @@
         {
           "name": "Fast checks",
           "command": "npm run check",
-          "status": "pending"
+          "status": "passed",
+          "evidence": "npm run check passed in the release pipeline on 2026-06-18."
         },
         {
           "name": "Cross-platform check",
           "command": "npm run check:windows",
-          "status": "pending"
+          "status": "passed",
+          "evidence": "npm run check:windows passed on 2026-06-18."
         },
         {
           "name": "Targeted Playwright smoke",
           "command": "npm run smoke:ui:local",
-          "status": "pending"
+          "status": "passed",
+          "evidence": "npm run smoke:ui:local passed on 2026-06-18."
         }
       ],
       "crossPlatform": {
-        "mac": "pending",
-        "windows": "pending"
+        "mac": "passed",
+        "windows": "passed"
       },
       "risks": [
         "A stale runtime or missing latest-file endpoint could still leave the prod Accounts handoff pointing at the wrong dataset."
@@ -363,7 +366,7 @@
         "notes": "No visible UI redesign; preserve the existing loading and review layout."
       },
       "createdAt": "2026-06-18T00:00:00.000Z",
-      "updatedAt": "2026-06-18T00:00:00.000Z"
+      "updatedAt": "2026-06-18T20:14:00.000Z"
     },
     {
       "id": "salesforce-org-selector-reflow",
