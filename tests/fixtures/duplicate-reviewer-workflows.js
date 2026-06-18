@@ -354,7 +354,7 @@ function accountCompanyNormalizationSmokeCsv() {
 function accountCommentaryNormalizationSmokeCsv() {
   return csvRows([
     ["Id", "Name", "Website", "Phone", "Billing Street", "Billing City", "Billing State", "Billing Postal Code", "Billing Country"],
-    ["001N00000000011", "Northstar Analytics (FKA)", "", "(415) 555-2200", "", "", "", "", "United States"],
+    ["001N00000000011", "Northstar Analytics - FKA Legacy Northstar", "", "(415) 555-2200", "", "", "", "", "United States"],
     ["001N00000000012", "Northstar Analytics", "", "(415) 555-2200", "", "", "", "", "United States"]
   ]);
 }
