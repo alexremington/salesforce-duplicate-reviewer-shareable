@@ -5,17 +5,27 @@ These instructions apply to this repository and its subdirectories.
 ## Product Goals
 
 - Build inside the existing app and preserve the current workflow unless the user explicitly asks for a separate prototype.
-- When changes are intended for both audiences, keep the private branch and approved public-safe shareable branch aligned through the mirror worktree flow instead of direct `main -> public/main` pushes.
+- Keep the private branch and shareable branch in sync when changes are intended for both audiences.
 - Keep the app portable for both macOS and Windows users.
+- Never use demo data without labeling it explicitly as `demo data`, and never mix demo data with production data in the same view, response, runtime, or workflow. If the app can switch between demo and live sources, label the active source clearly and keep those datasets isolated.
 
 ## Front-End Design
 
 - Prioritize clean, legible UI and familiar controls.
+- Default new UI work to `Radix UI` primitives plus `shadcn/ui` components unless the repo already has an established design system.
 - Use commonly understood graphical icons in place of text where an icon is clearer.
 - Use common input patterns for user-provided data: selects for option sets, toggles or checkboxes for booleans, numeric inputs or steppers for numbers, and time selectors for clock times.
 - Unless specifically requested otherwise, distribute whitespace evenly within and between UI elements.
 - Prioritize legibility over density. Labels, buttons, cards, panels, headers, and form controls should feel balanced, readable, and intentionally placed rather than cramped or visually uneven.
 - Never permit visible text or controls to extend below the viewport while scrolling is prohibited. If content can exceed the viewport, the page or the containing pane must provide a clear, working scroll path. Hidden overflow on primary content regions is a cardinal UX violation unless the clipped region is purely decorative and contains no user-facing content.
+
+Shared UI stack policy:
+
+- Use `Radix UI` for interaction primitives and accessibility-sensitive controls.
+- Use `shadcn/ui` for app-level component scaffolding and common patterns.
+- Keep styling localized and token-driven so themes can vary by app without changing behavior.
+- Add thin internal wrappers only when they enforce shared patterns or reduce repetition.
+- Avoid introducing a competing design system unless a repo-specific constraint clearly requires it.
 
 ## Cross-Platform Rules
 
@@ -32,6 +42,13 @@ These instructions apply to this repository and its subdirectories.
 - Launcher changes must reject or restart stale runtime processes when feature or API contract versions do not match the current source.
 - Use Playwright for smoke testing. Do not attempt to use the Codex in-app browser for smoke tests; the repo Playwright harness is the source of truth for rendered smoke validation.
 - Smoke coverage should exercise primary buttons and fail on scroll traps, hidden overflowing content, layout overlap, and nonfunctional controls.
+
+## Duplicate Reviewer Contract Debugging
+
+- Separate file ingest, normalization, matching, and autoload handoff into distinct stages when diagnosing failures; prove the stage that is actually broken.
+- For large imports or slow loads, do not use a tiny smoke fixture as proof that production-sized exports are healthy; add a threshold or large-file regression that exercises the real failure mode.
+- If the launcher runtime may be stale, verify the served bundle or copied runtime before trusting the checkout.
+- When a behavior change affects import, matching, or autoload flow, add a named regression that proves the real user gesture path in the launched UI.
 
 ## Pre-Commit Preflight
 
@@ -84,6 +101,7 @@ For brittle interaction work, check `elementFromPoint`, bounding boxes, overlap,
 
 Useful reusable skills:
 
+- `live-contract-triage` for repeated source/runtime/downstream contract incidents across scheduler, duplicate reviewer, and token dashboard.
 - `launcher-runtime-triage` for copied-runtime and launcher-backed app drift.
 - `brittle-ui-validation` for hit-testing, overlays, and other false-positive-prone UI work.
 - `visible-change-delivery` for user-visible changes that need design, regression, and release discipline.

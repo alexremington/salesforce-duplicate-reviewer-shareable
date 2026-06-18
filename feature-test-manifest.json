@@ -48,6 +48,12 @@
           "command": "npm run check:windows",
           "status": "passed",
           "evidence": "npm run check:windows passed on 2026-06-17."
+        },
+        {
+          "name": "Release pipeline",
+          "command": "npm run verify:release",
+          "status": "not-applicable",
+          "evidence": "Repo closeout now owns release-pipeline verification."
         }
       ],
       "crossPlatform": {
@@ -59,59 +65,6 @@
       ],
       "createdAt": "2026-06-17T21:55:02.698Z",
       "updatedAt": "2026-06-17T21:55:02.698Z"
-    },
-    {
-      "id": "workspace-export-restore",
-      "title": "Workspace Export and Restore",
-      "app": "salesforce-duplicate-reviewer",
-      "status": "complete",
-      "visibleUi": true,
-      "brief": "docs/features/workspace-export-restore.md",
-      "requirements": [
-        "Keep the current CSV dataset loader as the source of truth for the source records.",
-        "Save the active review state as a single workspace record in browser persistence and export that same record as JSON.",
-        "Restore duplicate/not-duplicate decisions, training labels, field-resolution choices, separated records, merge results, and merge master selections from the workspace JSON.",
-        "Keep the existing Decisions and Labels CSV exports available for downstream workflows and backward compatibility.",
-        "Keep the workspace controls inside the existing Import and Export menus. Do not add a new panel or separate workflow surface."
-      ],
-      "acceptanceCriteria": [
-        "The Import menu includes a Workspace action that opens a JSON file picker.",
-        "The Export menu includes a Workspace action that downloads a JSON file.",
-        "The exported workspace JSON includes the current dataset metadata plus the saved review state.",
-        "Importing a matching workspace file restores the saved review state in a fresh browser context after the same dataset is loaded again.",
-        "The current CSV-based dataset import path still works unchanged.",
-        "The workspace export/import path remains reachable with the existing menu and keyboard behavior on desktop and mobile."
-      ],
-      "fixtures": [
-        "At least one Contacts dataset with duplicate groups and saved review state so the round-trip can prove label and decision restoration.",
-        "Demo data should still load normally even if no workspace file has been exported yet.",
-        "No Salesforce write action is required; this is a local JSON handoff for review state."
-      ],
-      "tests": [
-        {
-          "name": "Fast checks",
-          "command": "npm run check",
-          "status": "passed",
-          "evidence": "npm run check passed on 2026-06-09."
-        },
-        {
-          "name": "Targeted Playwright smoke",
-          "command": "npm run smoke:ui:local",
-          "status": "passed",
-          "evidence": "npm run smoke:ui:local passed on 2026-06-09."
-        }
-      ],
-      "crossPlatform": {
-        "mac": "passed",
-        "windows": "passed"
-      },
-      "risks": [],
-      "humeDesign": {
-        "reviewed": true,
-        "notes": "Keep the workspace actions inside the existing Import and Export menus. Do not add a new panel or separate workflow surface, and preserve the current topbar layout and scroll model."
-      },
-      "createdAt": "2026-06-09T20:00:00Z",
-      "updatedAt": "2026-06-09T20:00:00Z"
     },
     {
       "id": "dataset-export-with-scores",
@@ -171,6 +124,73 @@
       },
       "createdAt": "2026-06-04T18:54:01.327Z",
       "updatedAt": "2026-06-09T16:00:00Z"
+    },
+    {
+      "id": "duplicate-reviewer-pull-efficiency-path",
+      "title": "Duplicate Reviewer Pull Efficiency Path",
+      "app": "salesforce-duplicate-reviewer",
+      "status": "complete",
+      "visibleUi": true,
+      "brief": "docs/features/duplicate-reviewer-pull-efficiency-path.md",
+      "requirements": [
+        "Fail fast before expensive Salesforce pull work when auth freshness or runtime alignment is not usable.",
+        "Expose auth freshness and runtime alignment in /api/health.",
+        "Resolve the requested org through the canonical shared catalog at the pull boundary.",
+        "Reuse an in-flight pull for the same canonical org plus source signature.",
+        "Reuse a recently completed pull for the same canonical org plus source signature for a short time window.",
+        "Keep the read-only instance URL display and existing apply flow intact.",
+        "Surface compact blocked or ready feedback in the existing workflow surface instead of adding a new admin view."
+      ],
+      "acceptanceCriteria": [
+        "/api/health reports both auth freshness and runtime alignment.",
+        "A stale auth state blocks the pull path before the Salesforce job starts.",
+        "A matching in-flight pull request reuses the first request instead of starting a duplicate query.",
+        "A matching recent pull request reuses the latest cached result when the short-lived reuse window is still valid.",
+        "Canonical org resolution prefers the shared catalog alias and does not regress the existing read-only instance URL display or apply flow.",
+        "The compact status summary is visible in the normal workflow surface and clearly explains blocked versus ready state."
+      ],
+      "humeDesign": {
+        "reviewed": true,
+        "notes": "Use the existing Source rail and status affordances. Keep the new feedback compact, accessible, and inline with the current org selector surface."
+      },
+      "fixtures": [
+        "A canonical staging org, a legacy staging alias that resolves to the canonical alias, and a synthetic repeated pull signature.",
+        "Fake Salesforce CLI and fake org catalog fixtures for contract tests.",
+        "Live pull wrappers should still resolve orgs through Salesforce CLI and reuse the same output when the signature matches."
+      ],
+      "tests": [
+        {
+          "name": "Fast checks",
+          "command": "npm run check",
+          "status": "passed",
+          "evidence": "npm run check passed on 2026-06-15."
+        },
+        {
+          "name": "Cross-platform check",
+          "command": "npm run check:windows",
+          "status": "passed",
+          "evidence": "npm run check:windows passed on 2026-06-15."
+        },
+        {
+          "name": "Targeted Playwright smoke",
+          "command": "npm run smoke:ui:local",
+          "status": "passed",
+          "evidence": "npm run smoke:ui:local passed on 2026-06-15."
+        },
+        {
+          "name": "Release pipeline",
+          "command": "npm run verify:release",
+          "status": "passed",
+          "evidence": "npm run closeout passed after the manifest and brief statuses were synchronized on 2026-06-15."
+        }
+      ],
+      "crossPlatform": {
+        "mac": "passed",
+        "windows": "passed"
+      },
+      "risks": [],
+      "createdAt": "2026-06-15T18:55:04.987Z",
+      "updatedAt": "2026-06-15T19:24:52.000Z"
     },
     {
       "id": "merge-preview-confirmation",
