@@ -227,6 +227,354 @@
       "risks": [],
       "createdAt": "2026-06-03T21:15:03.021Z",
       "updatedAt": "2026-06-09T16:00:00Z"
+    },
+    {
+      "id": "prod-contacts-autoload",
+      "title": "Prod Contacts Autoload",
+      "app": "salesforce-duplicate-reviewer",
+      "status": "complete",
+      "visibleUi": false,
+      "brief": "docs/features/prod-contacts-autoload.md",
+      "requirements": [
+        "Add a prod Contacts autoload source alongside the existing staging autoload source.",
+        "Expose the prod latest Contacts JSON and CSV endpoints from the server.",
+        "Route the reviewer server to the canonical Duplicate Reviewer/prod output tree when the prod launcher starts.",
+        "Repair any legacy download-prefixed prod output into the canonical prod tree before the reviewer opens.",
+        "Seed the prod latest file into Recent files when the reviewer launches server-backed.",
+        "Keep staging Contacts and Accounts autoload behavior unchanged."
+      ],
+      "acceptanceCriteria": [
+        "autoload=prod-contacts loads the expected prod latest Contacts dataset and labels it as the prod latest file.",
+        "The app can fetch /api/prod-contacts/latest.json and /api/prod-contacts/latest.csv.",
+        "The prod launcher and server both resolve the canonical Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts path.",
+        "The prod launcher repairs any legacy download-prefixed prod output before opening the reviewer.",
+        "The prod latest file is available in recent files with a clear prod label.",
+        "The staging autoload path still works."
+      ],
+      "fixtures": [
+        "A prod Contacts JSON export with Contact rows.",
+        "A prod Contacts CSV fallback for the same dataset."
+      ],
+      "tests": [
+        {
+          "name": "Fast checks",
+          "command": "npm run check",
+          "status": "passed",
+          "evidence": "npm run check passed on 2026-06-16."
+        },
+        {
+          "name": "Cross-platform check",
+          "command": "npm run check:windows",
+          "status": "passed",
+          "evidence": "npm run check:windows passed on 2026-06-16."
+        },
+        {
+          "name": "Targeted Playwright smoke",
+          "command": "npm run smoke:ui:local",
+          "status": "passed",
+          "evidence": "npm run smoke:ui:local passed on 2026-06-16."
+        }
+      ],
+      "crossPlatform": {
+        "mac": "passed",
+        "windows": "passed"
+      },
+      "risks": [
+        "The new prod source must stay isolated from the existing staging dataset labels and endpoints."
+      ],
+      "humeDesign": {
+        "reviewed": false,
+        "notes": "No visible UI redesign; preserve the existing loading and review layout."
+      },
+      "createdAt": "2026-06-15T00:00:00.000Z",
+      "updatedAt": "2026-06-15T00:00:00.000Z"
+    },
+    {
+      "id": "prod-accounts-autoload",
+      "title": "Prod Accounts Autoload",
+      "app": "salesforce-duplicate-reviewer",
+      "status": "complete",
+      "visibleUi": false,
+      "brief": "docs/features/prod-accounts-autoload.md",
+      "requirements": [
+        "Add a prod Accounts autoload source alongside the existing staging autoload sources.",
+        "Expose the prod latest Accounts JSON and CSV endpoints from the server.",
+        "Route the reviewer server to the canonical Duplicate Reviewer/prod output tree when the prod Accounts launcher starts.",
+        "Keep the prod Accounts launcher on the raw report-latest filenames and fresh-runtime handoff.",
+        "Seed the prod latest file into Recent files when the reviewer launches server-backed."
+      ],
+      "acceptanceCriteria": [
+        "autoload=prod-accounts loads the expected prod latest Accounts dataset and labels it as the prod latest file.",
+        "The app can fetch /api/prod-accounts/latest.json and /api/prod-accounts/latest.csv.",
+        "The prod launcher and server both resolve the canonical Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-accounts path.",
+        "The prod latest file is available in recent files with a clear prod label.",
+        "The staging autoload path still works."
+      ],
+      "fixtures": [
+        "A prod Accounts JSON export with Account rows.",
+        "A prod Accounts CSV fallback for the same dataset."
+      ],
+      "tests": [
+        {
+          "name": "Fast checks",
+          "command": "npm run check",
+          "status": "passed",
+          "evidence": "npm run check passed in the release pipeline on 2026-06-18."
+        },
+        {
+          "name": "Cross-platform check",
+          "command": "npm run check:windows",
+          "status": "passed",
+          "evidence": "npm run check:windows passed on 2026-06-18."
+        },
+        {
+          "name": "Targeted Playwright smoke",
+          "command": "npm run smoke:ui:local",
+          "status": "passed",
+          "evidence": "npm run smoke:ui:local passed on 2026-06-18."
+        }
+      ],
+      "crossPlatform": {
+        "mac": "passed",
+        "windows": "passed"
+      },
+      "risks": [
+        "A stale runtime or missing latest-file endpoint could still leave the prod Accounts handoff pointing at the wrong dataset."
+      ],
+      "humeDesign": {
+        "reviewed": false,
+        "notes": "No visible UI redesign; preserve the existing loading and review layout."
+      },
+      "createdAt": "2026-06-18T00:00:00.000Z",
+      "updatedAt": "2026-06-18T20:14:00.000Z"
+    },
+    {
+      "id": "salesforce-org-selector-reflow",
+      "title": "Salesforce Org Selector Reflow",
+      "app": "salesforce-duplicate-reviewer",
+      "status": "complete",
+      "visibleUi": true,
+      "brief": "docs/features/salesforce-org-selector-reflow.md",
+      "requirements": [
+        "Keep the Salesforce org selector inside the existing Source rail.",
+        "Keep the rail as a contained column so long org labels and URLs do not widen into the workspace pane.",
+        "Preserve the existing file import workflow, recent files list, and collapse toggles.",
+        "Provide a clear scroll path when the left rail contents exceed the viewport.",
+        "Keep the org selector compact and truncation-safe on desktop, with readable stacking behavior on narrow screens."
+      ],
+      "acceptanceCriteria": [
+        "The Source rail no longer overlaps the workspace column at supported desktop and mobile widths.",
+        "The Source, Match Controls, and Match Groups collapse toggles remain visible and clickable after the org selector renders.",
+        "The left rail scrolls when its contents exceed the viewport instead of pushing controls offscreen without a scroll path.",
+        "Long org labels, aliases, and instance URLs remain usable without widening the rail.",
+        "Existing import, match, and merge behavior remains unchanged."
+      ],
+      "fixtures": [
+        "At least one loaded dataset with a selected Salesforce org and at least one long org label or URL value to exercise the truncation-safe layout.",
+        "No demo-only fallback should alter the org selector layout.",
+        "The org selector must continue to drive the same Salesforce org-scoped requests as before."
+      ],
+      "tests": [
+        {
+          "name": "Fast checks",
+          "command": "npm run check",
+          "status": "passed",
+          "evidence": "npm run check passed on 2026-06-12."
+        },
+        {
+          "name": "Targeted Playwright smoke",
+          "command": "npm run smoke:ui:local",
+          "status": "passed",
+          "evidence": "npm run smoke:ui:local passed on 2026-06-12."
+        },
+        {
+          "name": "Cross-platform smoke",
+          "command": "npm run check:windows",
+          "status": "passed",
+          "evidence": "npm run check:windows passed on 2026-06-12."
+        }
+      ],
+      "crossPlatform": {
+        "mac": "passed",
+        "windows": "passed"
+      },
+      "risks": [],
+      "humeDesign": {
+        "reviewed": true,
+        "notes": "Reviewed in docs/HUME-DESIGN-REVIEW.md under Salesforce Org Selector Reflow. Keep the selector inline in Source, make the rail scrollable instead of expanding, and keep collapse toggles reachable."
+      },
+      "createdAt": "2026-06-12T13:00:00Z",
+      "updatedAt": "2026-06-12T17:38:00Z"
+    },
+    {
+      "id": "salesforce-org-selector-simplification",
+      "title": "Salesforce Org Selector Simplification",
+      "app": "salesforce-duplicate-reviewer",
+      "status": "complete",
+      "visibleUi": true,
+      "brief": "docs/features/salesforce-org-selector-simplification.md",
+      "requirements": [
+        "Keep the selector inside the existing Source rail.",
+        "Render shared org catalog choices as alias-only options.",
+        "Remove the separate editable Alias field from the inline selector.",
+        "Render the instance URL as a clearly labeled read-only display control.",
+        "Preserve the apply flow and mismatch behavior when a catalog org is selected.",
+        "Remove the display cap so every available org entry can render."
+      ],
+      "acceptanceCriteria": [
+        "The Source rail shows an alias-only shared org catalog dropdown.",
+        "The Alias input is no longer present in the selector.",
+        "The instance URL is visible but not editable.",
+        "Selecting a catalog org and pressing Use org updates the active target org and mismatch warning state.",
+        "The dropdown renders every available catalog entry without truncating the list at five items.",
+        "The selector remains compact, scrollable, and hit-testable at supported desktop and mobile widths."
+      ],
+      "fixtures": [
+        "At least six complete Salesforce org profiles, one matching the loaded dataset source and several others to verify the list is uncapped.",
+        "A loaded dataset whose source org metadata can be compared against the selected target org.",
+        "No demo-only fallback should alter the selector layout."
+      ],
+      "tests": [
+        {
+          "name": "Fast checks",
+          "command": "npm run check",
+          "status": "passed",
+          "evidence": "npm run check passed on 2026-06-12."
+        },
+        {
+          "name": "Cross-platform check",
+          "command": "npm run check:windows",
+          "status": "passed",
+          "evidence": "npm run check:windows passed on 2026-06-12."
+        },
+        {
+          "name": "Targeted Playwright smoke",
+          "command": "npm run smoke:ui:local",
+          "status": "passed",
+          "evidence": "npm run smoke:ui:local passed on 2026-06-12."
+        }
+      ],
+      "crossPlatform": {
+        "mac": "passed",
+        "windows": "passed"
+      },
+      "risks": [],
+      "humeDesign": {
+        "reviewed": true,
+        "notes": "Reviewed in docs/HUME-DESIGN-REVIEW.md under Salesforce Org Selector Simplification. Keep the selector inline in Source, use an alias-only dropdown, and render the instance URL read-only."
+      },
+      "createdAt": "2026-06-12T00:00:00Z",
+      "updatedAt": "2026-06-12T00:00:00Z"
+    },
+    {
+      "id": "salesforce-staging-alias-canonicalization",
+      "title": "Salesforce Staging Alias Canonicalization",
+      "app": "salesforce-duplicate-reviewer",
+      "status": "complete",
+      "visibleUi": true,
+      "brief": "docs/features/salesforce-staging-alias-canonicalization.md",
+      "requirements": [
+        "Treat politico-staging as the canonical alias for the staging sandbox.",
+        "Collapse any legacy staging org references onto politico-staging before the selector renders.",
+        "Keep the existing instance URL, org ID, and username attached to the canonical profile.",
+        "Normalize persisted preferences, imported job metadata, and source-derived metadata to the canonical alias.",
+        "Keep the dropdown alias-only and preserve the read-only instance URL display."
+      ],
+      "acceptanceCriteria": [
+        "The org catalog returns one staging entry labeled politico-staging instead of a separate legacy staging option.",
+        "The org selector never renders staging as a distinct dropdown choice.",
+        "Existing saved or imported staging references are rewritten to politico-staging when loaded by the app.",
+        "The active staging sandbox still resolves to the same instance URL and auth target.",
+        "The mismatch warning and apply flow continue to work after canonicalization."
+      ],
+      "fixtures": [
+        "A loaded dataset or saved preference that still contains a legacy staging alias.",
+        "A shared org catalog entry for the same sandbox using the canonical politico-staging alias."
+      ],
+      "tests": [
+        {
+          "name": "Fast checks",
+          "command": "npm run check",
+          "status": "passed",
+          "evidence": "npm run check passed on 2026-06-12."
+        },
+        {
+          "name": "Cross-platform check",
+          "command": "npm run check:windows",
+          "status": "passed",
+          "evidence": "npm run check:windows passed on 2026-06-12."
+        },
+        {
+          "name": "Targeted Playwright smoke",
+          "command": "npm run smoke:ui:local",
+          "status": "passed",
+          "evidence": "npm run smoke:ui:local passed on 2026-06-12."
+        }
+      ],
+      "crossPlatform": {
+        "mac": "passed",
+        "windows": "passed"
+      },
+      "risks": [],
+      "humeDesign": {
+        "reviewed": true,
+        "notes": "This change reuses the existing selector design; no new UI direction was introduced."
+      },
+      "createdAt": "2026-06-12T19:15:35Z",
+      "updatedAt": "2026-06-12T19:15:35Z"
+    },
+    {
+      "id": "workspace-export-restore",
+      "title": "Workspace Export and Restore",
+      "app": "salesforce-duplicate-reviewer",
+      "status": "complete",
+      "visibleUi": true,
+      "brief": "docs/features/workspace-export-restore.md",
+      "requirements": [
+        "Keep the current CSV dataset loader as the source of truth for the source records.",
+        "Save the active review state as a single workspace record in browser persistence and export that same record as JSON.",
+        "Restore duplicate/not-duplicate decisions, training labels, field-resolution choices, separated records, merge results, and merge master selections from the workspace JSON.",
+        "Keep the existing Decisions and Labels CSV exports available for downstream workflows and backward compatibility.",
+        "Keep the workspace controls inside the existing Import and Export menus. Do not add a new panel or separate workflow surface."
+      ],
+      "acceptanceCriteria": [
+        "The Import menu includes a Workspace action that opens a JSON file picker.",
+        "The Export menu includes a Workspace action that downloads a JSON file.",
+        "The exported workspace JSON includes the current dataset metadata plus the saved review state.",
+        "Importing a matching workspace file restores the saved review state in a fresh browser context after the same dataset is loaded again.",
+        "The current CSV-based dataset import path still works unchanged.",
+        "The workspace export/import path remains reachable with the existing menu and keyboard behavior on desktop and mobile."
+      ],
+      "fixtures": [
+        "At least one Contacts dataset with duplicate groups and saved review state so the round-trip can prove label and decision restoration.",
+        "Demo data should still load normally even if no workspace file has been exported yet.",
+        "No Salesforce write action is required; this is a local JSON handoff for review state."
+      ],
+      "tests": [
+        {
+          "name": "Fast checks",
+          "command": "npm run check",
+          "status": "passed",
+          "evidence": "npm run check passed on 2026-06-09."
+        },
+        {
+          "name": "Targeted Playwright smoke",
+          "command": "npm run smoke:ui:local",
+          "status": "passed",
+          "evidence": "npm run smoke:ui:local passed on 2026-06-09."
+        }
+      ],
+      "crossPlatform": {
+        "mac": "passed",
+        "windows": "passed"
+      },
+      "risks": [],
+      "humeDesign": {
+        "reviewed": true,
+        "notes": "Keep the workspace actions inside the existing Import and Export menus. Do not add a new panel or separate workflow surface, and preserve the current topbar layout and scroll model."
+      },
+      "createdAt": "2026-06-09T20:00:00Z",
+      "updatedAt": "2026-06-09T20:00:00Z"
     }
   ]
 }
