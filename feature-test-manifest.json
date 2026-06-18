@@ -310,6 +310,62 @@
       "updatedAt": "2026-06-15T00:00:00.000Z"
     },
     {
+      "id": "prod-accounts-autoload",
+      "title": "Prod Accounts Autoload",
+      "app": "salesforce-duplicate-reviewer",
+      "status": "in-progress",
+      "visibleUi": false,
+      "brief": "docs/features/prod-accounts-autoload.md",
+      "requirements": [
+        "Add a prod Accounts autoload source alongside the existing staging autoload sources.",
+        "Expose the prod latest Accounts JSON and CSV endpoints from the server.",
+        "Route the reviewer server to the canonical Duplicate Reviewer/prod output tree when the prod Accounts launcher starts.",
+        "Keep the prod Accounts launcher on the raw report-latest filenames and fresh-runtime handoff.",
+        "Seed the prod latest file into Recent files when the reviewer launches server-backed."
+      ],
+      "acceptanceCriteria": [
+        "autoload=prod-accounts loads the expected prod latest Accounts dataset and labels it as the prod latest file.",
+        "The app can fetch /api/prod-accounts/latest.json and /api/prod-accounts/latest.csv.",
+        "The prod launcher and server both resolve the canonical Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-accounts path.",
+        "The prod latest file is available in recent files with a clear prod label.",
+        "The staging autoload path still works."
+      ],
+      "fixtures": [
+        "A prod Accounts JSON export with Account rows.",
+        "A prod Accounts CSV fallback for the same dataset."
+      ],
+      "tests": [
+        {
+          "name": "Fast checks",
+          "command": "npm run check",
+          "status": "pending"
+        },
+        {
+          "name": "Cross-platform check",
+          "command": "npm run check:windows",
+          "status": "pending"
+        },
+        {
+          "name": "Targeted Playwright smoke",
+          "command": "npm run smoke:ui:local",
+          "status": "pending"
+        }
+      ],
+      "crossPlatform": {
+        "mac": "pending",
+        "windows": "pending"
+      },
+      "risks": [
+        "A stale runtime or missing latest-file endpoint could still leave the prod Accounts handoff pointing at the wrong dataset."
+      ],
+      "humeDesign": {
+        "reviewed": false,
+        "notes": "No visible UI redesign; preserve the existing loading and review layout."
+      },
+      "createdAt": "2026-06-18T00:00:00.000Z",
+      "updatedAt": "2026-06-18T00:00:00.000Z"
+    },
+    {
       "id": "salesforce-org-selector-reflow",
       "title": "Salesforce Org Selector Reflow",
       "app": "salesforce-duplicate-reviewer",

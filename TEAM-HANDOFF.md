@@ -16,6 +16,8 @@ For duplicate-label exports, double-click `Launch Duplicate Labels Export - Mac.
 
 For prod Contacts review, run `scripts/run-prod-contacts-bulk-query.sh` after the prod pull completes. It opens Duplicate Reviewer on the `prod-contacts` autoload route with `object=contact`, `notify=1`, `sticky=1`, and `name=salesforce-report-latest.json`, keeps the prod latest files separate from staging through source-aware recent-file metadata, and logs whether the reviewer server was reused or started fresh.
 
+For prod Accounts review, run `scripts/run-prod-accounts-bulk-query.sh` after the prod pull completes. It opens Duplicate Reviewer on the `prod-accounts` autoload route with `object=account`, `notify=1`, `sticky=1`, and `name=salesforce-report-latest.json`, keeps the prod latest files separate from staging through source-aware recent-file metadata, and logs whether the reviewer server was reused or started fresh.
+
 If mirror reconciliation needs temporary worktrees, scratch repos, or helper links, treat them as disposable repair state and remove them before handoff.
 
 Use the launcher for normal server-backed work. When latest Contact or Account exports exist under `Output/`, the app adds them to `Recent files` automatically.

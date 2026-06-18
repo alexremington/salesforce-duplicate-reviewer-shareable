@@ -111,6 +111,7 @@ Write-Host 'Checking staging routing defaults...'
 $contactsOutDir = 'C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts'
 $accountsOutDir = 'C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-accounts'
 $prodContactsOutDir = 'C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts'
+$prodAccountsOutDir = 'C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-accounts'
 $env:OUT_DIR = $contactsOutDir
 $contactsDryRun = (& scripts/run-staging-contacts-bulk-query.sh --dry-run) -join "`n"
 if ($contactsDryRun -notmatch '/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts') {
@@ -154,6 +155,50 @@ if ($prodContactsDryRun -notmatch 'Latest JSON: .*/Salesforce Pulls/Duplicate Re
 if ($prodContactsDryRun -notmatch 'Compatibility CSV: .*/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/salesforce-report-latest.csv') {
   Write-Host $prodContactsDryRun
   throw 'Prod Contacts did not preserve the canonical prod compatibility CSV output flow.'
+}
+$env:OUT_DIR = $prodAccountsOutDir
+$prodAccountsDryRun = (& scripts/run-prod-accounts-bulk-query.sh --dry-run) -join "`n"
+if ($prodAccountsDryRun -notmatch '/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-accounts') {
+  Write-Host $prodAccountsDryRun
+  throw 'Prod Accounts did not resolve to the canonical Salesforce Pulls prod folder.'
+}
+if ($prodAccountsDryRun -notmatch 'Org alias: politico') {
+  Write-Host $prodAccountsDryRun
+  throw 'Prod Accounts did not use the canonical prod Salesforce org alias.'
+}
+if ($prodAccountsDryRun -notmatch 'Instance: https://politico.my.salesforce.com') {
+  Write-Host $prodAccountsDryRun
+  throw 'Prod Accounts did not use the canonical prod Salesforce instance URL.'
+}
+if ($prodAccountsDryRun -notmatch 'SOQL file: .*/queries/report-00OVZ000003Dm572AC.soql') {
+  Write-Host $prodAccountsDryRun
+  throw 'Prod Accounts did not use the canonical prod Accounts query file.'
+}
+if ($prodAccountsDryRun -notmatch 'Latest JSON: C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-accounts/salesforce-report-latest.json') {
+  Write-Host $prodAccountsDryRun
+  throw 'Prod Accounts did not preserve the canonical prod latest JSON output flow.'
+}
+if ($prodAccountsDryRun -notmatch 'Compatibility CSV: C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-accounts/salesforce-report-latest.csv') {
+  Write-Host $prodAccountsDryRun
+  throw 'Prod Accounts did not preserve the canonical prod compatibility CSV output flow.'
+}
+if ((Get-Content scripts/run-prod-accounts-bulk-query.sh -Raw) -notmatch 'autoload_url="\$\{reviewer_url\}/\?autoload=prod-accounts&object=account&notify=1&sticky=1&name=\$\{LATEST_JSON_NAME\}"') {
+  throw 'Prod Accounts launcher did not open Duplicate Reviewer with the expected prod handoff URL.'
+}
+if ((Get-Content scripts/run-prod-accounts-bulk-query.sh -Raw) -match 'prod-accounts-output-repair\.js') {
+  throw 'Prod Accounts launcher still depends on the legacy repair helper.'
+}
+if ((Get-Content scripts/run-prod-accounts-bulk-query.sh -Raw) -notmatch 'reviewer_launch_output="\$\("\$\{PROJECT_DIR\}/scripts/start-reviewer-server.sh" --force-refresh\)"') {
+  throw 'Prod Accounts launcher did not force-refresh the reviewer server before opening the URL.'
+}
+if ((Get-Content scripts/run-prod-accounts-bulk-query.sh -Raw) -notmatch 'if ! /usr/bin/open "\$\{autoload_url\}"; then') {
+  throw 'Prod Accounts launcher did not fail when Duplicate Reviewer could not be opened.'
+}
+if ((Get-Content scripts/run-prod-accounts-bulk-query.sh -Raw) -notmatch 'name=\$\{LATEST_JSON_NAME\}') {
+  throw 'Prod Accounts launcher did not target the prod latest JSON file.'
+}
+if ((Get-Content scripts/start-reviewer-server.sh -Raw) -notmatch 'PROD_ACCOUNTS_CSV') {
+  throw 'Reviewer launcher did not pass the canonical prod Accounts CSV path to the server.'
 }
 $prodLauncher = Get-Content scripts/run-prod-contacts-bulk-query.sh -Raw
 if ($prodLauncher -notmatch 'autoload_url="\$\{reviewer_url\}/\?autoload=prod-contacts&object=contact&notify=1&sticky=1&name=\$\{LATEST_JSON_NAME\}"') {

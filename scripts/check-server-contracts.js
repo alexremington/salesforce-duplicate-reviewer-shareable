@@ -73,9 +73,11 @@ async function main() {
   const contactsCsvPath = path.join(tempDir, "contacts-latest.csv");
   const accountsCsvPath = path.join(tempDir, "accounts-latest.csv");
   const prodContactsCsvPath = path.join(tempDir, "prod-contacts-latest.csv");
+  const prodAccountsCsvPath = path.join(tempDir, "prod-accounts-latest.csv");
   await writeSmokeDataset(contactsCsvPath, "003T00000090001", "003T00000090002");
   await writeSmokeDataset(accountsCsvPath, "001T00000090001", "001T00000090002");
   await writeSmokeDataset(prodContactsCsvPath, "003P00000090001", "003P00000090002");
+  await writeSmokeDataset(prodAccountsCsvPath, "001P00000090001", "001P00000090002");
 
   serverProcess = childProcess.spawn(process.execPath, [SERVER_SCRIPT], {
     cwd: PROJECT_DIR,
@@ -87,6 +89,7 @@ async function main() {
       STAGING_CONTACTS_CSV: contactsCsvPath,
       STAGING_ACCOUNTS_CSV: accountsCsvPath,
       PROD_CONTACTS_CSV: prodContactsCsvPath,
+      PROD_ACCOUNTS_CSV: prodAccountsCsvPath,
       SF_CLI_BIN: fakeSalesforceCli,
       SF_ORG_ALIAS: "smoke-org",
       SF_INSTANCE_URL: fakeSalesforceServer.baseUrl,
@@ -108,7 +111,9 @@ async function main() {
     assertEqual(health.salesforceCliWarningSafe, true, "health salesforceCliWarningSafe");
     assertEqual(health.salesforceCliApiVersionEnvIsolated, true, "health salesforceCliApiVersionEnvIsolated");
     assertEqual(health.latestStagingFiles, true, "health latestStagingFiles");
+    assertEqual(health.latestProdFiles, true, "health latestProdFiles");
     assertEqual(health.jsonDatasets, true, "health jsonDatasets");
+    assertEqual(health.prodAccounts, true, "health prodAccounts");
     assertEqual(health.salesforceAuthFresh, true, "health salesforceAuthFresh");
     assertEqual(health.runtimeAligned, true, "health runtimeAligned");
 
@@ -248,14 +253,34 @@ async function assertProdLatestEndpointCaching(baseUrl) {
     throw new Error(`Prod latest JSON cache contract did not preserve prod source metadata: ${response.body}`);
   }
 
+  const accountsResponse = await requestText(`${baseUrl}/api/prod-accounts/latest.json`);
+  if (accountsResponse.statusCode !== 200 || !accountsResponse.body.includes("salesforce-duplicate-reviewer.dataset")) {
+    throw new Error(`Prod Accounts latest JSON cache contract failed: HTTP ${accountsResponse.statusCode}: ${accountsResponse.body}`);
+  }
+
+  const accountsPayload = JSON.parse(accountsResponse.body);
+  if (
+    accountsPayload?.fileName !== "salesforce-report-latest.json" ||
+    accountsPayload?.source?.name !== "Latest Prod Accounts" ||
+    accountsPayload?.source?.orgAlias !== "smoke-prod" ||
+    accountsPayload?.source?.instanceUrl !== fakeSalesforceServer.baseUrl
+  ) {
+    throw new Error(`Prod Accounts latest JSON cache contract did not preserve prod source metadata: ${accountsResponse.body}`);
+  }
+
   const latestFiles = await requestJson(`${baseUrl}/api/prod/latest-files`);
   const files = Array.isArray(latestFiles.files) ? latestFiles.files : [];
   const prodContact = files.find((file) => file.source === "prod-contacts");
+  const prodAccounts = files.find((file) => file.source === "prod-accounts");
   if (
     !prodContact ||
     prodContact.endpoint !== "/api/prod-contacts/latest.json" ||
     prodContact.name !== "salesforce-report-latest.json" ||
-    prodContact.label !== "Latest Prod Contacts"
+    prodContact.label !== "Latest Prod Contacts" ||
+    !prodAccounts ||
+    prodAccounts.endpoint !== "/api/prod-accounts/latest.json" ||
+    prodAccounts.name !== "salesforce-report-latest.json" ||
+    prodAccounts.label !== "Latest Prod Accounts"
   ) {
     throw new Error(`Prod latest-files route failed: ${JSON.stringify(latestFiles)}`);
   }
@@ -514,7 +539,7 @@ async function assertStaticApp(baseUrl) {
   if (
     response.statusCode !== 200 ||
     !response.body.includes("Salesforce Account and Contact Matching") ||
-    !response.body.includes('app.js?v=duplicate-reviewer-cli-warning-safe-v3')
+    !response.body.includes('app.js?v=duplicate-reviewer-cli-warning-safe-v4')
   ) {
     throw new Error(`Static app contract failed: HTTP ${response.statusCode}`);
   }

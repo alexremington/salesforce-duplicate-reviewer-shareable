@@ -154,6 +154,79 @@ if ! grep -Fq 'name=${LATEST_JSON_NAME}' scripts/run-prod-contacts-bulk-query.sh
   echo "Prod Contacts launcher did not target the prod latest JSON file."
   exit 1
 fi
+prodAccountsDryRun="$(scripts/run-prod-accounts-bulk-query.sh --dry-run)"
+case "${prodAccountsDryRun}" in
+  *"/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-accounts"*) ;;
+  *)
+    echo "${prodAccountsDryRun}"
+    echo "Prod Accounts did not resolve to the canonical Salesforce Pulls prod folder."
+    exit 1
+    ;;
+esac
+case "${prodAccountsDryRun}" in
+  *"Org alias: politico"*) ;;
+  *)
+    echo "${prodAccountsDryRun}"
+    echo "Prod Accounts did not use the canonical prod Salesforce org alias."
+    exit 1
+    ;;
+esac
+case "${prodAccountsDryRun}" in
+  *"Instance: https://politico.my.salesforce.com"*) ;;
+  *)
+    echo "${prodAccountsDryRun}"
+    echo "Prod Accounts did not use the canonical prod Salesforce instance URL."
+    exit 1
+    ;;
+esac
+case "${prodAccountsDryRun}" in
+  *"SOQL file: ${PROJECT_DIR}/queries/report-00OVZ000003Dm572AC.soql"*) ;;
+  *)
+    echo "${prodAccountsDryRun}"
+    echo "Prod Accounts did not use the canonical prod Accounts query file."
+    exit 1
+    ;;
+esac
+case "${prodAccountsDryRun}" in
+  *"Latest JSON: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-accounts/salesforce-report-latest.json"*) ;;
+  *)
+    echo "${prodAccountsDryRun}"
+    echo "Prod Accounts did not preserve the canonical prod latest JSON output flow."
+    exit 1
+    ;;
+esac
+case "${prodAccountsDryRun}" in
+  *"Compatibility CSV: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-accounts/salesforce-report-latest.csv"*) ;;
+  *)
+    echo "${prodAccountsDryRun}"
+    echo "Prod Accounts did not preserve the canonical prod compatibility CSV output flow."
+    exit 1
+    ;;
+esac
+if ! grep -Fq 'autoload_url="${reviewer_url}/?autoload=prod-accounts&object=account&notify=1&sticky=1&name=${LATEST_JSON_NAME}"' scripts/run-prod-accounts-bulk-query.sh; then
+  echo "Prod Accounts launcher did not open Duplicate Reviewer with the expected prod handoff URL."
+  exit 1
+fi
+if grep -Fq 'prod-accounts-output-repair.js' scripts/run-prod-accounts-bulk-query.sh; then
+  echo "Prod Accounts launcher still depends on the legacy repair helper."
+  exit 1
+fi
+if ! grep -Fq 'reviewer_launch_output="$("${PROJECT_DIR}/scripts/start-reviewer-server.sh" --force-refresh)"' scripts/run-prod-accounts-bulk-query.sh; then
+  echo "Prod Accounts launcher did not force-refresh the reviewer server before opening the URL."
+  exit 1
+fi
+if ! grep -Fq 'if ! /usr/bin/open "${autoload_url}"; then' scripts/run-prod-accounts-bulk-query.sh; then
+  echo "Prod Accounts launcher did not fail when Duplicate Reviewer could not be opened."
+  exit 1
+fi
+if ! grep -Fq 'name=${LATEST_JSON_NAME}' scripts/run-prod-accounts-bulk-query.sh; then
+  echo "Prod Accounts launcher did not target the prod latest JSON file."
+  exit 1
+fi
+if ! grep -Fq 'PROD_ACCOUNTS_CSV' scripts/start-reviewer-server.sh; then
+  echo "Reviewer launcher did not pass the canonical prod Accounts CSV path to the server."
+  exit 1
+fi
 if ! grep -Fq 'PROD_CONTACTS_CSV' scripts/start-reviewer-server.sh; then
   echo "Reviewer launcher did not pass the canonical prod Contacts CSV path to the server."
   exit 1

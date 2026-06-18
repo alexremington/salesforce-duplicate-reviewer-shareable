@@ -29,6 +29,9 @@ const STAGING_ACCOUNTS_CSV =
 const PROD_CONTACTS_CSV =
   process.env.PROD_CONTACTS_CSV ||
   defaultProdContactsCsvPath();
+const PROD_ACCOUNTS_CSV =
+  process.env.PROD_ACCOUNTS_CSV ||
+  defaultProdAccountsCsvPath();
 const STAGING_SF_ORG_ALIAS = process.env.SF_ORG_ALIAS || "politico-staging";
 const STAGING_SF_INSTANCE_URL = process.env.SF_INSTANCE_URL || "https://politico--staging.sandbox.my.salesforce.com";
 const PROD_SF_ORG_ALIAS = process.env.PROD_SF_ORG_ALIAS || "politico";
@@ -37,7 +40,7 @@ const SF_ORG_ALIAS = STAGING_SF_ORG_ALIAS;
 const SF_INSTANCE_URL = STAGING_SF_INSTANCE_URL;
 const SF_API_VERSION = process.env.SF_API_VERSION || "v67.0";
 const SF_CLI_BIN = String(process.env.SF_CLI_BIN || "").trim();
-const FEATURE_VERSION = "duplicate-reviewer-cli-warning-safe-v3";
+const FEATURE_VERSION = "duplicate-reviewer-cli-warning-safe-v4";
 const API_CONTRACT_VERSION = "duplicate-reviewer-api-contract-v2";
 const DEFAULT_PATH = managedPlatform.defaultCommandPath();
 const salesforceMergeService = createSalesforceMergeService();
@@ -167,6 +170,19 @@ const CSV_ENDPOINTS = new Map([
       orgAlias: PROD_SF_ORG_ALIAS,
       instanceUrl: PROD_SF_INSTANCE_URL
     }
+  ],
+  [
+    "/api/prod-accounts/latest.csv",
+    {
+      path: PROD_ACCOUNTS_CSV,
+      jsonPath: PROD_ACCOUNTS_CSV.replace(/\.csv$/i, ".json"),
+      fileName: "salesforce-report-latest.csv",
+      objectType: "account",
+      label: "Latest Prod Accounts",
+      source: "prod-accounts",
+      orgAlias: PROD_SF_ORG_ALIAS,
+      instanceUrl: PROD_SF_INSTANCE_URL
+    }
   ]
 ]);
 const JSON_ENDPOINTS = new Map(
@@ -206,6 +222,35 @@ function defaultProdContactsCsvPath() {
     "prod",
     "Output",
     "prod-contacts",
+    "salesforce-report-latest.csv"
+  );
+}
+
+function defaultProdAccountsCsvPath() {
+  if (process.platform === "win32") {
+    return path.join(
+      os.homedir(),
+      "OneDrive - POLITICO",
+      "Salesforce Pulls",
+      "Duplicate Reviewer",
+      "prod",
+      "Output",
+      "prod-accounts",
+      "salesforce-report-latest.csv"
+    );
+  }
+
+  return path.join(
+    os.homedir(),
+    "Library",
+    "CloudStorage",
+    "OneDrive-POLITICO",
+    "Automation Projects",
+    "Salesforce Pulls",
+    "Duplicate Reviewer",
+    "prod",
+    "Output",
+    "prod-accounts",
     "salesforce-report-latest.csv"
   );
 }
@@ -266,7 +311,9 @@ async function handleRequest(request, response) {
       appId: "salesforce-duplicate-reviewer",
       stickyNotifications: true,
       stagingAccounts: true,
+      prodAccounts: true,
       latestStagingFiles: true,
+      latestProdFiles: true,
       jsonDatasets: true,
       staticAssetRoot: Boolean(process.env.DUPLICATE_REVIEWER_STATIC_DIR),
       svgStaticAssets: true,

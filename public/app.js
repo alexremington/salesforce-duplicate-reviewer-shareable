@@ -1778,6 +1778,12 @@ async function loadFromUrlIfRequested() {
       defaultFileName: "salesforce-report-latest.json",
       label: "Latest Prod Contacts"
     },
+    "prod-accounts": {
+      endpoint: "/api/prod-accounts/latest.json",
+      defaultObjectType: "account",
+      defaultFileName: "salesforce-report-latest.json",
+      label: "Latest Prod Accounts"
+    },
     "staging-accounts": {
       endpoint: "/api/staging-accounts/latest.json",
       defaultObjectType: "account",
@@ -2046,6 +2052,9 @@ function canonicalRecentEndpoint(record) {
   if (endpoint === "/api/prod-contacts/latest.json" || endpoint === "/api/prod-contacts/latest.csv") {
     return endpoint;
   }
+  if (endpoint === "/api/prod-accounts/latest.json" || endpoint === "/api/prod-accounts/latest.csv") {
+    return endpoint;
+  }
   if (
     endpoint === "/api/staging-contacts/latest.json" ||
     endpoint === "/api/staging-contacts/latest.csv" ||
@@ -2057,6 +2066,9 @@ function canonicalRecentEndpoint(record) {
   if (isProdContactsRecentRecord(record)) {
     return "/api/prod-contacts/latest.json";
   }
+  if (isProdAccountsRecentRecord(record)) {
+    return "/api/prod-accounts/latest.json";
+  }
   return recentEndpointForRecord(record);
 }
 
@@ -2065,14 +2077,16 @@ function canonicalRecentFileName(record) {
   if (
     endpoint === "/api/staging-contacts/latest.csv" ||
     endpoint === "/api/staging-accounts/latest.csv" ||
-    endpoint === "/api/prod-contacts/latest.csv"
+    endpoint === "/api/prod-contacts/latest.csv" ||
+    endpoint === "/api/prod-accounts/latest.csv"
   ) {
     return "salesforce-report-latest.csv";
   }
   if (
     endpoint === "/api/staging-contacts/latest.json" ||
     endpoint === "/api/staging-accounts/latest.json" ||
-    endpoint === "/api/prod-contacts/latest.json"
+    endpoint === "/api/prod-contacts/latest.json" ||
+    endpoint === "/api/prod-accounts/latest.json"
   ) {
     return "salesforce-report-latest.json";
   }
@@ -2083,9 +2097,15 @@ function canonicalRecentDisplayName(record) {
   if (isProdContactsRecentRecord(record)) {
     return "Latest Prod Contacts";
   }
+  if (isProdAccountsRecentRecord(record)) {
+    return "Latest Prod Accounts";
+  }
   const endpoint = String(canonicalRecentEndpoint(record) || "").toLowerCase();
   if (endpoint === "/api/prod-contacts/latest.json" || endpoint === "/api/prod-contacts/latest.csv") {
     return "Latest Prod Contacts";
+  }
+  if (endpoint === "/api/prod-accounts/latest.json" || endpoint === "/api/prod-accounts/latest.csv") {
+    return "Latest Prod Accounts";
   }
   if (
     endpoint === "/api/staging-contacts/latest.json" ||
@@ -2113,6 +2133,24 @@ function isProdContactsRecentRecord(record) {
     name.includes("prod contacts") ||
     displayName.includes("prod contacts") ||
     displayName.includes("latest prod contacts")
+  );
+}
+
+function isProdAccountsRecentRecord(record) {
+  const endpoint = String(record?.endpoint || "").toLowerCase();
+  if (endpoint === "/api/prod-accounts/latest.json" || endpoint === "/api/prod-accounts/latest.csv") {
+    return true;
+  }
+
+  const id = String(record?.id || "").toLowerCase();
+  const name = String(record?.name || "").toLowerCase();
+  const displayName = String(record?.displayName || "").toLowerCase();
+  return (
+    id.includes("prod-accounts") ||
+    name.includes("prod-accounts") ||
+    name.includes("prod accounts") ||
+    displayName.includes("prod accounts") ||
+    displayName.includes("latest prod accounts")
   );
 }
 
@@ -2226,18 +2264,20 @@ async function compactOversizedRecentFiles(db, records) {
 
 function recentEndpointForRecord(record) {
   const normalizedName = String(record?.name || "");
-  const displayName = String(record?.displayName || "").toLowerCase();
   const objectType = String(record?.objectType || "");
   const isProdContacts = isProdContactsRecentRecord(record);
+  const isProdAccounts = isProdAccountsRecentRecord(record);
 
   if (normalizedName === "salesforce-report-latest.json") {
     if (isProdContacts) return "/api/prod-contacts/latest.json";
+    if (isProdAccounts) return "/api/prod-accounts/latest.json";
     return objectType.toLowerCase() === "account"
       ? "/api/staging-accounts/latest.json"
       : "/api/staging-contacts/latest.json";
   }
   if (normalizedName === "salesforce-report-latest.csv") {
     if (isProdContacts) return "/api/prod-contacts/latest.csv";
+    if (isProdAccounts) return "/api/prod-accounts/latest.csv";
     return objectType.toLowerCase() === "account"
       ? "/api/staging-accounts/latest.csv"
       : "/api/staging-contacts/latest.csv";
@@ -2248,8 +2288,10 @@ function recentEndpointForRecord(record) {
     "salesforce-staging-accounts-latest.csv": "/api/staging-accounts/latest.csv",
     "salesforce-staging-contacts-latest.json": "/api/staging-contacts/latest.json",
     "salesforce-staging-accounts-latest.json": "/api/staging-accounts/latest.json",
-    "salesforce-prod-contacts-latest.csv": "/api/prod-contacts/latest.json",
-    "salesforce-prod-contacts-latest.json": "/api/prod-contacts/latest.json"
+    "salesforce-prod-contacts-latest.csv": "/api/prod-contacts/latest.csv",
+    "salesforce-prod-contacts-latest.json": "/api/prod-contacts/latest.json",
+    "salesforce-prod-accounts-latest.csv": "/api/prod-accounts/latest.csv",
+    "salesforce-prod-accounts-latest.json": "/api/prod-accounts/latest.json"
   }[normalizedName] || "";
 }
 

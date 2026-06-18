@@ -133,6 +133,10 @@ async function run() {
     await prodContactsPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
     await assertProdContactsRecentFileSourceMapping(prodContactsPage);
     await assertLegacyProdContactsRecentFileCompatibility(prodContactsPage);
+    const prodAccountsAutoloadState = await assertProdAccountsAutoload(prodContactsPage, { closePage: false });
+    await prodContactsPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
+    await assertProdAccountsRecentFileSourceMapping(prodContactsPage);
+    await assertLegacyProdAccountsRecentFileCompatibility(prodContactsPage);
     const emptyImportButtonState = await assertEmptyStateOmitsDuplicateImportAction(browser);
     const lastNameChangeCandidateState = await assertLastNameChangeCandidateMatch(browser, lastNameChangeCsvPath);
     const differentCompanyConflictState = await assertDifferentCompanyConflictSeparated(browser, differentCompanyConflictCsvPath);
@@ -1643,6 +1647,8 @@ async function assertProdContactsAutoload(page, { closePage = true } = {}) {
   };
 
   try {
+    await page.unroute("**/api/prod/latest-files").catch(() => {});
+    await page.unroute("**/api/prod-contacts/latest.json").catch(() => {});
     await page.route("**/api/staging/latest-files", async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: [] }) });
     });
@@ -1787,6 +1793,8 @@ async function assertProdContactsRecentFileSourceMapping(page) {
   };
 
   try {
+    await page.unroute("**/api/prod/latest-files").catch(() => {});
+    await page.unroute("**/api/prod-contacts/latest.json").catch(() => {});
     await page.route("**/api/prod/latest-files", async (route) => {
       await route.fulfill({
         status: 200,
@@ -1937,6 +1945,8 @@ async function assertLegacyProdContactsRecentFileCompatibility(page) {
   };
 
   try {
+    await page.unroute("**/api/prod/latest-files").catch(() => {});
+    await page.unroute("**/api/prod-accounts/latest.json").catch(() => {});
     await page.route("**/api/staging/latest-files", async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: [] }) });
     });
@@ -2026,6 +2036,371 @@ async function assertLegacyProdContactsRecentFileCompatibility(page) {
     }
   } finally {
     // Caller owns the shared prod-contacts page lifecycle.
+  }
+}
+
+async function assertProdAccountsAutoload(page, { closePage = true } = {}) {
+  const prodDataset = {
+    schema: "salesforce-duplicate-reviewer.dataset",
+    schemaVersion: 1,
+    objectType: "account",
+    fileName: "salesforce-report-latest.json",
+    source: {
+      system: "salesforce",
+      name: "Latest Prod Accounts",
+      format: "salesforce-records-json",
+      orgAlias: "qa-prod-org",
+      instanceUrl: "https://qa-prod-org.example.invalid"
+    },
+    fields: [
+      { apiName: "Id", label: "Id", type: "text" },
+      { apiName: "Name", label: "Name", type: "text" },
+      { apiName: "Website", label: "Website", type: "text" }
+    ],
+    records: [
+      { Id: "001P00000000001", Name: "Prod Account One", Website: "https://prod-one.example.com" },
+      { Id: "001P00000000002", Name: "Prod Account Two", Website: "https://prod-two.example.com" }
+    ]
+  };
+
+  try {
+    await page.route("**/api/staging/latest-files", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: [] }) });
+    });
+    await page.route("**/api/prod/latest-files", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          files: [
+            {
+              source: "prod-accounts",
+              objectType: "account",
+              label: "Latest Prod Accounts",
+              name: "salesforce-report-latest.json",
+              endpoint: "/api/prod-accounts/latest.json",
+              size: 1,
+              updatedAt: Date.now()
+            }
+          ]
+        })
+      });
+    });
+    await page.route("**/api/prod-accounts/latest.json", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: `${JSON.stringify(prodDataset)}\n`
+      });
+    });
+    await page.goto(`${baseUrl}/?autoload=prod-accounts&object=account&notify=1&sticky=1&name=salesforce-report-latest.json`, {
+      waitUntil: "domcontentloaded"
+    });
+    await page.waitForFunction(() => state.rows.length === 2 && state.objectType === "account", null, { timeout: 10000 });
+
+    const url = new URL(page.url());
+    const autoloadState = await page.evaluate(() => ({
+      fileName: state.fileName,
+      sourceName: state.datasetMetadata?.source?.name || "",
+      orgAlias: state.datasetSource?.orgAlias || "",
+      instanceUrl: state.datasetSource?.instanceUrl || "",
+      rowCount: state.rows.length,
+      recentFiles: [...document.querySelectorAll(".recent-file")].map((node) => node.textContent.trim())
+    }));
+
+    if (
+      url.searchParams.get("autoload") !== "prod-accounts" ||
+      url.searchParams.get("object") !== "account" ||
+      url.searchParams.get("notify") !== "1" ||
+      url.searchParams.get("sticky") !== "1" ||
+      url.searchParams.get("name") !== "salesforce-report-latest.json" ||
+      autoloadState.fileName !== "salesforce-report-latest.json" ||
+      autoloadState.sourceName !== "Latest Prod Accounts" ||
+      autoloadState.rowCount !== 2 ||
+      autoloadState.orgAlias !== "qa-prod-org" ||
+      autoloadState.instanceUrl !== "https://qa-prod-org.example.invalid" ||
+      !autoloadState.recentFiles.some((text) => text.includes("Latest Prod Accounts"))
+    ) {
+      throw new Error(`Prod Accounts autoload regression failed: ${JSON.stringify(autoloadState)}`);
+    }
+
+    return autoloadState;
+  } finally {
+    if (closePage) {
+      // Caller owns the shared prod page lifecycle.
+    }
+  }
+}
+
+async function assertProdAccountsRecentFileSourceMapping(page) {
+  const prodDataset = {
+    schema: "salesforce-duplicate-reviewer.dataset",
+    schemaVersion: 1,
+    objectType: "account",
+    fileName: "salesforce-report-latest.json",
+    source: {
+      system: "salesforce",
+      name: "Latest Prod Accounts",
+      format: "salesforce-records-json",
+      orgAlias: "qa-prod-org",
+      instanceUrl: "https://qa-prod-org.example.invalid"
+    },
+    fields: [
+      { apiName: "Id", label: "Id", type: "text" },
+      { apiName: "Name", label: "Name", type: "text" },
+      { apiName: "Website", label: "Website", type: "text" }
+    ],
+    records: [
+      { Id: "001P00000000001", Name: "Prod Account One", Website: "https://prod-one.example.com" },
+      { Id: "001P00000000002", Name: "Prod Account Two", Website: "https://prod-two.example.com" }
+    ]
+  };
+  const canonicalRecord = {
+    id: "account:/api/prod-accounts/latest.json",
+    name: "salesforce-report-latest.json",
+    displayName: "Latest Prod Accounts",
+    size: 123,
+    objectType: "account",
+    format: "json",
+    contractVersion: "",
+    content: "",
+    endpoint: "/api/prod-accounts/latest.json",
+    updatedAt: Date.now() - 1000
+  };
+
+  try {
+    await page.route("**/api/prod/latest-files", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          files: [
+            {
+              source: "prod-accounts",
+              objectType: "account",
+              label: "Latest Prod Accounts",
+              name: "salesforce-report-latest.json",
+              endpoint: "/api/prod-accounts/latest.json",
+              size: 1,
+              updatedAt: Date.now()
+            }
+          ]
+        })
+      });
+    });
+    await page.route("**/api/prod-accounts/latest.json", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: `${JSON.stringify(prodDataset)}\n`
+      });
+    });
+    await clearRecentFilesStore(page);
+    await page.evaluate(async (record) => {
+      const openDb = () => new Promise((resolve, reject) => {
+        const request = indexedDB.open("salesforce-duplicate-reviewer", 2);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains("recentFiles")) {
+            db.createObjectStore("recentFiles", { keyPath: "id" });
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const transactionDone = (transaction) => new Promise((resolve, reject) => {
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+      const db = await openDb();
+      const transaction = db.transaction("recentFiles", "readwrite");
+      transaction.objectStore("recentFiles").put(record);
+      await transactionDone(transaction);
+      db.close();
+    }, canonicalRecord);
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const recentFile = page.locator(".recent-file").filter({ hasText: "Latest Prod Accounts" }).first();
+    await recentFile.waitFor({ state: "visible", timeout: 5000 });
+    await recentFile.click();
+    await page.waitForFunction(() => (
+      state.fileName === "salesforce-report-latest.json" &&
+      state.rows.length === 2 &&
+      state.datasetSource?.endpoint === "/api/prod-accounts/latest.json" &&
+      state.datasetSource?.displayName === "Latest Prod Accounts"
+    ), null, { timeout: 10000 });
+
+    const sourceState = await page.evaluate(async () => {
+      const openDb = () => new Promise((resolve, reject) => {
+        const request = indexedDB.open("salesforce-duplicate-reviewer", 2);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const db = await openDb();
+      const transaction = db.transaction("recentFiles", "readonly");
+      const records = await new Promise((resolve, reject) => {
+        const request = transaction.objectStore("recentFiles").getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      db.close();
+      return {
+        records,
+        prodRecords: records.filter((record) => String(record.displayName || "").includes("Prod Accounts")),
+        fileName: state.fileName,
+        sourceEndpoint: state.datasetSource?.endpoint || "",
+        sourceDisplayName: state.datasetSource?.displayName || "",
+        rendered: [...document.querySelectorAll(".recent-file")].map((node) => node.textContent.trim())
+      };
+    });
+
+    if (
+      sourceState.prodRecords.length !== 1 ||
+      sourceState.prodRecords[0].id !== canonicalRecord.id ||
+      sourceState.prodRecords[0].endpoint !== "/api/prod-accounts/latest.json" ||
+      sourceState.prodRecords[0].name !== "salesforce-report-latest.json" ||
+      sourceState.fileName !== "salesforce-report-latest.json" ||
+      sourceState.sourceEndpoint !== "/api/prod-accounts/latest.json" ||
+      sourceState.sourceDisplayName !== "Latest Prod Accounts" ||
+      !sourceState.rendered.some((text) => text.includes("Latest Prod Accounts")) ||
+      sourceState.rendered.some((text) => text.includes("salesforce-prod-accounts-latest.json"))
+    ) {
+      throw new Error(`Prod Accounts recent-file source mapping failed: ${JSON.stringify(sourceState)}`);
+    }
+
+    return sourceState;
+  } finally {
+    // Caller owns the shared prod page lifecycle.
+  }
+}
+
+async function assertLegacyProdAccountsRecentFileCompatibility(page) {
+  const prodDataset = {
+    schema: "salesforce-duplicate-reviewer.dataset",
+    schemaVersion: 1,
+    objectType: "account",
+    fileName: "salesforce-report-latest.json",
+    source: {
+      system: "salesforce",
+      name: "Latest Prod Accounts",
+      format: "salesforce-records-json",
+      orgAlias: "qa-prod-org",
+      instanceUrl: "https://qa-prod-org.example.invalid"
+    },
+    fields: [
+      { apiName: "Id", label: "Id", type: "text" },
+      { apiName: "Name", label: "Name", type: "text" },
+      { apiName: "Website", label: "Website", type: "text" }
+    ],
+    records: [
+      { Id: "001P00000000001", Name: "Prod Account One", Website: "https://prod-one.example.com" },
+      { Id: "001P00000000002", Name: "Prod Account Two", Website: "https://prod-two.example.com" }
+    ]
+  };
+  const legacyRecord = {
+    id: "account:salesforce-prod-accounts-latest.json",
+    name: "salesforce-prod-accounts-latest.json",
+    displayName: "Latest Prod Accounts",
+    size: 123,
+    objectType: "account",
+    format: "json",
+    contractVersion: "",
+    content: "",
+    endpoint: "/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-accounts/salesforce-prod-accounts-latest.json",
+    updatedAt: Date.now() - 1000
+  };
+
+  try {
+    await page.route("**/api/staging/latest-files", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: [] }) });
+    });
+    await page.route("**/api/prod/latest-files", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ files: [] }) });
+    });
+    await page.route("**/api/prod-accounts/latest.json", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: `${JSON.stringify(prodDataset)}\n`
+      });
+    });
+    await clearRecentFilesStore(page);
+
+    await page.evaluate(async (record) => {
+      const openDb = () => new Promise((resolve, reject) => {
+        const request = indexedDB.open("salesforce-duplicate-reviewer", 2);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains("recentFiles")) {
+            db.createObjectStore("recentFiles", { keyPath: "id" });
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const transactionDone = (transaction) => new Promise((resolve, reject) => {
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+      const db = await openDb();
+      const transaction = db.transaction("recentFiles", "readwrite");
+      transaction.objectStore("recentFiles").put(record);
+      await transactionDone(transaction);
+      db.close();
+    }, legacyRecord);
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const recentFile = page.locator(".recent-file").filter({ hasText: "Latest Prod Accounts" }).first();
+    await recentFile.waitFor({ state: "visible", timeout: 5000 });
+    await recentFile.click();
+    await page.waitForFunction(() => (
+      state.fileName === "salesforce-report-latest.json" &&
+      state.rows.length === 2 &&
+      state.datasetSource?.endpoint === "/api/prod-accounts/latest.json" &&
+      state.datasetSource?.displayName === "Latest Prod Accounts"
+    ), null, { timeout: 10000 });
+
+    const sourceState = await page.evaluate(async () => {
+      const openDb = () => new Promise((resolve, reject) => {
+        const request = indexedDB.open("salesforce-duplicate-reviewer", 2);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const db = await openDb();
+      const transaction = db.transaction("recentFiles", "readonly");
+      const records = await new Promise((resolve, reject) => {
+        const request = transaction.objectStore("recentFiles").getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      db.close();
+      return {
+        records,
+        prodRecords: records.filter((record) => String(record.displayName || "").includes("Prod Accounts")),
+        fileName: state.fileName,
+        sourceEndpoint: state.datasetSource?.endpoint || "",
+        sourceDisplayName: state.datasetSource?.displayName || "",
+        rendered: [...document.querySelectorAll(".recent-file")].map((node) => node.textContent.trim())
+      };
+    });
+
+    if (
+      sourceState.prodRecords.length !== 1 ||
+      sourceState.prodRecords[0].id !== legacyRecord.id ||
+      sourceState.prodRecords[0].endpoint !== "/api/prod-accounts/latest.json" ||
+      sourceState.prodRecords[0].name !== "salesforce-report-latest.json" ||
+      sourceState.fileName !== "salesforce-report-latest.json" ||
+      sourceState.sourceEndpoint !== "/api/prod-accounts/latest.json" ||
+      sourceState.sourceDisplayName !== "Latest Prod Accounts" ||
+      !sourceState.rendered.some((text) => text.includes("Latest Prod Accounts")) ||
+      sourceState.rendered.some((text) => text.includes("salesforce-prod-accounts-latest.json"))
+    ) {
+      throw new Error(`Legacy prod Accounts recent-file compatibility failed: ${JSON.stringify(sourceState)}`);
+    }
+  } finally {
+    // Caller owns the shared prod page lifecycle.
   }
 }
 

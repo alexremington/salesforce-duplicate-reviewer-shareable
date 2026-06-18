@@ -45,6 +45,7 @@ fi
 export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export DUPLICATE_REVIEWER_PROD_ROOT="${DUPLICATE_REVIEWER_PROD_ROOT:-${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/prod}"
 export PROD_CONTACTS_CSV="${PROD_CONTACTS_CSV:-${DUPLICATE_REVIEWER_PROD_ROOT}/Output/prod-contacts/salesforce-report-latest.csv}"
+export PROD_ACCOUNTS_CSV="${PROD_ACCOUNTS_CSV:-${DUPLICATE_REVIEWER_PROD_ROOT}/Output/prod-accounts/salesforce-report-latest.csv}"
 
 mkdir -p "${LOG_DIR}"
 
@@ -65,7 +66,7 @@ server_is_duplicate_reviewer() {
 server_supports_required_features() {
   local health
   health="$(server_health)"
-  [[ "${health}" == *'"salesforceMerge":true'* && "${health}" == *'"salesforcePreMergeCheck":true'* && "${health}" == *'"salesforceCliWarningSafe":true'* && "${health}" == *'"salesforceCliApiVersionEnvIsolated":true'* && "${health}" == *'"latestStagingFiles":true'* && "${health}" == *'"jsonDatasets":true'* && "${health}" == *'"runtimeAligned":true'* && "${health}" == *'"staticAssetRoot":true'* && "${health}" == *'"svgStaticAssets":true'* && "${health}" == *'"brandHeaderVersion":"shared-logo-contact-v1"'* && "${health}" == *'"featureVersion":"duplicate-reviewer-cli-warning-safe-v3"'* && "${health}" == *'"apiContractVersion":"duplicate-reviewer-api-contract-v2"'* ]]
+  [[ "${health}" == *'"salesforceMerge":true'* && "${health}" == *'"salesforcePreMergeCheck":true'* && "${health}" == *'"salesforceCliWarningSafe":true'* && "${health}" == *'"salesforceCliApiVersionEnvIsolated":true'* && "${health}" == *'"latestStagingFiles":true'* && "${health}" == *'"latestProdFiles":true'* && "${health}" == *'"jsonDatasets":true'* && "${health}" == *'"runtimeAligned":true'* && "${health}" == *'"staticAssetRoot":true'* && "${health}" == *'"svgStaticAssets":true'* && "${health}" == *'"brandHeaderVersion":"shared-logo-contact-v1"'* && "${health}" == *'"featureVersion":"duplicate-reviewer-cli-warning-safe-v4"'* && "${health}" == *'"apiContractVersion":"duplicate-reviewer-api-contract-v2"'* ]]
 }
 
 write_server_plist() {
@@ -116,6 +117,8 @@ write_server_plist() {
     <string>${DUPLICATE_REVIEWER_PROD_ROOT}</string>
     <key>PROD_CONTACTS_CSV</key>
     <string>${PROD_CONTACTS_CSV}</string>
+    <key>PROD_ACCOUNTS_CSV</key>
+    <string>${PROD_ACCOUNTS_CSV}</string>
     <key>PROD_SF_ORG_ALIAS</key>
     <string>${PROD_SF_ORG_ALIAS:-politico}</string>
     <key>PROD_SF_INSTANCE_URL</key>
