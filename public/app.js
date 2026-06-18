@@ -5998,25 +5998,26 @@ function accountCompanyValue(row) {
 }
 
 const COMPANY_COMMENTARY_PATTERNS = [
+  /\(\s*(?:f\s*\.?\s*k\s*\.?\s*a|formerly known as|d\s*\.?\s*b\s*\.?\s*a|doing business as)\b[^)]*\)/gi,
+  /\[\s*(?:f\s*\.?\s*k\s*\.?\s*a|formerly known as|d\s*\.?\s*b\s*\.?\s*a|doing business as)\b[^\]]*\]/gi,
+  /\s[-/:|]\s*(?:f\s*\.?\s*k\s*\.?\s*a|d\s*\.?\s*b\s*\.?\s*a)\b.*$/gi,
+  /\s(?:formerly known as|doing business as)\b.*$/gi
+];
+
+const COMPANY_STATUS_MARKER_PATTERNS = [
   "do not use",
   "donotuse",
   "inactive",
   "obsolete",
   "deprecated",
   "duplicate",
-  "dupe",
-  "fka",
-  "f k a",
-  "formerly known as",
-  "dba",
-  "d b a",
-  "doing business as"
+  "dupe"
 ];
 
 function stripCompanyCommentary(value) {
   let normalized = String(value || "");
   COMPANY_COMMENTARY_PATTERNS.forEach((pattern) => {
-    normalized = normalized.replace(new RegExp(`\\b${pattern.replace(/\s+/g, "\\s+")}\\b`, "g"), " ");
+    normalized = normalized.replace(pattern, " ");
   });
   return normalized
     .trim()
@@ -6024,12 +6025,20 @@ function stripCompanyCommentary(value) {
 }
 
 function stripCompanyStatusMarkers(value) {
-  return stripCompanyCommentary(value);
+  let normalized = String(value || "");
+  COMPANY_STATUS_MARKER_PATTERNS.forEach((pattern) => {
+    normalized = normalized.replace(new RegExp(`\\b${pattern.replace(/\s+/g, "\\s+")}\\b`, "g"), " ");
+  });
+  return normalized
+    .trim()
+    .replace(/\s+/g, " ");
 }
 
 function hasCompanyStatusMarker(value) {
-  const normalized = normalizeText(value);
-  return stripCompanyCommentary(normalized) !== normalized;
+  const raw = String(value || "").trim().replace(/\s+/g, " ");
+  const commentaryStripped = stripCompanyCommentary(value);
+  const normalized = normalizeText(stripCompanyCommentary(value));
+  return commentaryStripped !== raw || stripCompanyStatusMarkers(normalized) !== normalized;
 }
 
 function normalizeEmail(value) {
