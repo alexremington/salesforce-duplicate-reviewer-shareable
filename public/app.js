@@ -5500,7 +5500,6 @@ function shouldApplyAccountParentBranchDivergenceCap(fieldScores, left, right) {
 function hasAccountScopeDivergence(fieldScores, left, right) {
   const nameScore = fieldScores.name;
   if (nameScore == null || nameScore < 0.9 || nameScore >= 1) return false;
-  if (left.hasStatusMarker || right.hasStatusMarker) return false;
   if (!hasEntityTokenContainment(accountCompanyValue(left), accountCompanyValue(right))) return false;
   if (hasStrongAccountIdentityCorroboration(fieldScores, left, right)) return false;
 
@@ -5532,7 +5531,6 @@ function hasStrongExactNameCorroboration(fieldScores, left, right) {
 }
 
 function hasStrongAccountCorroboration(fieldScores, left, right) {
-  if (left.hasStatusMarker || right.hasStatusMarker) return true;
   if ((fieldScores.website || 0) >= MATCHED_FIELD_THRESHOLD) return true;
   if (fieldScores.phone === 1) return true;
   if (fieldScores.billingPostalCode === 1 && fieldScores.billingCountry === 1) return true;
@@ -5592,8 +5590,7 @@ function hasStrongExactAccountDuplicateCorroboration(fieldScores, left, right) {
   if (fieldScores.name !== 1) return false;
   if (fieldScores.website === 1) return true;
   if (fieldScores.ultimateParentAccount === 1) return true;
-  if (hasStrongExactBillingAddress(fieldScores)) return true;
-  return left.hasStatusMarker || right.hasStatusMarker;
+  return hasStrongExactBillingAddress(fieldScores);
 }
 
 function hasStrongExactBillingAddress(fieldScores) {
@@ -5953,17 +5950,39 @@ function accountCompanyValue(row) {
   return row.organization || row.name;
 }
 
-function stripCompanyStatusMarkers(value) {
-  return String(value || "")
-    .replace(/\b(do not use|donotuse|inactive|obsolete|deprecated|duplicate|dupe)\b/g, " ")
+const COMPANY_COMMENTARY_PATTERNS = [
+  "do not use",
+  "donotuse",
+  "inactive",
+  "obsolete",
+  "deprecated",
+  "duplicate",
+  "dupe",
+  "fka",
+  "f k a",
+  "formerly known as",
+  "dba",
+  "d b a",
+  "doing business as"
+];
+
+function stripCompanyCommentary(value) {
+  let normalized = String(value || "");
+  COMPANY_COMMENTARY_PATTERNS.forEach((pattern) => {
+    normalized = normalized.replace(new RegExp(`\\b${pattern.replace(/\s+/g, "\\s+")}\\b`, "g"), " ");
+  });
+  return normalized
     .trim()
     .replace(/\s+/g, " ");
 }
 
+function stripCompanyStatusMarkers(value) {
+  return stripCompanyCommentary(value);
+}
+
 function hasCompanyStatusMarker(value) {
-  return /(^|[^a-z0-9])(do[^a-z0-9]*not[^a-z0-9]*use|donotuse|inactive|obsolete|deprecated|duplicate|dupe)(?=$|[^a-z0-9])/i.test(
-    String(value || "")
-  );
+  const normalized = normalizeText(value);
+  return stripCompanyCommentary(normalized) !== normalized;
 }
 
 function normalizeEmail(value) {

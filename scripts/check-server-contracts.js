@@ -110,6 +110,7 @@ async function main() {
     await assertSalesforceExportSchemaUpgradeRegression();
     await assertAccountScopeDivergenceRegression();
     await assertAccountExactWebsiteCorroborationRegression();
+    await assertAccountCommentaryNormalizationRegression();
     await assertContactSparseExactNameFloorRegression();
     await assertContactCompanyDifferenceVetoRegression();
     await assertContactExactPhoneLinkedInDivergenceRegression();
@@ -680,6 +681,38 @@ async function assertAccountExactWebsiteCorroborationRegression() {
   if (Math.round(score.value) !== 92 || !score.reasons.includes("Exact duplicate corroboration")) {
     throw new Error(
       `Account exact-billing corroboration regression failed: expected the Salesforce-calibrated floor at 92, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
+    );
+  }
+}
+
+async function assertAccountCommentaryNormalizationRegression() {
+  const api = loadAppApi();
+  const csv = [
+    "Id,Name,Phone,BillingCountry",
+    "001CN1,Northstar Analytics (FKA),(555) 010-2200,United States",
+    "001CN2,Northstar Analytics,(555) 010-2200,United States"
+  ].join("\n");
+  const parsed = api.parseCsv(csv);
+  const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
+  const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
+  const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.account.fields);
+  const preparedRows = api.prepareRows(rows, "account", mapping);
+  const fieldStats = api.buildFieldStats(preparedRows, "account");
+  const score = api.scoreAccountPair(preparedRows[0], preparedRows[1], fieldStats);
+
+  if (
+    preparedRows[0].organization !== preparedRows[1].organization ||
+    preparedRows[0].organization !== "northstar analytics" ||
+    score.fieldScores.name !== 1 ||
+    !score.reasons.includes("Exact account name")
+  ) {
+    throw new Error(
+      `Account commentary normalization regression failed: ${JSON.stringify({
+        organizations: preparedRows.map((row) => row.organization),
+        score: Math.round(score.value),
+        fieldScores: score.fieldScores,
+        reasons: score.reasons
+      })}`
     );
   }
 }

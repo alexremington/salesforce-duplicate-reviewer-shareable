@@ -46,6 +46,11 @@ These instructions apply to this repository and its subdirectories.
 - Do not commit a broad sync or cleanup that deletes protected workflow code unless you have manually reviewed the removed sections and confirmed the replacement behavior is intentional.
 - Treat `npm run check` as the minimum pre-commit gate, then run `npm run smoke:ui:local` before pushing any user-visible change.
 - Run `npm run closeout` before handoff so the working tree is clean and every remaining file is accounted for.
+- Local Beads workspace metadata should live in the workspace-owned external Beads home, not under the app tree; if an older `.beads/` tree still exists locally, it should stay ignored and untracked until the migration is complete, and closeout should not treat it as release content.
+- If mirror reconciliation needs temporary worktrees, scratch repos, or helper links, treat them as disposable repair state and remove them before closeout.
+- If the change is user-visible, behavior-changing, or tied to a release, include a short release note in the handoff closeout before marking the work done. Use one of: `Release note: fixed <issue> for <users>, validated by <test or smoke>.` `Release note: updated launcher/runtime behavior for <scenario>, validated by <check> and <smoke>.` `Release note: release handoff for <branch or version>, includes <summary> and <validation>.`
+- Use the workspace shared closeout templates and keep the closeout summary, release note, commit SHA(s), and one residual-risk bullet in every handoff.
+- Any local Beads state should remain ignored and untracked rather than committed as release content. Prefer the workspace shared Beads helper and storage convention.
 - If a change touches the launcher or cached runtime path, confirm the live served bundle still reflects the current source before committing.
 
 ## Recommended Agent Workflow
@@ -61,9 +66,9 @@ The repo-local custom agents live under `.codex/agents/`, and the reusable workf
 
 New development-task prompts are hook-enforced through `.codex/config.toml`, so no special `agentic-delivery` prefix is required. For visible UI work, mention `Hume` only when design direction is still unresolved or you want design review.
 
-OpenSpec follows the workspace-level policy in `/Users/aremington/codex-workspace/AGENTS.md`. For user-visible, behavior-changing, cross-cutting, launcher/runtime, or multi-session work, create or update the required OpenSpec proposal, spec delta or capability spec, implementation tasks, and any behavior-affecting technical decisions before coding.
+OpenSpec follows the workspace-level policy in the top-level workspace `AGENTS.md`. For user-visible, behavior-changing, cross-cutting, launcher/runtime, or multi-session work, create or update the required OpenSpec proposal, spec delta or capability spec, implementation tasks, and any behavior-affecting technical decisions before coding.
 
-For plan-to-implementation work that moves to a fresh session, use the shared handoff format in `/Users/aremington/codex-workspace/apps/automation-shared-resources/docs/SESSION-HANDOFF.md` and keep the packet concise enough that the next session can restate the plan without rereading the full thread.
+For plan-to-implementation work that moves to a fresh session, use the canonical shared handoff format from the workspace automation shared resources docs and keep only the implementation context the next session needs to resume work without rereading the full thread.
 
 ## Testing Ladder
 
