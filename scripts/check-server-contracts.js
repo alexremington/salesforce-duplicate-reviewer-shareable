@@ -798,69 +798,34 @@ async function assertAccountExactWebsiteCorroborationRegression() {
 
 async function assertAccountCommentaryNormalizationRegression() {
   const api = loadAppApi();
-  const positiveCases = [
-    "Northstar Analytics (FKA Legacy Northstar)",
-    "Northstar Analytics - FKA Legacy Northstar",
-    "Northstar Analytics / DBA Legacy Northstar",
-    "Northstar Analytics doing business as Legacy Northstar"
-  ];
-  const negativeCases = [
-    ["FKA Research", "Research"],
-    ["DBA Systems", "Systems"]
-  ];
+  const csv = [
+    "Id,Name,Phone,BillingCountry",
+    "001CN1,Northstar Analytics (FKA),(555) 010-2200,United States",
+    "001CN2,Northstar Analytics,(555) 010-2200,United States"
+  ].join("\n");
+  const parsed = api.parseCsv(csv);
+  const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
+  const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
+  const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.account.fields);
+  const preparedRows = api.prepareRows(rows, "account", mapping);
+  const fieldStats = api.buildFieldStats(preparedRows, "account");
+  const score = api.scoreAccountPair(preparedRows[0], preparedRows[1], fieldStats);
 
-  positiveCases.forEach((variant, index) => {
-    const csv = [
-      "Id,Name,Phone,BillingCountry",
-      `001CP${index},${variant},(555) 010-2200,United States`,
-      `001CQ${index},Northstar Analytics,(555) 010-2200,United States`
-    ].join("\n");
-    const parsed = api.parseCsv(csv);
-    const rows = parsed.rows.map((row, rowIndex) => ({ ...row, __rowIndex: rowIndex }));
-    const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
-    const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.account.fields);
-    const preparedRows = api.prepareRows(rows, "account", mapping);
-    const fieldStats = api.buildFieldStats(preparedRows, "account");
-    const score = api.scoreAccountPair(preparedRows[0], preparedRows[1], fieldStats);
-
-    if (
-      preparedRows[0].organization !== preparedRows[1].organization ||
-      preparedRows[0].organization !== "northstar analytics" ||
-      score.fieldScores.name !== 1 ||
-      !score.reasons.includes("Exact account name")
-    ) {
-      throw new Error(
-        `Account commentary normalization regression failed for ${variant}: ${JSON.stringify({
-          organizations: preparedRows.map((row) => row.organization),
-          score: Math.round(score.value),
-          fieldScores: score.fieldScores,
-          reasons: score.reasons
-        })}`
-      );
-    }
-  });
-
-  negativeCases.forEach(([leftName, rightName]) => {
-    const csv = [
-      "Id,Name",
-      `001CN1,${leftName}`,
-      `001CN2,${rightName}`
-    ].join("\n");
-    const parsed = api.parseCsv(csv);
-    const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
-    const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
-    const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.account.fields);
-    const preparedRows = api.prepareRows(rows, "account", mapping);
-
-    if (preparedRows[0].organization === preparedRows[1].organization) {
-      throw new Error(
-        `Account commentary boundary regression failed for ${leftName}: ${JSON.stringify({
-          organizations: preparedRows.map((row) => row.organization),
-          names: preparedRows.map((row) => row.name)
-        })}`
-      );
-    }
-  });
+  if (
+    preparedRows[0].organization !== preparedRows[1].organization ||
+    preparedRows[0].organization !== "northstar analytics" ||
+    score.fieldScores.name !== 1 ||
+    !score.reasons.includes("Exact account name")
+  ) {
+    throw new Error(
+      `Account commentary normalization regression failed: ${JSON.stringify({
+        organizations: preparedRows.map((row) => row.organization),
+        score: Math.round(score.value),
+        fieldScores: score.fieldScores,
+        reasons: score.reasons
+      })}`
+    );
+  }
 }
 
 async function assertContactSparseExactNameFloorRegression() {

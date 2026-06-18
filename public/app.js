@@ -5547,7 +5547,6 @@ function shouldApplyAccountParentBranchDivergenceCap(fieldScores, left, right) {
 function hasAccountScopeDivergence(fieldScores, left, right) {
   const nameScore = fieldScores.name;
   if (nameScore == null || nameScore < 0.9 || nameScore >= 1) return false;
-  if (left.hasStatusMarker || right.hasStatusMarker) return false;
   if (!hasEntityTokenContainment(accountCompanyValue(left), accountCompanyValue(right))) return false;
   if (hasStrongAccountIdentityCorroboration(fieldScores, left, right)) return false;
 
@@ -5998,9 +5997,25 @@ function accountCompanyValue(row) {
   return row.organization || row.name;
 }
 
-function stripCompanyStatusMarkers(value) {
+const COMPANY_COMMENTARY_PATTERNS = [
+  "do not use",
+  "donotuse",
+  "inactive",
+  "obsolete",
+  "deprecated",
+  "duplicate",
+  "dupe",
+  "fka",
+  "f k a",
+  "formerly known as",
+  "dba",
+  "d b a",
+  "doing business as"
+];
+
+function stripCompanyCommentary(value) {
   let normalized = String(value || "");
-  COMPANY_STATUS_MARKER_PATTERNS.forEach((pattern) => {
+  COMPANY_COMMENTARY_PATTERNS.forEach((pattern) => {
     normalized = normalized.replace(new RegExp(`\\b${pattern.replace(/\s+/g, "\\s+")}\\b`, "g"), " ");
   });
   return normalized
@@ -6008,11 +6023,13 @@ function stripCompanyStatusMarkers(value) {
     .replace(/\s+/g, " ");
 }
 
+function stripCompanyStatusMarkers(value) {
+  return stripCompanyCommentary(value);
+}
+
 function hasCompanyStatusMarker(value) {
-  const raw = String(value || "").trim().replace(/\s+/g, " ");
-  const commentaryStripped = stripCompanyCommentary(value);
-  const normalized = normalizeText(stripCompanyCommentary(value));
-  return commentaryStripped !== raw || stripCompanyStatusMarkers(normalized) !== normalized;
+  const normalized = normalizeText(value);
+  return stripCompanyCommentary(normalized) !== normalized;
 }
 
 function normalizeEmail(value) {

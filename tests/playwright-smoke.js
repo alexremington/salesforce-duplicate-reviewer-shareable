@@ -63,6 +63,7 @@ async function run() {
   const mirrorRelationshipCsvPath = path.join(outDir, "contacts-mirror-relationship.csv");
   const accountCsvPath = path.join(outDir, "accounts-smoke.csv");
   const accountCompanyNormalizationCsvPath = path.join(outDir, "accounts-company-normalization.csv");
+  const accountCommentaryNormalizationCsvPath = path.join(outDir, "accounts-commentary-normalization.csv");
   const largeContactCsvPath = path.join(outDir, "contacts-large-smoke.csv");
   const largeContactJsonPath = path.join(outDir, "contacts-large-smoke.json");
   const datasetExportPath = path.join(outDir, "dataset-export.csv");
@@ -81,6 +82,7 @@ async function run() {
   await fs.writeFile(mirrorRelationshipCsvPath, contactMirrorRelationshipSmokeCsv());
   await fs.writeFile(accountCsvPath, accountSmokeCsv());
   await fs.writeFile(accountCompanyNormalizationCsvPath, accountCompanyNormalizationSmokeCsv());
+  await fs.writeFile(accountCommentaryNormalizationCsvPath, accountCommentaryNormalizationSmokeCsv());
   await fs.writeFile(largeContactCsvPath, largeContactCsv);
   await fs.writeFile(largeContactJsonPath, largeContactJson);
 
@@ -143,6 +145,7 @@ async function run() {
     const sharedCompanyExactPhoneNameConflictState = await assertSharedCompanyExactPhoneNameConflictSeparated(browser, sharedCompanyExactPhoneNameConflictCsvPath);
     const pairRegressionState = await assertPairRegressionGroups(browser, pairRegressionJsonPath);
     const accountCompanyNormalizationState = await assertAccountCompanyNormalizationSeparated(browser, accountCompanyNormalizationCsvPath);
+    const accountCommentaryNormalizationState = await assertAccountCompanyNormalizationSeparated(browser, accountCommentaryNormalizationCsvPath);
     await assertMirrorRelationshipSeparated(browser, mirrorRelationshipCsvPath);
     const largeContactPerformance = await assertLargeContactCsvPerformance(browser, largeContactCsvPath);
     const largeContactJsonDeferredState = await assertLargeContactJsonDeferredIngest(browser, largeContactJsonPath);
@@ -607,6 +610,17 @@ async function run() {
       !accountCompanyNormalizationState.reasons.includes("Exact phone")
     ) {
       throw new Error(`Expected the account company normalization fixture to group the canonical alias pair: ${JSON.stringify(accountCompanyNormalizationState)}`);
+    }
+    if (
+      accountCommentaryNormalizationState.rowCount !== 2 ||
+      accountCommentaryNormalizationState.groupCount !== 1 ||
+      accountCommentaryNormalizationState.runtimeScore < 70 ||
+      !accountCommentaryNormalizationState.reasons.includes("Exact account name") ||
+      !accountCommentaryNormalizationState.reasons.includes("Exact phone")
+    ) {
+      throw new Error(
+        `Expected the account commentary normalization fixture to strip internal commentary and keep exact-name plus exact-phone evidence: ${JSON.stringify(accountCommentaryNormalizationState)}`
+      );
     }
     assertPerformanceBudget("large Contact CSV worker import", largeContactPerformance.elapsedMs, PERFORMANCE_BUDGETS.largeContactCsvWorkerMs);
     if (!lightTheme.colorScheme.includes("light") || !darkTheme.colorScheme.includes("dark") || lightTheme.bodyBg === darkTheme.bodyBg) {
