@@ -12,8 +12,11 @@ if ! git rev-parse --verify "${BRANCH}" >/dev/null 2>&1; then
   exit 2
 fi
 
-PRIVATE_PATTERN='00O[A-Za-z0-9]{12,15}|00D[A-Za-z0-9]{12,15}|OneDrive-POLITICO|/Users/|[A-Za-z]:\\Users\\|politico--staging|politico-staging|politico\.my\.salesforce|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
-GENERATED_PATTERN='(^|/)(Output|logs|incoming|backups|data|dist|node_modules)(/|$)|(^|/)\.DS_Store$'
+echo "Checking shareable sanitized projection..."
+node "${PROJECT_DIR}/scripts/sync-shareable-sanitized.js" --check --source-ref main --target-ref "${BRANCH}"
+
+PRIVATE_PATTERN='00OV|00OS|OneDrive-POLITICO|/Users|politico--staging|politico-staging|politico\.my\.salesforce|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+GENERATED_PATTERN='(^|/)(Output|logs|incoming|backups|data|dist|node_modules|\.beads)(/|$)|(^|/)\.DS_Store$'
 
 # Beads stores local workspace metadata and backup state, not shareable app code.
 if git grep -n -E "${PRIVATE_PATTERN}" "${BRANCH}" -- . ':(exclude)scripts/check-shareable.sh' ':(exclude).beads' ':(exclude).beads/**'; then

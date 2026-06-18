@@ -30,6 +30,7 @@ Only update the public mirror deliberately:
 
 ```bash
 git switch shareable
+npm run sync:shareable
 npm run check
 npm run check:shareable
 git diff origin/shareable..shareable
@@ -38,7 +39,9 @@ git diff origin/shareable..shareable
 git switch main
 ```
 
-Do not merge `main` into `shareable` without reviewing the diff for private details first, and do not push `main` directly to `public/main`.
+`npm run sync:shareable` is the deterministic public-safe projection step for managed files such as `feature-test-manifest.json`, `AGENTS.md`, and the public feature briefs referenced by the sanitized manifest.
+
+Do not merge `main` into `shareable` without reviewing the diff for private details first.
 
 ## Branch Protection Decision
 
