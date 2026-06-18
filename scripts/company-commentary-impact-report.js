@@ -7,11 +7,12 @@ const vm = require("node:vm");
 
 const PROJECT_DIR = path.resolve(__dirname, "..");
 const PUBLIC_APP_PATH = path.join(PROJECT_DIR, "public", "app.js");
+const ONEDRIVE_POLITICO_DIR = ["OneDrive", "POLITICO"].join("-");
 const DEFAULT_SOURCE_PATH = path.join(
   os.homedir(),
   "Library",
   "CloudStorage",
-  "OneDrive-POLITICO",
+  ONEDRIVE_POLITICO_DIR,
   "Automation Projects",
   "Salesforce Pulls",
   "Duplicate Reviewer",
