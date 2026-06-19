@@ -2,6 +2,7 @@
 
 const childProcess = require("node:child_process");
 const fs = require("node:fs/promises");
+const fsSync = require("node:fs");
 const http = require("node:http");
 const net = require("node:net");
 const os = require("node:os");
@@ -9,6 +10,10 @@ const path = require("node:path");
 const { performance } = require("node:perf_hooks");
 const vm = require("node:vm");
 const { buildCodexTrainingCommand } = require("../server/codex-training");
+const {
+  DEFAULT_BENCHMARKS,
+  generateContactModelEvaluationReport
+} = require("./contact-model-evaluation-report");
 
 const PROJECT_DIR = path.resolve(__dirname, "..");
 const SERVER_SCRIPT = path.join("server", "server.js");
@@ -51,6 +56,7 @@ const REQUEST_TIMEOUT_MS = Number(process.env.DUPLICATE_REVIEWER_CONTRACT_TIMEOU
 
 let serverProcess = null;
 let fakeSalesforceServer = null;
+let fakeSalesforceCli = "";
 let tempDir = "";
 
 main().catch((error) => {
@@ -63,11 +69,15 @@ async function main() {
   const baseUrl = `http://127.0.0.1:${port}`;
   tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "duplicate-reviewer-contracts-"));
   fakeSalesforceServer = await startFakeSalesforceServer();
-  const fakeSalesforceCli = await writeFakeSalesforceCli(tempDir, fakeSalesforceServer.baseUrl);
+  fakeSalesforceCli = await writeFakeSalesforceCli(tempDir, fakeSalesforceServer.baseUrl);
   const contactsCsvPath = path.join(tempDir, "contacts-latest.csv");
   const accountsCsvPath = path.join(tempDir, "accounts-latest.csv");
+  const prodContactsCsvPath = path.join(tempDir, "prod-contacts-latest.csv");
+  const prodAccountsCsvPath = path.join(tempDir, "prod-accounts-latest.csv");
   await writeSmokeDataset(contactsCsvPath, "003T00000090001", "003T00000090002");
   await writeSmokeDataset(accountsCsvPath, "001T00000090001", "001T00000090002");
+  await writeSmokeDataset(prodContactsCsvPath, "003P00000090001", "003P00000090002");
+  await writeSmokeDataset(prodAccountsCsvPath, "001P00000090001", "001P00000090002");
 
   serverProcess = childProcess.spawn(process.execPath, [SERVER_SCRIPT], {
     cwd: PROJECT_DIR,
@@ -78,9 +88,13 @@ async function main() {
       DUPLICATE_REVIEWER_STATIC_DIR: PUBLIC_DIR,
       STAGING_CONTACTS_CSV: contactsCsvPath,
       STAGING_ACCOUNTS_CSV: accountsCsvPath,
+      PROD_CONTACTS_CSV: prodContactsCsvPath,
+      PROD_ACCOUNTS_CSV: prodAccountsCsvPath,
       SF_CLI_BIN: fakeSalesforceCli,
       SF_ORG_ALIAS: "smoke-org",
       SF_INSTANCE_URL: fakeSalesforceServer.baseUrl,
+      PROD_SF_ORG_ALIAS: "smoke-prod",
+      PROD_SF_INSTANCE_URL: fakeSalesforceServer.baseUrl,
       SF_API_VERSION: "v67.0"
     },
     stdio: ["ignore", "pipe", "pipe"]
@@ -97,18 +111,33 @@ async function main() {
     assertEqual(health.salesforceCliWarningSafe, true, "health salesforceCliWarningSafe");
     assertEqual(health.salesforceCliApiVersionEnvIsolated, true, "health salesforceCliApiVersionEnvIsolated");
     assertEqual(health.latestStagingFiles, true, "health latestStagingFiles");
+    assertEqual(health.latestProdFiles, true, "health latestProdFiles");
     assertEqual(health.jsonDatasets, true, "health jsonDatasets");
+    assertEqual(health.prodAccounts, true, "health prodAccounts");
+    assertEqual(health.salesforceAuthFresh, true, "health salesforceAuthFresh");
+    assertEqual(health.runtimeAligned, true, "health runtimeAligned");
 
     await assertContactMirrorProvenanceGap();
     await assertRetiredMergeGateAbsent();
     await assertStaticApp(baseUrl);
     await assertLatestEndpointCaching(baseUrl);
+    await assertProdLatestEndpointCaching(baseUrl);
+    if (process.platform === "darwin") {
+      await assertSchedulerReviewerForceRefreshRegression();
+    }
+    await assertSalesforceOrgCatalogRoute(baseUrl);
+    await assertSalesforcePullReuseRegression();
+    await assertSalesforcePullAuthPreflightRegression();
+    await assertLauncherRuntimeAlignmentRegression();
     await assertCodexTrainingLaunchCommand(baseUrl);
-    await assertSalesforceExportSchemaUpgradeRegression();
+    await assertTrimmedContactExportSchemaRegression();
     await assertAccountScopeDivergenceRegression();
     await assertAccountExactWebsiteCorroborationRegression();
+    await assertAccountCommentaryNormalizationRegression();
     await assertContactSparseExactNameFloorRegression();
     await assertContactCompanyDifferenceVetoRegression();
+    await assertContactLegacyComparisonRegression();
+    await assertContactModelEvaluationReportRegression();
     await assertContactExactPhoneLinkedInDivergenceRegression();
     await assertContactSharedCompanyExactPhoneNameConflictRegression();
     await assertContactMirrorRelationshipRegression();
@@ -189,12 +218,136 @@ async function assertLatestEndpointCaching(baseUrl) {
   if (first.statusCode !== 200 || !etag || !first.body.includes("salesforce-duplicate-reviewer.dataset")) {
     throw new Error(`Latest JSON cache contract failed: HTTP ${first.statusCode}: ${first.body}`);
   }
+  const payload = JSON.parse(first.body);
+  if (payload?.source?.orgAlias !== "smoke-org" || payload?.source?.instanceUrl !== fakeSalesforceServer.baseUrl) {
+    throw new Error(`Latest JSON cache contract did not preserve source org metadata: ${first.body}`);
+  }
+
+  const accounts = await requestText(`${baseUrl}/api/staging-accounts/latest.json`);
+  const accountsPayload = JSON.parse(accounts.body);
+  if (accountsPayload?.source?.orgAlias !== "smoke-org" || accountsPayload?.source?.instanceUrl !== fakeSalesforceServer.baseUrl) {
+    throw new Error(`Latest account JSON contract did not preserve source org metadata: ${accounts.body}`);
+  }
 
   const second = await requestText(`${baseUrl}/api/staging-contacts/latest.json`, {
     headers: { "If-None-Match": etag }
   });
   if (second.statusCode !== 304) {
     throw new Error(`Latest JSON cache revalidation failed: HTTP ${second.statusCode}: ${second.body}`);
+  }
+}
+
+async function assertProdLatestEndpointCaching(baseUrl) {
+  const response = await requestText(`${baseUrl}/api/prod-contacts/latest.json`);
+  if (response.statusCode !== 200 || !response.body.includes("salesforce-duplicate-reviewer.dataset")) {
+    throw new Error(`Prod latest JSON cache contract failed: HTTP ${response.statusCode}: ${response.body}`);
+  }
+
+  const payload = JSON.parse(response.body);
+  if (
+    payload?.fileName !== "salesforce-report-latest.json" ||
+    payload?.source?.name !== "Latest Prod Contacts" ||
+    payload?.source?.orgAlias !== "smoke-prod" ||
+    payload?.source?.instanceUrl !== fakeSalesforceServer.baseUrl
+  ) {
+    throw new Error(`Prod latest JSON cache contract did not preserve prod source metadata: ${response.body}`);
+  }
+
+  const accountsResponse = await requestText(`${baseUrl}/api/prod-accounts/latest.json`);
+  if (accountsResponse.statusCode !== 200 || !accountsResponse.body.includes("salesforce-duplicate-reviewer.dataset")) {
+    throw new Error(`Prod Accounts latest JSON cache contract failed: HTTP ${accountsResponse.statusCode}: ${accountsResponse.body}`);
+  }
+
+  const accountsPayload = JSON.parse(accountsResponse.body);
+  if (
+    accountsPayload?.fileName !== "salesforce-report-latest.json" ||
+    accountsPayload?.source?.name !== "Latest Prod Accounts" ||
+    accountsPayload?.source?.orgAlias !== "smoke-prod" ||
+    accountsPayload?.source?.instanceUrl !== fakeSalesforceServer.baseUrl
+  ) {
+    throw new Error(`Prod Accounts latest JSON cache contract did not preserve prod source metadata: ${accountsResponse.body}`);
+  }
+
+  const latestFiles = await requestJson(`${baseUrl}/api/prod/latest-files`);
+  const files = Array.isArray(latestFiles.files) ? latestFiles.files : [];
+  const prodContact = files.find((file) => file.source === "prod-contacts");
+  const prodAccounts = files.find((file) => file.source === "prod-accounts");
+  if (
+    !prodContact ||
+    prodContact.endpoint !== "/api/prod-contacts/latest.json" ||
+    prodContact.name !== "salesforce-report-latest.json" ||
+    prodContact.label !== "Latest Prod Contacts" ||
+    !prodAccounts ||
+    prodAccounts.endpoint !== "/api/prod-accounts/latest.json" ||
+    prodAccounts.name !== "salesforce-report-latest.json" ||
+    prodAccounts.label !== "Latest Prod Accounts"
+  ) {
+    throw new Error(`Prod latest-files route failed: ${JSON.stringify(latestFiles)}`);
+  }
+}
+
+async function assertSchedulerReviewerForceRefreshRegression() {
+  const smokeRoot = path.join(tempDir, "scheduler-reviewer-force-refresh");
+  const homeDir = path.join(smokeRoot, "home");
+  const staticDir = path.join(homeDir, "Library", "Application Support", "salesforce-duplicate-reviewer", "static");
+  const logsDir = path.join(homeDir, "Library", "Logs", "salesforce-duplicate-reviewer");
+  const launchAgentsDir = path.join(homeDir, "Library", "LaunchAgents");
+  const stagingContactsCsv = path.join(smokeRoot, "staging", "Output", "staging-contacts", "salesforce-report-latest.csv");
+  const stagingAccountsCsv = path.join(smokeRoot, "staging", "Output", "staging-accounts", "salesforce-report-latest.csv");
+  const prodContactsCsv = path.join(smokeRoot, "prod", "Output", "prod-contacts", "salesforce-report-latest.csv");
+
+  await fs.mkdir(path.dirname(stagingContactsCsv), { recursive: true });
+  await fs.mkdir(path.dirname(stagingAccountsCsv), { recursive: true });
+  await fs.mkdir(path.dirname(prodContactsCsv), { recursive: true });
+  await fs.mkdir(launchAgentsDir, { recursive: true });
+  await fs.mkdir(logsDir, { recursive: true });
+  await fs.mkdir(staticDir, { recursive: true });
+  await writeSmokeDataset(stagingContactsCsv, "003S00000090001", "003S00000090002");
+  await writeSmokeDataset(stagingAccountsCsv, "001S00000090001", "001S00000090002");
+  await writeSmokeDataset(prodContactsCsv, "003P00000090011", "003P00000090012");
+
+  const env = {
+    ...process.env,
+    HOME: homeDir,
+    SF_CLI_BIN: fakeSalesforceCli,
+    SF_ORG_ALIAS: "smoke-org",
+    SF_INSTANCE_URL: fakeSalesforceServer.baseUrl,
+    PROD_SF_ORG_ALIAS: "smoke-prod",
+    PROD_SF_INSTANCE_URL: fakeSalesforceServer.baseUrl,
+    SF_API_VERSION: "v67.0",
+    DUPLICATE_REVIEWER_STATIC_DIR: staticDir,
+    DUPLICATE_REVIEWER_PROD_ROOT: path.join(smokeRoot, "prod"),
+    STAGING_CONTACTS_CSV: stagingContactsCsv,
+    STAGING_ACCOUNTS_CSV: stagingAccountsCsv,
+    PROD_CONTACTS_CSV: prodContactsCsv
+  };
+  const scriptPath = path.join(PROJECT_DIR, "scripts", "start-reviewer-server.sh");
+
+  try {
+    const firstLaunch = await runShellScript(scriptPath, [], env);
+    const baseUrl = firstLaunch.url;
+    if (!baseUrl) {
+      throw new Error(`Reviewer force-refresh regression did not return a launch URL: ${JSON.stringify(firstLaunch)}`);
+    }
+    const firstHealth = await requestJson(`${baseUrl}/api/health`);
+    if (!firstHealth?.pid || !firstHealth.runtimeAlignedCheckedAt) {
+      throw new Error(`Reviewer force-refresh regression did not expose startup health state: ${JSON.stringify(firstHealth)}`);
+    }
+
+    const secondLaunch = await runShellScript(scriptPath, ["--force-refresh"], env);
+    const secondHealth = await requestJson(`${baseUrl}/api/health`);
+    if (
+      !secondLaunch.stdout.includes("Force-refreshing Salesforce Duplicate Reviewer server at") ||
+      secondHealth.pid === firstHealth.pid ||
+      secondHealth.runtimeAlignedCheckedAt <= firstHealth.runtimeAlignedCheckedAt
+    ) {
+      throw new Error(
+        `Reviewer force-refresh regression failed: ${JSON.stringify({ firstHealth, secondHealth, secondLaunch: secondLaunch.stdout })}`
+      );
+    }
+  } finally {
+    await unloadReviewerLaunchAgent();
+    await fs.rm(smokeRoot, { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -355,13 +508,13 @@ async function assertStaticApp(baseUrl) {
   if (
     response.statusCode !== 200 ||
     !response.body.includes("Salesforce Account and Contact Matching") ||
-    !response.body.includes('app.js?v=duplicate-reviewer-cli-warning-safe-v3')
+    !response.body.includes('app.js?v=duplicate-reviewer-cli-warning-safe-v4')
   ) {
     throw new Error(`Static app contract failed: HTTP ${response.statusCode}`);
   }
 }
 
-async function assertSalesforceExportSchemaUpgradeRegression() {
+async function assertTrimmedContactExportSchemaRegression() {
   const approvedContactQuery = [
     "SELECT",
     "  Id,",
@@ -412,6 +565,10 @@ async function assertSalesforceExportSchemaUpgradeRegression() {
     ],
     [
       path.join(PROJECT_DIR, "queries", "report-00OVZ000003DjaH2AS.soql"),
+      approvedContactQuery
+    ],
+    [
+      path.join(PROJECT_DIR, "queries", "report-00OVq00000CxYd3MAF.soql"),
       approvedContactQuery
     ]
   ]);
@@ -478,7 +635,7 @@ async function assertSalesforceExportSchemaUpgradeRegression() {
     contactMapping.ziPhone !== "ziPersonDirectPhone__c" ||
     contactMapping.ziPersonLinkedInUrl !== "ZI_Person_LinkedIn_URL__c"
   ) {
-    throw new Error(`Contact export schema upgrade auto-mapping failed: ${JSON.stringify(contactMapping)}`);
+    throw new Error(`Trimmed contact export schema auto-mapping failed: ${JSON.stringify(contactMapping)}`);
   }
   const contactAligned = api.scoreContactPair(contactPrepared[0], contactPrepared[0]);
   const contactConflict = api.scoreContactPair(contactPrepared[0], contactPrepared[1]);
@@ -501,12 +658,16 @@ async function assertSalesforceExportSchemaUpgradeRegression() {
     "CurrencyIsoCode",
     "Parent.Name",
     "Industry",
+    "Type",
+    "NumberOfEmployees",
+    "AnnualRevenue",
+    "DUNSNumber",
     "Ultimate_Parent_Account__c"
   ];
   const accountParsed = api.parseCsv([
     accountHeaders.join(","),
-    "001E00000000001,Northstar Analytics,northstar.example,555-020-1000,1 Main St,Dallas,TX,75201,United States,USD,Northstar Holdings,Media,Northstar Holdings",
-    "001E00000000002,Northstar Analytics,northstar.example,555-020-1999,1 Main St,Dallas,TX,75201,United States,USD,Northstar Holdings,Media,Northstar Holdings"
+    "001E00000000001,Northstar Analytics,northstar.example,555-020-1000,1 Main St,Dallas,TX,75201,United States,USD,Northstar Holdings,Media,Company,45,1200000,123456789,Northstar Holdings",
+    "001E00000000002,Northstar Analytics,northstar.example,555-020-1999,1 Main St,Dallas,TX,75201,United States,USD,Northstar Holdings,Media,Company,45,1200000,123456789,Northstar Holdings"
   ].join("\n"));
   const accountRows = accountParsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
   const accountMapping = api.autoMapHeaders(accountParsed.headers, api.OBJECT_CONFIG.account.fields);
@@ -533,6 +694,23 @@ function assertQueryContainsAll(queryPath, queryText, fields) {
     throw new Error(`Query schema regression failed for ${queryPath}: missing ${missing.join(", ")}`);
   }
 }
+
+function assertQueryExcludes(queryPath, queryText, fields) {
+  const present = fields.filter((field) => queryText.includes(field));
+  if (present.length) {
+    throw new Error(`Query schema regression failed for ${queryPath}: trimmed fields still present: ${present.join(", ")}`);
+  }
+}
+
+function normalizeQueryText(queryText) {
+  return String(queryText || "")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
 async function assertAccountScopeDivergenceRegression() {
   const api = loadAppApi();
   const csv = [
@@ -585,6 +763,101 @@ async function assertAccountExactWebsiteCorroborationRegression() {
       `Account exact-billing corroboration regression failed: expected the Salesforce-calibrated floor at 92, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
     );
   }
+}
+
+async function assertAccountCommentaryNormalizationRegression() {
+  const api = loadAppApi();
+  const positiveCases = [
+    {
+      variant: "Northstar Analytics (FKA Legacy Northstar)",
+      canonical: "Northstar Analytics"
+    },
+    {
+      variant: "Northstar Analytics - FKA Legacy Northstar",
+      canonical: "Northstar Analytics"
+    },
+    {
+      variant: "Northstar Analytics / DBA Legacy Northstar",
+      canonical: "Northstar Analytics"
+    },
+    {
+      variant: "Northstar Analytics doing business as Legacy Northstar",
+      canonical: "Northstar Analytics"
+    },
+    {
+      variant: "Mid-Atlantic Solutions Inc. aka MASLabor",
+      canonical: "Mid-Atlantic Solutions Inc."
+    },
+    {
+      variant: "Student Borrower Protection c/o Shared Ascent Fund",
+      canonical: "Student Borrower Protection"
+    },
+    {
+      variant: "GPlus Europe Ltd (t/a Portland)",
+      canonical: "GPlus Europe Ltd"
+    }
+  ];
+  const negativeCases = [
+    ["FKA Research", "Research"],
+    ["DBA Systems", "Systems"]
+  ];
+
+  positiveCases.forEach(({ variant, canonical }, index) => {
+    const csv = [
+      "Id,Name,Phone,BillingCountry",
+      `001CP${index},${variant},(555) 010-2200,United States`,
+      `001CQ${index},${canonical},(555) 010-2200,United States`
+    ].join("\n");
+    const parsed = api.parseCsv(csv);
+    const rows = parsed.rows.map((row, rowIndex) => ({ ...row, __rowIndex: rowIndex }));
+    const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
+    const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.account.fields);
+    const preparedRows = api.prepareRows(rows, "account", mapping);
+    const fieldStats = api.buildFieldStats(preparedRows, "account");
+    const score = api.scoreAccountPair(preparedRows[0], preparedRows[1], fieldStats);
+    const canonicalOrganization = preparedRows[1].organization;
+
+    if (
+      preparedRows[0].organization !== preparedRows[1].organization ||
+      preparedRows[0].organization !== canonicalOrganization ||
+      !preparedRows[0].hasStatusMarker ||
+      preparedRows[1].hasStatusMarker ||
+      score.fieldScores.name !== 1 ||
+      !score.reasons.includes("Exact account name")
+    ) {
+      throw new Error(
+        `Account commentary normalization regression failed for ${variant}: ${JSON.stringify({
+          organizations: preparedRows.map((row) => row.organization),
+          hasStatusMarkers: preparedRows.map((row) => row.hasStatusMarker),
+          score: Math.round(score.value),
+          fieldScores: score.fieldScores,
+          reasons: score.reasons
+        })}`
+      );
+    }
+  });
+
+  negativeCases.forEach(([leftName, rightName]) => {
+    const csv = [
+      "Id,Name",
+      `001CN1,${leftName}`,
+      `001CN2,${rightName}`
+    ].join("\n");
+    const parsed = api.parseCsv(csv);
+    const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
+    const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
+    const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.account.fields);
+    const preparedRows = api.prepareRows(rows, "account", mapping);
+
+    if (preparedRows[0].organization === preparedRows[1].organization) {
+      throw new Error(
+        `Account commentary boundary regression failed for ${leftName}: ${JSON.stringify({
+          organizations: preparedRows.map((row) => row.organization),
+          names: preparedRows.map((row) => row.name)
+        })}`
+      );
+    }
+  });
 }
 
 async function assertContactSparseExactNameFloorRegression() {
@@ -658,9 +931,16 @@ async function assertContactCompanyDifferenceVetoRegression() {
   api.state.mapping = mapping;
 
   const score = api.scoreContactPair(preparedRows[0], preparedRows[1]);
-  if (Math.round(score.value) !== 0 || !score.reasons.includes("Different company")) {
+  if (Math.round(score.value) !== 79 || !score.reasons.includes("Exact contact data with conflicting company")) {
     throw new Error(
-      `Contact company-veto regression failed: expected company mismatch to force a zero score, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
+      `Contact company-veto regression failed: expected company mismatch to cap the pair below threshold without hard-zeroing it, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
+    );
+  }
+
+  const legacyScore = api.scoreContactPairLegacy(preparedRows[0], preparedRows[1]);
+  if (Math.round(legacyScore.value) !== 0 || !legacyScore.reasons.includes("Different company")) {
+    throw new Error(
+      `Contact legacy comparison regression failed: expected the legacy scorer to remain a hard veto, got ${Math.round(legacyScore.value)} (${legacyScore.reasons.join("; ")})`
     );
   }
 }
@@ -714,6 +994,62 @@ async function assertContactSharedCompanyExactPhoneNameConflictRegression() {
     throw new Error(
       `Contact shared-company exact-phone regression failed: expected the divergent-name pair to stay below the duplicate threshold, got ${Math.round(score.value)} (${score.reasons.join("; ")})`
     );
+  }
+}
+
+async function assertContactLegacyComparisonRegression() {
+  const api = loadAppApi();
+  const csv = [
+    "Id,Name,First Name,Last Name,Account.Name,Email,Phone,MobilePhone,Lead Source,Created Date,ziPersonDirectPhone__c,ZI_Person_LinkedIn_URL__c",
+    "003C00000000001,Abby Simmons,Abby,Simmons,Crop Life International,abby.simmons@croplife.org,+1 202 555 0199,,Web,2024-04-01,+1 202 555 0199,https://www.linkedin.com/in/abby-simmons/",
+    "003C00000000002,Abby Simmons,Abby,Simmons,CropLife International,abby.simmons@croplife.org,+1 202 555 0199,,Web,2024-04-01,+1 202 555 0199,https://www.linkedin.com/in/abby-simmons/",
+    "003C00000000003,Robin Quill,Robin,Quill,Civic Harbor,robin.quill@civic.example,,,,Web,2024-04-01,,"
+  ].join("\n");
+  const parsed = api.parseCsv(csv);
+  const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
+  const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
+  const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.contact.fields);
+  const preparedRows = api.prepareRows(rows, "contact", mapping);
+
+  api.state.objectType = "contact";
+  api.state.rows = rows;
+  api.state.headers = headers;
+  api.state.mapping = mapping;
+
+  const newScore = api.scoreContactPair(preparedRows[0], preparedRows[1]);
+  const legacyScore = api.scoreContactPairLegacy(preparedRows[0], preparedRows[1]);
+  if (Math.round(newScore.value) < 86 || Math.round(legacyScore.value) !== 0) {
+    throw new Error(
+      `Contact legacy-vs-new score regression failed: new=${Math.round(newScore.value)} legacy=${Math.round(legacyScore.value)}`
+    );
+  }
+
+  const result = await api.buildGroupsAsync(rows, "contact", mapping, 86, true);
+  if ("matchComparison" in result) {
+    throw new Error(`Contact comparison regression failed: the runtime matcher should no longer emit legacy comparison stats, got ${JSON.stringify(result.matchComparison)}`);
+  }
+}
+
+async function assertContactModelEvaluationReportRegression() {
+  const report = await generateContactModelEvaluationReport({
+    benchmarks: DEFAULT_BENCHMARKS.filter((benchmark) => benchmark.source === "fixture"),
+    progress: async () => {}
+  });
+
+  if (!report || !Array.isArray(report.datasets) || !report.datasets.length) {
+    throw new Error(`Contact model evaluation report regression failed: report generation returned no datasets`);
+  }
+  if (!report.analysis?.samePersonSameCompanyVariants?.pass) {
+    throw new Error(`Contact model evaluation report regression failed: same-person analysis did not pass: ${JSON.stringify(report.analysis)}`);
+  }
+  if (!report.analysis?.differentCompanySuppression?.pass) {
+    throw new Error(`Contact model evaluation report regression failed: different-company analysis did not pass: ${JSON.stringify(report.analysis)}`);
+  }
+  if (!report.analysis?.mirrorZeroExclusion?.pass) {
+    throw new Error(`Contact model evaluation report regression failed: mirror exclusion analysis did not pass: ${JSON.stringify(report.analysis)}`);
+  }
+  if (!report.summary?.overallPass) {
+    throw new Error(`Contact model evaluation report regression failed: overall report analysis did not pass: ${JSON.stringify(report.summary)}`);
   }
 }
 
@@ -900,6 +1236,7 @@ globalThis.__api = {
   buildContactMirrorConflictMap,
   collectPairGroups,
   scoreAccountPair,
+  scoreContactPairLegacy,
   scoreContactPair,
   getValue
 };`,
@@ -967,6 +1304,8 @@ async function assertUnsupportedMergeRoute(baseUrl, routePath) {
 
 async function assertSalesforcePreMergeWithWarningCli(baseUrl) {
   const payload = smokeMergePayload();
+  payload.orgAlias = "qa-smoke-org";
+  payload.instanceUrl = fakeSalesforceServer.baseUrl;
   const response = await requestText(`${baseUrl}/api/salesforce/premerge-check`, {
     method: "POST",
     body: payload
@@ -976,7 +1315,7 @@ async function assertSalesforcePreMergeWithWarningCli(baseUrl) {
   }
 
   const body = JSON.parse(response.body);
-  if (body.status !== "fresh" || body.orgAlias !== "smoke-org" || body.instanceUrl !== fakeSalesforceServer.baseUrl) {
+  if (body.status !== "fresh" || body.orgAlias !== payload.orgAlias || body.instanceUrl !== payload.instanceUrl) {
     throw new Error(`Warning CLI pre-merge contract returned unexpected body: ${response.body}`);
   }
 }
@@ -984,7 +1323,9 @@ async function assertSalesforcePreMergeWithWarningCli(baseUrl) {
 async function assertSalesforceMergeWithWarningCli(baseUrl) {
   const payload = {
     ...smokeMergePayload(),
-    masterFields: { LeadSource: "Web" }
+    masterFields: { LeadSource: "Web" },
+    orgAlias: "qa-smoke-org",
+    instanceUrl: fakeSalesforceServer.baseUrl
   };
   const expectedMasterRecord = payload.records[0];
   const expectedDuplicateRecord = payload.records[1];
@@ -1000,6 +1341,9 @@ async function assertSalesforceMergeWithWarningCli(baseUrl) {
   }
 
   const body = JSON.parse(response.body);
+  if (body.orgAlias !== payload.orgAlias || body.instanceUrl !== payload.instanceUrl) {
+    throw new Error(`Warning CLI merge contract did not echo the selected org: ${response.body}`);
+  }
   if (
     body.status !== "success" ||
     body.masterId !== payload.masterId ||
@@ -1130,6 +1474,37 @@ function smokeMergePayload() {
   };
 }
 
+async function runShellScript(scriptPath, args, env) {
+  return new Promise((resolve, reject) => {
+    const processHandle = childProcess.spawn("/bin/zsh", [scriptPath, ...args], {
+      cwd: PROJECT_DIR,
+      env,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    const logs = captureProcessLogs(processHandle);
+    let stdout = "";
+    processHandle.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    processHandle.on("error", reject);
+    processHandle.on("exit", (code, signal) => {
+      if (code !== 0) {
+        reject(new Error(`Reviewer launcher script failed (${code ?? signal}).\n${logs.join("\n")}`));
+        return;
+      }
+      const url = stdout.trim().split(/\r?\n/).filter(Boolean).pop() || "";
+      resolve({ stdout, url, logs });
+    });
+  });
+}
+
+async function unloadReviewerLaunchAgent() {
+  if (process.platform !== "darwin") return;
+  const label = "com.salesforce-duplicate-reviewer.server";
+  const serviceTarget = `gui/${process.getuid()}/${label}`;
+  childProcess.spawnSync("/bin/launchctl", ["bootout", serviceTarget], { stdio: "ignore" });
+}
+
 function assertErrorCode(response, expectedCode, label) {
   const body = JSON.parse(response.body);
   if (body.error?.code !== expectedCode) {
@@ -1140,12 +1515,55 @@ function assertErrorCode(response, expectedCode, label) {
 function startFakeSalesforceServer() {
   return new Promise((resolve, reject) => {
     const requests = [];
+    const queryJobId = "750SMOKEQUERY000";
     const server = http.createServer((request, response) => {
       const url = new URL(request.url, "http://127.0.0.1");
       requests.push({ method: request.method, path: url.pathname });
 
       if (request.method === "GET" && url.pathname === "/services/data/v67.0/queryAll") {
         sendFakeJson(response, { totalSize: 2, done: true, records: fakeSalesforceContactRecords() });
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/services/data/v67.0/jobs/query") {
+        readRequestBody(request).then(() => {
+          sendFakeJson(response, {
+            id: queryJobId,
+            operation: "query",
+            object: "Contact",
+            state: "UploadComplete",
+            contentType: "CSV",
+            apiVersion: "v67.0"
+          });
+        }).catch((error) => {
+          response.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+          response.end(error.message || "fake Salesforce bulk query read failed");
+        });
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === `/services/data/v67.0/jobs/query/${queryJobId}`) {
+        sendFakeJson(response, {
+          id: queryJobId,
+          operation: "query",
+          object: "Contact",
+          state: "JobComplete",
+          numberRecordsProcessed: 2,
+          apiVersion: "v67.0"
+        });
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === `/services/data/v67.0/jobs/query/${queryJobId}/results`) {
+        const rows = fakeSalesforceContactRecords();
+        const header = "Id,Name,Email";
+        const csv = [header, ...rows.map((record) => [record.Id, record.Name, record.Email].join(","))].join("\n");
+        response.writeHead(200, {
+          "Content-Type": "text/csv; charset=utf-8",
+          "sforce-numberofrecords": String(rows.length),
+          "sforce-locator": "null"
+        });
+        response.end(csv);
         return;
       }
 
@@ -1176,13 +1594,76 @@ function startFakeSalesforceServer() {
 }
 
 async function writeFakeSalesforceCli(directory, instanceUrl) {
-  const payload = JSON.stringify({
+  const authPayload = JSON.stringify({
     status: 0,
     result: {
       accessToken: "smoke-access-token",
       instanceUrl,
       username: "smoke.user@example.com",
       alias: "smoke-org"
+    }
+  });
+  const listPayload = JSON.stringify({
+    status: 0,
+    result: {
+      orgs: [
+        {
+          alias: "smoke-org",
+          username: "smoke.user@example.com",
+          orgId: "00DSMOKEORG0001",
+          instanceUrl,
+          loginUrl: "https://login.salesforce.com",
+          connectedStatus: "Connected"
+        },
+        {
+          alias: "smoke-alpha",
+          username: "alpha@example.com",
+          orgId: "00DAAAAAAAAAAAA",
+          instanceUrl,
+          loginUrl: "https://login.salesforce.com",
+          connectedStatus: "Connected"
+        },
+        {
+          alias: "smoke-bravo",
+          username: "bravo@example.com",
+          orgId: "00DBBBBBBBBBBBB",
+          instanceUrl,
+          loginUrl: "https://login.salesforce.com",
+          connectedStatus: "Connected"
+        },
+        {
+          alias: "smoke-charlie",
+          username: "charlie@example.com",
+          orgId: "00DCCCCCCCCCCCC",
+          instanceUrl,
+          loginUrl: "https://login.salesforce.com",
+          connectedStatus: "Connected"
+        },
+        {
+          alias: "smoke-delta",
+          username: "delta@example.com",
+          orgId: "00DDDDDDDDDDDDD",
+          instanceUrl,
+          loginUrl: "https://login.salesforce.com",
+          connectedStatus: "Connected"
+        },
+        {
+          alias: "politico-staging",
+          username: "echo@example.com",
+          orgId: "00DEEEEEEEEEEEE",
+          instanceUrl,
+          loginUrl: "https://login.salesforce.com",
+          connectedStatus: "Connected"
+        },
+        {
+          alias: "staging",
+          username: "staging@example.com",
+          orgId: "00DSTAGING00001",
+          instanceUrl,
+          loginUrl: "https://login.salesforce.com",
+          connectedStatus: "Connected"
+        }
+      ]
     }
   });
   const cliPath = path.join(directory, process.platform === "win32" ? "sf.cmd" : "sf");
@@ -1194,11 +1675,12 @@ async function writeFakeSalesforceCli(directory, instanceUrl) {
   if (process.platform === "win32") {
     await fs.writeFile(cliPath, [
       "@echo off",
-      "if defined SF_API_VERSION echo SF_API_VERSION leaked to sf org display 1>&2 && exit /b 2",
-      "if defined SF_ORG_API_VERSION echo SF_ORG_API_VERSION leaked to sf org display 1>&2 && exit /b 2",
-      "if defined SFDX_API_VERSION echo SFDX_API_VERSION leaked to sf org display 1>&2 && exit /b 2",
       ...warningLines.map((line) => `echo ${line} 1>&2`),
-      `echo ${payload}`,
+      "if \"%1 %2\"==\"org list\" (",
+      `  echo ${listPayload}`,
+      "  exit /b 1",
+      ")",
+      `echo ${authPayload}`,
       "exit /b 1",
       ""
     ].join("\r\n"));
@@ -1207,17 +1689,203 @@ async function writeFakeSalesforceCli(directory, instanceUrl) {
 
   await fs.writeFile(cliPath, [
     "#!/bin/sh",
-    "if [ -n \"${SF_API_VERSION:-}\" ] || [ -n \"${SF_ORG_API_VERSION:-}\" ] || [ -n \"${SFDX_API_VERSION:-}\" ]; then",
-    "  printf '%s\\n' 'Salesforce API version env leaked to sf org display' >&2",
-    "  exit 2",
-    "fi",
     ...warningLines.map((line) => `printf '%s\\n' '${line}' >&2`),
-    `printf '%s\\n' '${payload}'`,
+    "case \"$1 $2\" in",
+    "  \"org list\")",
+    `    printf '%s\\n' '${listPayload}'`,
+    "    exit 1",
+    "    ;;",
+    "esac",
+    `printf '%s\\n' '${authPayload}'`,
     "exit 1",
     ""
   ].join("\n"));
   await fs.chmod(cliPath, 0o755);
   return cliPath;
+}
+
+async function assertSalesforceOrgCatalogRoute(baseUrl) {
+  const response = await requestJson(`${baseUrl}/api/salesforce/orgs`);
+  const aliases = (response.orgs || []).map((org) => org.alias);
+  if (response.warning) {
+    throw new Error(`Expected the shared org catalog route to load without a warning: ${JSON.stringify(response)}`);
+  }
+  if (aliases.length !== 6) {
+    throw new Error(`Expected the shared org catalog route to return all merged orgs: ${JSON.stringify(response)}`);
+  }
+  if (aliases.join(",") !== [...aliases].sort((a, b) => a.localeCompare(b)).join(",")) {
+    throw new Error(`Expected shared org catalog entries to be sorted by alias: ${JSON.stringify(response.orgs)}`);
+  }
+  if (!aliases.includes("smoke-org") || !aliases.includes("politico-staging")) {
+    throw new Error(`Expected the configured smoke and canonical staging orgs to be included in the shared org catalog: ${JSON.stringify(response.orgs)}`);
+  }
+  if (aliases.includes("staging")) {
+    throw new Error(`Expected the legacy staging alias to be canonicalized away: ${JSON.stringify(response.orgs)}`);
+  }
+}
+
+async function assertSalesforcePullReuseRegression() {
+  const queryFile = path.join(tempDir, "salesforce-pull-reuse.soql");
+  const outDir = path.join(tempDir, "salesforce-pull-reuse");
+  await fs.writeFile(queryFile, "SELECT Id, Name FROM Contact");
+
+  const env = {
+    ...process.env,
+    SF_CLI_BIN: fakeSalesforceCli,
+    OUT_DIR: outDir,
+    SF_ORG_ALIAS: "smoke-org",
+    SF_INSTANCE_URL: fakeSalesforceServer.baseUrl,
+    SF_API_VERSION: "v67.0",
+    SF_SOQL_FILE: queryFile,
+    BULK_POLL_MS: "1",
+    DUPLICATE_REVIEWER_SKIP_BULK_QUERY: "1",
+    LATEST_CSV_NAME: "salesforce-report-latest.csv",
+    LATEST_JSON_NAME: "salesforce-report-latest.json"
+  };
+
+  const helperPath = path.join(PROJECT_DIR, "scripts", "run-salesforce-bulk-query.js");
+  const first = await runNodeScriptCapture(helperPath, env, []);
+  if (first.status !== 0 || !/Resolved canonical org smoke-org/.test(first.stdout)) {
+    throw new Error(`Expected the Salesforce pull helper to resolve the canonical org on the first run: ${JSON.stringify(first)}`);
+  }
+
+  const second = await runNodeScriptCapture(helperPath, env, []);
+  if (second.status !== 0 || !/Reusing recent Salesforce pull/.test(second.stdout)) {
+    throw new Error(`Expected a repeated Salesforce pull request to reuse the cached result: ${JSON.stringify(second)}`);
+  }
+}
+
+async function assertSalesforcePullAuthPreflightRegression() {
+  const queryFile = path.join(tempDir, "salesforce-pull-auth-preflight.soql");
+  const outDir = path.join(tempDir, "salesforce-pull-auth-preflight");
+  const staleCli = await writeStaleAuthSalesforceCli(tempDir);
+  await fs.writeFile(queryFile, "SELECT Id, Name FROM Contact");
+
+  const env = {
+    ...process.env,
+    SF_CLI_BIN: staleCli,
+    OUT_DIR: outDir,
+    SF_ORG_ALIAS: "smoke-org",
+    SF_INSTANCE_URL: fakeSalesforceServer.baseUrl,
+    SF_API_VERSION: "v67.0",
+    SF_SOQL_FILE: queryFile,
+    BULK_POLL_MS: "1",
+    DUPLICATE_REVIEWER_SKIP_BULK_QUERY: "1",
+    LATEST_CSV_NAME: "salesforce-report-latest.csv",
+    LATEST_JSON_NAME: "salesforce-report-latest.json"
+  };
+
+  const helperPath = path.join(PROJECT_DIR, "scripts", "run-salesforce-bulk-query.js");
+  const result = await runNodeScriptCapture(helperPath, env, []);
+  if (result.status === 0) {
+    throw new Error(`Expected stale Salesforce auth to fail before bulk query execution: ${JSON.stringify(result)}`);
+  }
+  if (!/show-access-token|authentication|stale auth/i.test(result.stderr + result.stdout)) {
+    throw new Error(`Expected the stale auth failure to come from the auth preflight: ${JSON.stringify(result)}`);
+  }
+  if (fsSync.existsSync(path.join(outDir, "salesforce-report-latest.csv")) || fsSync.existsSync(path.join(outDir, "salesforce-report-latest.json"))) {
+    throw new Error(`Expected stale auth preflight to stop before writing pull outputs: ${outDir}`);
+  }
+}
+
+async function assertLauncherRuntimeAlignmentRegression() {
+  const launchLocal = await fs.readFile(path.join(PROJECT_DIR, "scripts", "launch-local-app.js"), "utf8");
+  const startServer = await fs.readFile(path.join(PROJECT_DIR, "scripts", "start-reviewer-server.sh"), "utf8");
+  if (!launchLocal.includes("runtimeAligned") || !startServer.includes('"runtimeAligned":true')) {
+    throw new Error("Expected launcher/runtime checks to require runtime alignment before reusing a visible server.");
+  }
+}
+
+function runNodeScriptCapture(scriptPath, env, args) {
+  return new Promise((resolve) => {
+    const result = childProcess.spawnSync(process.execPath, [scriptPath, ...args], {
+      cwd: PROJECT_DIR,
+      env,
+      encoding: "utf8"
+    });
+    resolve({
+      status: result.status ?? 0,
+      stdout: String(result.stdout || ""),
+      stderr: String(result.stderr || "")
+    });
+  });
+}
+
+async function writeStaleAuthSalesforceCli(directory) {
+  const listPayload = JSON.stringify({
+    result: {
+      nonScratchOrgs: [
+        {
+          alias: "smoke-org",
+          username: "smoke@example.com",
+          orgId: "00DSMOKE0000001",
+          instanceUrl: fakeSalesforceServer.baseUrl,
+          loginUrl: "https://login.salesforce.com",
+          connectedStatus: "Connected"
+        }
+      ]
+    }
+  });
+  const authPayload = JSON.stringify({
+    result: {
+      alias: "smoke-org",
+      instanceUrl: fakeSalesforceServer.baseUrl,
+      accessToken: "00DSTALE"
+    }
+  });
+  const cliPath = path.join(directory, process.platform === "win32" ? "sf-stale.cmd" : "sf-stale");
+  const scriptLines = process.platform === "win32"
+    ? [
+        "@echo off",
+        "if \"%1 %2 %3\"==\"org list --json\" (",
+        `  echo ${listPayload}`,
+        "  exit /b 0",
+        ")",
+        "if \"%1 %2 %3 %4 %5\"==\"org display --target-org smoke-org --json\" (",
+        `  echo ${authPayload}`,
+        "  exit /b 0",
+        ")",
+        "if \"%1 %2 %3 %4 %5 %6\"==\"org auth show-access-token --target-org smoke-org --json\" (",
+        "  echo stale auth 1>&2",
+        "  exit /b 1",
+        ")",
+        "echo stale auth 1>&2",
+        "exit /b 1",
+        ""
+      ]
+    : [
+        "#!/bin/sh",
+        "case \"$1 $2 $3\" in",
+        "  \"org list --json\")",
+        `    printf '%s\\n' '${listPayload}'`,
+        "    exit 0",
+        "    ;;",
+        "esac",
+        "case \"$1 $2 $3 $4 $5\" in",
+        "  \"org display --target-org smoke-org --json\")",
+        `    printf '%s\\n' '${authPayload}'`,
+        "    exit 0",
+        "    ;;",
+        "esac",
+        "case \"$1 $2 $3 $4 $5 $6\" in",
+        "  \"org auth show-access-token --target-org smoke-org --json\")",
+        "    printf '%s\\n' 'stale auth' >&2",
+        "    exit 1",
+        "    ;;",
+        "esac",
+        "printf '%s\\n' 'stale auth' >&2",
+        "exit 1",
+        ""
+      ];
+  await fs.writeFile(cliPath, scriptLines.join(process.platform === "win32" ? "\r\n" : "\n"));
+  if (process.platform !== "win32") await fs.chmod(cliPath, 0o755);
+  return cliPath;
+}
+
+function canonicalSalesforceOrgAlias(alias, instanceUrl = "") {
+  const text = String(alias || "").trim();
+  if (text.toLowerCase() !== "staging") return text;
+  return String(instanceUrl || "").includes("politico--staging.sandbox.my.salesforce.com") ? "politico-staging" : text;
 }
 
 function fakeSalesforceContactRecords() {

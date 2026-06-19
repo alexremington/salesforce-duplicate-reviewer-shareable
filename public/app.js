@@ -201,6 +201,7 @@ const PREMERGE_FRESHNESS_FIELDS = [
   "phone",
   "mobile"
 ];
+const ORG_PREFERENCES_STORAGE_KEY = "salesforce-duplicate-reviewer.org-preferences-v1";
 const GROUP_FILTER_FIELD_TYPES = {
   recordId: "text",
   fullName: "text",
@@ -427,6 +428,7 @@ const GROUP_LIST_VIRTUALIZATION_THRESHOLD = 60;
 const DRAFT_GROUP_FILTER_ID = "__draft-filter";
 const RECENT_FILE_LIMIT = 4;
 const MAX_RECENT_FILE_CONTENT_BYTES = 20 * 1024 * 1024;
+const LARGE_JSON_INGEST_THRESHOLD_BYTES = 50 * 1024 * 1024;
 const REVIEW_STATE_LIMIT = 25;
 const REVIEW_STATE_SAVE_DELAY_MS = 120;
 const DATASET_KEY_SAMPLE_SIZE = 800;
@@ -435,6 +437,7 @@ const FILE_HISTORY_DB_VERSION = 2;
 const FILE_HISTORY_STORE = "recentFiles";
 const REVIEW_STATE_STORE = "reviewStates";
 const LATEST_STAGING_FILES_ENDPOINT = "/api/staging/latest-files";
+const LATEST_PROD_FILES_ENDPOINT = "/api/prod/latest-files";
 const MATCHED_FIELD_THRESHOLD = 0.9;
 const EXACT_HEADER_ONLY_ALIASES = new Set([
   "account",
@@ -481,7 +484,7 @@ const CONTACT_FIELD_WEIGHTS = {
   mailingPostalCode: 5,
   mailingCountry: 2
 };
-const CONTACT_COMPANY_DIVERGENCE_THRESHOLD = 0.5;
+const CONTACT_COMPANY_DIVERGENCE_THRESHOLD = 1;
 const CONTACT_COMPANY_DIVERGENCE_CAP = 80;
 const CONTACT_STRONG_IDENTITY_CONFLICT_CAP = 79;
 const CONTACT_COMPANY_GEOGRAPHY_CONFLICT_CAP = 72;
@@ -498,6 +501,12 @@ const CONTACT_SHARED_COMPANY_EXACT_PHONE_NAME_CONFLICT_REASON = "Shared company 
 const CONTACT_EMAIL_CONTEXT_CORROBORATION_MIN = 0.5;
 const CONTACT_MIRROR_RELATIONSHIP_REASON = "Entitled Contact mirror";
 const CONTACT_EXCLUDED_MERGE_BLOCK_MESSAGE = "This Contact pair is excluded by the Entitled Contact mirror rule and cannot enter the Salesforce merge queue.";
+const CONTACT_MODEL_COMPARISON_THRESHOLD = 70;
+const CONTACT_ORGANIZATION_ALIASES = new Map([
+  ["osu", "ohio state university"],
+  ["the ohio state university", "ohio state university"],
+  ["ohio state", "ohio state university"]
+]);
 const TRAINING_LABELS = {
   match: "Match",
   not_match: "Not Match",
@@ -808,9 +817,19 @@ const state = {
     displayName: "",
     objectType: "contact",
     format: "",
-    contractVersion: ""
+    contractVersion: "",
+    orgAlias: "",
+    instanceUrl: ""
   },
   datasetMetadata: {},
+  selectedOrgAlias: "",
+  selectedInstanceUrl: "",
+  pendingOrgAlias: "",
+  pendingInstanceUrl: "",
+  orgCatalog: [],
+  orgCatalogLoading: false,
+  orgCatalogWarning: "",
+  serverHealth: null,
   datasetKey: "",
   reviewStateStatus: "",
   loadError: "",
@@ -819,10 +838,13 @@ const state = {
     active: false,
     title: "",
     message: "",
-    progress: 0
+    progress: 0,
+    cancelable: false
   },
   isLoadingFile: false,
   loadingFileName: "",
+  loadPhase: "idle",
+  matchingDeferred: false,
   headers: [],
   rows: [],
   mapping: {},
@@ -857,6 +879,9 @@ let matchingArtifactsCache = null;
 let matchingArtifactsWarmCacheJob = null;
 let reviewStateSaveTimer = 0;
 let pendingReviewStateRecord = null;
+let activeLoadRequestId = 0;
+let activeLoadReader = null;
+let activeLoadAbortController = null;
 let nextGroupFilterId = 1;
 const mergeMasterSelections = new Map();
 const mergePreviewStates = new Map();
@@ -884,6 +909,13 @@ const els = {
   fileName: document.getElementById("fileName"),
   fileMeta: document.getElementById("fileMeta"),
   sourcePill: document.getElementById("sourcePill"),
+  orgSelectionLabel: document.getElementById("orgSelectionLabel"),
+  orgSelectionPill: document.getElementById("orgSelectionPill"),
+  orgRecentSelect: document.getElementById("orgRecentSelect"),
+  orgInstanceUrlValue: document.getElementById("orgInstanceUrlValue"),
+  orgApplyButton: document.getElementById("orgApplyButton"),
+  orgStatus: document.getElementById("orgStatus"),
+  orgMismatchWarning: document.getElementById("orgMismatchWarning"),
   recentFileList: document.getElementById("recentFileList"),
   thresholdSlider: document.getElementById("thresholdSlider"),
   threshold: document.getElementById("threshold"),
@@ -932,7 +964,8 @@ const els = {
   loadingModalMessage: document.getElementById("loadingModalMessage"),
   loadingSplineStatus: document.getElementById("loadingSplineStatus"),
   loadingProgress: document.getElementById("loadingProgress"),
-  loadingProgressBar: document.getElementById("loadingProgressBar")
+  loadingProgressBar: document.getElementById("loadingProgressBar"),
+  loadingCancelButton: document.getElementById("loadingCancelButton")
 };
 
 if (SHOULD_BOOT_UI) {
@@ -991,6 +1024,9 @@ if (typeof window !== "undefined") {
 els.demoButton.addEventListener("click", () => {
   loadDemoData();
 });
+els.loadingCancelButton?.addEventListener("click", () => {
+  cancelActiveLoad();
+});
 
 async function loadDemoData() {
   showLoadingModal("Loading Demo Data", "Matching sample records.", 0);
@@ -1020,6 +1056,10 @@ els.labelStatusFilter.addEventListener("change", handleLabelStatusFilterChange);
 els.groupFilterBuilder.addEventListener("click", handleGroupFilterClick);
 els.groupFilterBuilder.addEventListener("change", handleGroupFilterChange);
 els.groupFilterBuilder.addEventListener("input", handleGroupFilterInput);
+els.orgRecentSelect.addEventListener("change", (event) => {
+  queueRecentOrgSelection(event.target.value);
+});
+els.orgApplyButton.addEventListener("click", applyQueuedOrgSelection);
 
 els.rerunButton.addEventListener("click", () => {
   state.mapping = readMappingFromControls();
@@ -1113,11 +1153,10 @@ els.detailSurface.addEventListener("input", (event) => {
 els.detailSurface.addEventListener("click", (event) => {
   const emptyAction = event.target.closest?.("[data-empty-action]");
   if (emptyAction) {
-    if (emptyAction.dataset.emptyAction === "choose-csv") {
-      openDatasetImport(state.objectType);
-      els.chooseCsvButton.focus();
-    } else if (emptyAction.dataset.emptyAction === "demo-data") {
+    if (emptyAction.dataset.emptyAction === "demo-data") {
       loadDemoData();
+    } else if (emptyAction.dataset.emptyAction === "run-match") {
+      applyMatchControls();
     }
     return;
   }
@@ -1169,6 +1208,9 @@ els.dropZone.addEventListener("drop", (event) => {
 });
 
 setupCollapsiblePanels();
+loadSalesforceOrgPreferences();
+refreshServerHealth();
+refreshSalesforceOrgCatalog();
 initializeFileHistory().finally(() => {
   loadFromUrlIfRequested();
 });
@@ -1231,36 +1273,45 @@ function closeShortcutsModal() {
 }
 
 function loadFile(file, objectType = state.objectType) {
-  beginFileLoad(file.name, objectType);
+  const loadRequestId = beginFileLoad(file.name, objectType);
   const format = datasetFormatFromFileName(file.name);
   const reader = new FileReader();
+  activeLoadReader = reader;
   reader.onload = async () => {
+    if (!isCurrentLoadRequest(loadRequestId)) return;
     await nextPaint();
     try {
-      showLoadingModal("Loading Dataset", `Parsing and matching ${file.name}.`);
-      state.objectType = normalizeObjectType(objectType, state.objectType);
+      showLoadingModal("Loading Dataset", `Parsing ${file.name}.`, 0, true);
+      state.loadPhase = "parsing";
+      renderSource();
       await loadDatasetText(String(reader.result || ""), {
         fileName: file.name,
         objectType,
         format,
         size: file.size,
-        saveRecent: true
+        saveRecent: true,
+        loadRequestId
       });
     } catch (error) {
-      if (isAbortError(error)) return;
+      if (isAbortError(error) || !isCurrentLoadRequest(loadRequestId)) return;
       state.loadError = error.message || "Dataset could not be loaded.";
       state.reviewStateStatus = state.loadError;
       endFileLoad();
       renderSource();
       renderDetail();
     } finally {
+      if (isCurrentLoadRequest(loadRequestId)) {
+        clearActiveLoadRequest(loadRequestId);
+      }
       hideLoadingModal();
     }
   };
   reader.onerror = () => {
+    if (!isCurrentLoadRequest(loadRequestId)) return;
     state.loadError = "Dataset could not be read.";
     state.reviewStateStatus = state.loadError;
     endFileLoad();
+    clearActiveLoadRequest(loadRequestId);
     hideLoadingModal();
     renderSource();
     renderDetail();
@@ -1272,6 +1323,363 @@ function datasetFormatFromFileName(fileName = "") {
   return /\.json$/i.test(String(fileName || "")) ? "json" : "csv";
 }
 
+function normalizeSalesforceOrgProfile(profile = {}) {
+  const instanceUrl = normalizeSalesforceInstanceUrl(profile.instanceUrl ?? profile.url ?? "");
+  const orgAlias = normalizeSalesforceOrgAlias(profile.orgAlias ?? profile.alias ?? "", instanceUrl);
+  return {
+    orgAlias,
+    instanceUrl
+  };
+}
+
+function normalizeSalesforceOrgAlias(value = "", instanceUrl = "") {
+  const alias = String(value || "").trim();
+  if (!alias) return "";
+  if (alias.toLowerCase() !== "staging") return alias;
+  return isCanonicalStagingSandboxInstanceUrl(instanceUrl) ? "politico-staging" : alias;
+}
+
+function normalizeSalesforceInstanceUrl(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  try {
+    const url = new URL(text);
+    if (url.hostname.endsWith(".lightning.force.com")) {
+      url.hostname = url.hostname.replace(".lightning.force.com", ".my.salesforce.com");
+    }
+    url.pathname = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return "";
+  }
+}
+
+function isCanonicalStagingSandboxInstanceUrl(value = "") {
+  return normalizeSalesforceInstanceUrl(value) === normalizeSalesforceInstanceUrl("https://politico--staging.sandbox.my.salesforce.com");
+}
+
+function salesforceOrgProfileKey(profile = {}) {
+  const normalized = normalizeSalesforceOrgProfile(profile);
+  return `${normalizeText(normalized.orgAlias)}|${normalizeText(normalized.instanceUrl)}`;
+}
+
+function salesforceOrgProfileLabel(profile = {}) {
+  const normalized = normalizeSalesforceOrgProfile(profile);
+  if (!normalized.orgAlias && !normalized.instanceUrl) return "No org selected";
+  if (!normalized.orgAlias) return normalized.instanceUrl;
+  return normalized.orgAlias;
+}
+
+function salesforceOrgInstanceUrlHost(instanceUrl = "") {
+  try {
+    return new URL(instanceUrl).host;
+  } catch {
+    return String(instanceUrl || "");
+  }
+}
+
+function salesforceOrgProfileSummary(profile = {}) {
+  const normalized = normalizeSalesforceOrgProfile(profile);
+  if (!normalized.orgAlias && !normalized.instanceUrl) return "No org selected";
+  if (!normalized.orgAlias) return normalized.instanceUrl;
+  if (!normalized.instanceUrl) return normalized.orgAlias;
+  return `${normalized.orgAlias} · ${salesforceOrgInstanceUrlHost(normalized.instanceUrl)}`;
+}
+
+function getQueuedSalesforceOrgProfile() {
+  return normalizeSalesforceOrgProfile({
+    orgAlias: state.pendingOrgAlias,
+    instanceUrl: state.pendingInstanceUrl
+  });
+}
+
+function getSelectedOrQueuedSalesforceOrgProfile() {
+  const queued = getQueuedSalesforceOrgProfile();
+  if (isCompleteSalesforceOrgProfile(queued)) return queued;
+  return getSelectedSalesforceOrgProfile();
+}
+
+function hasQueuedSalesforceOrgProfile() {
+  const queued = getQueuedSalesforceOrgProfile();
+  return isCompleteSalesforceOrgProfile(queued) && salesforceOrgProfileKey(queued) !== salesforceOrgProfileKey(getSelectedSalesforceOrgProfile());
+}
+
+function isCompleteSalesforceOrgProfile(profile = {}) {
+  const normalized = normalizeSalesforceOrgProfile(profile);
+  return Boolean(normalized.orgAlias && normalized.instanceUrl);
+}
+
+function getSelectedSalesforceOrgProfile() {
+  return normalizeSalesforceOrgProfile({
+    orgAlias: state.selectedOrgAlias,
+    instanceUrl: state.selectedInstanceUrl
+  });
+}
+
+function getLoadedDatasetSalesforceOrgProfile() {
+  return normalizeSalesforceOrgProfile({
+    orgAlias: state.datasetSource?.orgAlias || state.datasetMetadata?.orgAlias || state.datasetMetadata?.source?.orgAlias || "",
+    instanceUrl: state.datasetSource?.instanceUrl || state.datasetMetadata?.instanceUrl || state.datasetMetadata?.source?.instanceUrl || ""
+  });
+}
+
+function extractSalesforceOrgProfileFromDataset(result = {}) {
+  return normalizeSalesforceOrgProfile({
+    orgAlias: result.orgAlias || result.source?.orgAlias || result.source?.org?.orgAlias || result.datasetMetadata?.orgAlias || result.datasetMetadata?.source?.orgAlias || "",
+    instanceUrl: result.instanceUrl || result.source?.instanceUrl || result.source?.org?.instanceUrl || result.datasetMetadata?.instanceUrl || result.datasetMetadata?.source?.instanceUrl || ""
+  });
+}
+
+function loadSalesforceOrgPreferences() {
+  if (!canUseLocalStorage()) return;
+
+  try {
+    const raw = localStorage.getItem(ORG_PREFERENCES_STORAGE_KEY);
+    if (!raw) return;
+
+    const parsed = JSON.parse(raw);
+    const selectedOrg = normalizeSalesforceOrgProfile(
+      parsed.selectedOrg ||
+        parsed.currentOrg ||
+        (Array.isArray(parsed.recentOrgProfiles) ? parsed.recentOrgProfiles[0] : null) ||
+        (Array.isArray(parsed.recentOrgs) ? parsed.recentOrgs[0] : null) ||
+        {}
+    );
+    if (isCompleteSalesforceOrgProfile(selectedOrg)) {
+      state.selectedOrgAlias = selectedOrg.orgAlias;
+      state.selectedInstanceUrl = selectedOrg.instanceUrl;
+    }
+    state.pendingOrgAlias = "";
+    state.pendingInstanceUrl = "";
+  } catch (error) {
+    console.warn("Salesforce org preferences could not be loaded", error);
+  }
+}
+
+function persistSalesforceOrgPreferences() {
+  if (!canUseLocalStorage()) return;
+
+  try {
+    localStorage.setItem(
+      ORG_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        selectedOrg: getSelectedSalesforceOrgProfile()
+      })
+    );
+  } catch (error) {
+    console.warn("Salesforce org preferences could not be saved", error);
+  }
+}
+
+function canUseLocalStorage() {
+  try {
+    return typeof localStorage !== "undefined";
+  } catch {
+    return false;
+  }
+}
+
+function dedupeSalesforceOrgProfiles(profiles = []) {
+  const seen = new Set();
+  const unique = [];
+  profiles.forEach((profile) => {
+    const normalized = normalizeSalesforceOrgProfile(profile);
+    if (!isCompleteSalesforceOrgProfile(normalized)) return;
+    const key = salesforceOrgProfileKey(normalized);
+    if (seen.has(key)) return;
+    seen.add(key);
+    unique.push(normalized);
+  });
+  return unique;
+}
+
+function setSelectedSalesforceOrgProfile(profile = {}, { persist = true } = {}) {
+  const normalized = normalizeSalesforceOrgProfile(profile);
+  state.selectedOrgAlias = normalized.orgAlias;
+  state.selectedInstanceUrl = normalized.instanceUrl;
+  state.pendingOrgAlias = "";
+  state.pendingInstanceUrl = "";
+  if (persist) persistSalesforceOrgPreferences();
+  renderOrgSelector();
+}
+
+function setQueuedSalesforceOrgProfile(profile = {}) {
+  const normalized = normalizeSalesforceOrgProfile(profile);
+  state.pendingOrgAlias = normalized.orgAlias;
+  state.pendingInstanceUrl = normalized.instanceUrl;
+  renderOrgSelector();
+}
+
+function selectedSalesforceOrgMatchesLoadedDataset() {
+  const selected = getSelectedSalesforceOrgProfile();
+  const source = getLoadedDatasetSalesforceOrgProfile();
+  if (!isCompleteSalesforceOrgProfile(source) || !isCompleteSalesforceOrgProfile(selected)) return true;
+  return salesforceOrgProfileKey(selected) === salesforceOrgProfileKey(source);
+}
+
+async function refreshSalesforceOrgCatalog() {
+  state.orgCatalogLoading = true;
+  renderOrgSelector();
+
+  try {
+    const response = await fetch("/api/salesforce/orgs", { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`Salesforce org catalog could not be loaded: HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    state.orgCatalog = dedupeSalesforceOrgProfiles(Array.isArray(payload.orgs) ? payload.orgs : []);
+    state.orgCatalogWarning = String(payload.warning || "").trim();
+  } catch (error) {
+    console.warn("Salesforce org catalog could not be loaded", error);
+    state.orgCatalogWarning = error.message || "Salesforce org catalog could not be loaded.";
+    state.orgCatalog = dedupeSalesforceOrgProfiles(state.orgCatalog);
+  } finally {
+    state.orgCatalogLoading = false;
+    renderOrgSelector();
+  }
+}
+
+async function refreshServerHealth() {
+  if (!isServerBackedApp()) return;
+
+  try {
+    const response = await fetch("/api/health", { cache: "no-store" });
+    if (!response.ok) throw new Error(`Health check failed: HTTP ${response.status}`);
+    state.serverHealth = await response.json();
+  } catch (error) {
+    console.warn("Salesforce Duplicate Reviewer health could not be loaded", error);
+    state.serverHealth = null;
+  } finally {
+    renderOrgSelector();
+  }
+}
+
+function renderOrgSelector() {
+  const preview = getSelectedOrQueuedSalesforceOrgProfile();
+  const source = getLoadedDatasetSalesforceOrgProfile();
+  const hasSource = isCompleteSalesforceOrgProfile(source);
+  const hasPreview = isCompleteSalesforceOrgProfile(preview);
+  const hasQueued = hasQueuedSalesforceOrgProfile();
+  const hasMismatch = hasPreview && hasSource && salesforceOrgProfileKey(preview) !== salesforceOrgProfileKey(source);
+  const catalogProfiles = dedupeSalesforceOrgProfiles(state.orgCatalog);
+  const selectedKey = hasPreview ? salesforceOrgProfileKey(preview) : "";
+  const optionsProfiles = hasPreview && !catalogProfiles.some((profile) => salesforceOrgProfileKey(profile) === selectedKey)
+    ? [preview, ...catalogProfiles]
+    : catalogProfiles;
+  const healthSummary = salesforceHealthSummary(state.serverHealth);
+  const healthBlocked = salesforceHealthBlockedReason(state.serverHealth);
+  const healthSupport = salesforceHealthSupportSummary(state.serverHealth);
+
+  if (els.orgSelectionLabel) {
+    const selectionLabel = hasPreview ? salesforceOrgProfileLabel(preview) : "No org selected";
+    els.orgSelectionLabel.textContent = selectionLabel;
+    els.orgSelectionLabel.title = selectionLabel;
+  }
+  if (els.orgSelectionPill) {
+    els.orgSelectionPill.textContent = hasPreview ? (hasQueued ? "Ready" : "Selected") : "Unselected";
+    els.orgSelectionPill.classList.toggle("is-loaded", hasPreview);
+  }
+  if (els.orgRecentSelect) {
+    const options = [];
+    const placeholderLabel = state.orgCatalogLoading
+      ? "Loading Salesforce org catalog..."
+      : optionsProfiles.length
+        ? "Available orgs"
+        : "No Salesforce orgs available";
+    options.push(`<option value="" disabled ${hasPreview ? "" : "selected"}>${escapeHtml(placeholderLabel)}</option>`);
+    optionsProfiles.forEach((profile) => {
+      const key = salesforceOrgProfileKey(profile);
+      const label = escapeHtml(salesforceOrgProfileLabel(profile));
+      const active = key === selectedKey ? "selected" : "";
+      options.push(`<option value="${escapeHtml(key)}" title="${escapeHtml(salesforceOrgProfileSummary(profile))}" ${active}>${label}</option>`);
+    });
+    els.orgRecentSelect.innerHTML = options.join("");
+    els.orgRecentSelect.value = selectedKey || "";
+  }
+  if (els.orgInstanceUrlValue) {
+    const instanceValue = hasPreview ? preview.instanceUrl : "";
+    const valueText = instanceValue || "No instance URL selected";
+    els.orgInstanceUrlValue.textContent = valueText;
+    els.orgInstanceUrlValue.title = valueText;
+    els.orgInstanceUrlValue.classList.toggle("is-empty", !instanceValue);
+  }
+  if (els.orgStatus) {
+    let statusText;
+    if (hasPreview) {
+      statusText = hasQueued
+        ? `Ready to use: ${salesforceOrgProfileSummary(preview)}`
+        : `Target org: ${salesforceOrgProfileSummary(preview)}`;
+    } else if (state.orgCatalogLoading) {
+      statusText = "Loading Salesforce org catalog...";
+    } else if (state.orgCatalogWarning) {
+      statusText = state.orgCatalogWarning;
+    } else {
+      statusText = "Choose a Salesforce org before refreshing or merging.";
+    }
+    if (healthBlocked) {
+      statusText = `Blocked: ${healthBlocked}${healthSupport ? ` · ${healthSupport}` : ""}`;
+    } else if (healthSummary) {
+      statusText = `${statusText} · ${healthSummary}`;
+    }
+    if (state.orgCatalogWarning && !healthBlocked) {
+      statusText += ` · ${state.orgCatalogWarning}`;
+    }
+    els.orgStatus.textContent = statusText;
+    els.orgStatus.title = statusText;
+    els.orgStatus.classList.toggle("is-blocked", Boolean(healthBlocked));
+    els.orgStatus.classList.toggle("is-ready", Boolean(healthSummary && !healthBlocked));
+  }
+  if (els.orgMismatchWarning) {
+    els.orgMismatchWarning.hidden = !hasMismatch;
+    if (hasMismatch) {
+      const warningText = `Target org ${salesforceOrgProfileSummary(preview)} differs from the loaded dataset source ${salesforceOrgProfileSummary(source)}. Salesforce requests will use the target org.`;
+      els.orgMismatchWarning.textContent = warningText;
+      els.orgMismatchWarning.title = warningText;
+    }
+  }
+  if (!els.orgApplyButton) return;
+  els.orgApplyButton.disabled = !hasQueued;
+}
+
+function salesforceHealthSummary(health = null) {
+  return salesforceHealthSupportSummary(health);
+}
+
+function salesforceHealthSupportSummary(health = null) {
+  if (!health) return "";
+  const parts = [];
+  if (health.salesforceAuthFresh === true) parts.push("Auth ready");
+  if (health.runtimeAligned === true) parts.push("Runtime aligned");
+  return parts.join(" · ");
+}
+
+function salesforceHealthBlockedReason(health = null) {
+  if (!health) return "";
+  if (health.runtimeAligned === false) return "Runtime stale";
+  if (health.salesforceAuthFresh === false) return "Auth blocked";
+  return "";
+}
+
+function queueRecentOrgSelection(value) {
+  const recent = dedupeSalesforceOrgProfiles(state.orgCatalog);
+  const selected = recent.find((profile) => salesforceOrgProfileKey(profile) === String(value || ""));
+  if (!selected) {
+    setQueuedSalesforceOrgProfile({});
+    return;
+  }
+  setQueuedSalesforceOrgProfile(selected);
+}
+
+function applyQueuedOrgSelection() {
+  const queued = getQueuedSalesforceOrgProfile();
+  if (!isCompleteSalesforceOrgProfile(queued)) return;
+  if (salesforceOrgProfileKey(queued) === salesforceOrgProfileKey(getSelectedSalesforceOrgProfile())) return;
+  setSelectedSalesforceOrgProfile(queued);
+}
+
 async function loadDatasetText(datasetText, {
   fileName,
   objectType = state.objectType,
@@ -1279,35 +1687,59 @@ async function loadDatasetText(datasetText, {
   size = 0,
   saveRecent = false,
   displayName = "",
-  endpoint = ""
+  endpoint = "",
+  loadRequestId = 0
 } = {}) {
-  state.objectType = normalizeObjectType(objectType, state.objectType);
+  const normalizedObjectType = normalizeObjectType(objectType, state.objectType);
+  const shouldDeferMatching = shouldDeferJsonIngest({ format, size });
+  state.loadPhase = shouldDeferMatching ? "parsing" : "matching";
+  renderSource();
   const result = await processMatchingJob({
     mode: "process-text",
     text: datasetText,
     format,
     fileName: fileName || datasetFileNameForFormat(format),
-    objectType: state.objectType,
+    objectType: normalizedObjectType,
     threshold: state.threshold,
-    highRecallMode: state.highRecallMode
+    highRecallMode: state.highRecallMode,
+    deferMatching: shouldDeferMatching,
+    largeIngest: shouldDeferMatching,
+    size
   }, updateLoadingProgress);
 
-  await applyProcessedDataset(result, { fromObjects: false });
+  if (!isCurrentLoadRequest(loadRequestId)) return;
+
+  if (shouldDeferMatching) {
+    await applyParsedDataset(result, {
+      fromObjects: false,
+      objectType: normalizedObjectType,
+      loadRequestId
+    });
+  } else {
+    await applyProcessedDataset(result, {
+      fromObjects: false,
+      objectType: normalizedObjectType,
+      loadRequestId
+    });
+  }
+  if (!isCurrentLoadRequest(loadRequestId)) return;
   setLoadedDatasetSource({
     endpoint,
     fileName: result.fileName || fileName || datasetFileNameForFormat(format),
-    displayName,
-    objectType: normalizeObjectType(result.objectType || state.objectType),
+    displayName: displayName || result.displayName || fileName || state.fileName || "",
+    objectType: result.objectType || normalizedObjectType,
     format: result.format || format,
     contractVersion: result.contractVersion || result.datasetMetadata?.contractVersion || "",
-    metadata: extractDatasetMetadata(result)
+    metadata: result.datasetMetadata || {},
+    orgAlias: state.datasetSource?.orgAlias || "",
+    instanceUrl: state.datasetSource?.instanceUrl || ""
   });
   if (saveRecent) {
     saveRecentFileInBackground({
       name: result.fileName || fileName || datasetFileNameForFormat(format),
       displayName,
       size: size || datasetText.length,
-      objectType: normalizeObjectType(result.objectType || state.objectType),
+      objectType: normalizeObjectType(result.objectType || normalizedObjectType),
       format: result.format || format,
       contractVersion: result.contractVersion || result.datasetMetadata?.contractVersion || "",
       content: endpoint ? "" : datasetText,
@@ -1340,6 +1772,18 @@ async function loadFromUrlIfRequested() {
       defaultFileName: "salesforce-report-latest.json",
       label: "Latest Contacts"
     },
+    "prod-contacts": {
+      endpoint: "/api/prod-contacts/latest.json",
+      defaultObjectType: "contact",
+      defaultFileName: "salesforce-report-latest.json",
+      label: "Latest Prod Contacts"
+    },
+    "prod-accounts": {
+      endpoint: "/api/prod-accounts/latest.json",
+      defaultObjectType: "account",
+      defaultFileName: "salesforce-report-latest.json",
+      label: "Latest Prod Accounts"
+    },
     "staging-accounts": {
       endpoint: "/api/staging-accounts/latest.json",
       defaultObjectType: "account",
@@ -1353,13 +1797,15 @@ async function loadFromUrlIfRequested() {
   const objectType = normalizeObjectType(params.get("object") || source.defaultObjectType, source.defaultObjectType);
   const fileName = params.get("name") || source.defaultFileName;
 
-  beginFileLoad(fileName, objectType);
+  const loadRequestId = beginFileLoad(fileName, objectType);
   try {
-    showLoadingModal("Loading Dataset", `Fetching and matching ${fileName}.`);
+    showLoadingModal("Loading Dataset", `Fetching ${fileName}.`, 0, true);
+    activeLoadAbortController = new AbortController();
     await nextPaint();
-    const response = await fetch(source.endpoint, { cache: "no-store" });
+    const response = await fetch(source.endpoint, { cache: "no-store", signal: activeLoadAbortController.signal });
     if (!response.ok) throw new Error(`Dataset fetch failed: ${response.status}`);
     const datasetText = await response.text();
+    if (!isCurrentLoadRequest(loadRequestId)) return;
     await loadDatasetText(datasetText, {
       fileName,
       objectType,
@@ -1367,7 +1813,8 @@ async function loadFromUrlIfRequested() {
       size: datasetText.length,
       saveRecent: false,
       displayName: source.label,
-      endpoint: source.endpoint
+      endpoint: source.endpoint,
+      loadRequestId
     });
     if (params.get("saveRecent") !== "0") {
       saveRecentFileInBackground({
@@ -1383,13 +1830,17 @@ async function loadFromUrlIfRequested() {
       notifyReviewReady(fileName, { sticky: params.get("sticky") === "1" }).catch(() => {});
     }
   } catch (error) {
-    if (isAbortError(error)) return;
+    if (isAbortError(error) || !isCurrentLoadRequest(loadRequestId)) return;
     state.loadError = error.message || "Dataset could not be loaded.";
     state.reviewStateStatus = state.loadError;
     endFileLoad();
+    clearActiveLoadRequest(loadRequestId);
     renderSource();
     renderDetail();
   } finally {
+    if (isCurrentLoadRequest(loadRequestId)) {
+      clearActiveLoadRequest(loadRequestId);
+    }
     hideLoadingModal();
   }
 }
@@ -1408,59 +1859,45 @@ async function notifyReviewReady(fileName, { sticky = false } = {}) {
 
 function beginFileLoad(fileName, objectType = state.objectType) {
   flushPendingReviewStateSave();
-  clearLoadedDatasetForPendingLoad();
-  state.objectType = normalizeObjectType(objectType, state.objectType);
   state.isLoadingFile = true;
   state.loadingFileName = fileName || "";
-  state.reviewStateStatus = "";
-  state.loadError = "";
-  showLoadingModal("Loading Dataset", `Reading ${fileName || "dataset"}.`);
+  state.loadPhase = "reading";
+  showLoadingModal("Loading Dataset", `Reading ${fileName || "dataset"}.`, 0, true);
+  renderSource();
+  renderDetail();
+  activeLoadRequestId += 1;
+  activeLoadReader = null;
+  activeLoadAbortController = null;
+  return activeLoadRequestId;
+}
+
+function cancelActiveLoad() {
+  if (!state.isLoadingFile && !state.loadingModal.active) return;
+  activeLoadRequestId += 1;
+  try {
+    activeLoadReader?.abort();
+  } catch {}
+  try {
+    activeLoadAbortController?.abort();
+  } catch {}
+  matchingWorkerRunner?.terminate();
+  activeLoadReader = null;
+  activeLoadAbortController = null;
+  state.loadPhase = "idle";
+  endFileLoad();
+  hideLoadingModal();
   renderSource();
   renderDetail();
 }
 
-function clearLoadedDatasetForPendingLoad() {
-  state.fileName = "";
-  state.datasetSource = {
-    endpoint: "",
-    fileName: "",
-    displayName: "",
-    objectType: state.objectType,
-    format: "",
-    contractVersion: ""
-  };
-  state.datasetMetadata = {};
-  state.lastProcessingMode = "";
-  state.lastMatchingStats = null;
-  state.headers = [];
-  state.rows = [];
-  state.mapping = {};
-  state.groups = [];
-  groupListRenderCache = null;
-  detailRenderCache = "";
-  state.selectedGroupKey = "";
-  state.filters = [];
-  state.filterLogic = "";
-  state.filterLogicMode = "and";
-  state.groupStatusFilters.clear();
-  state.pendingGroupStatusFilters.clear();
-  state.labelStatusFilters.clear();
-  state.pendingLabelStatusFilters.clear();
-  state.decisions.clear();
-  state.mergeResults.clear();
-  state.trainingLabels.clear();
-  state.trainingPairIndexes.clear();
-  state.fieldResolutions.clear();
-  state.separatedRecords.clear();
-  mergeMasterSelections.clear();
-  mergePreviewStates.clear();
-  mergeInFlightGroupKeys.clear();
-  resetMergeReviewSession();
-  scoringContextCache = null;
-  matchingArtifactsCache = null;
-  matchingArtifactsWarmCacheJob = null;
-  groupLookupCache = null;
-  visibleGroupsCache = null;
+function isCurrentLoadRequest(loadRequestId) {
+  return Number(loadRequestId) === activeLoadRequestId;
+}
+
+function clearActiveLoadRequest(loadRequestId) {
+  if (!isCurrentLoadRequest(loadRequestId)) return;
+  activeLoadReader = null;
+  activeLoadAbortController = null;
 }
 
 function endFileLoad() {
@@ -1494,7 +1931,7 @@ async function initializeFileHistory() {
   }
 
   try {
-    await seedLatestStagingFiles();
+    await seedLatestSalesforceFiles();
   } catch (error) {
     console.warn("Latest exports could not be added to recent files", error);
   }
@@ -1508,76 +1945,101 @@ function isServerBackedApp() {
   return window.location.protocol === "http:" || window.location.protocol === "https:";
 }
 
-async function seedLatestStagingFiles() {
+async function seedLatestSalesforceFiles() {
   if (!isServerBackedApp()) return;
 
-  const response = await fetch(LATEST_STAGING_FILES_ENDPOINT, { cache: "no-store" });
-  if (!response.ok) return;
+  for (const latestFilesEndpoint of [LATEST_STAGING_FILES_ENDPOINT, LATEST_PROD_FILES_ENDPOINT]) {
+    const response = await fetch(latestFilesEndpoint, { cache: "no-store" });
+    if (!response.ok) continue;
 
-  const payload = await response.json();
-  const files = Array.isArray(payload.files) ? payload.files : [];
-  for (const file of files) {
-    const endpoint = String(file.endpoint || "");
-    const name = String(file.name || "");
-    if (!endpoint || !name) continue;
+    const payload = await response.json();
+    const files = Array.isArray(payload.files) ? payload.files : [];
+    for (const file of files) {
+      const endpoint = String(file.endpoint || "");
+      const name = String(file.name || "");
+      if (!endpoint || !name) continue;
 
-    await saveRecentFile({
-      name,
-      displayName: String(file.label || file.displayName || name),
-      size: Number(file.size) || 0,
-      objectType: normalizeObjectType(file.objectType),
-      format: datasetFormatFromFileName(name || endpoint),
-      endpoint,
-      updatedAt: Number(file.updatedAt) || Date.now()
-    });
+      await saveRecentFile({
+        name,
+        displayName: String(file.label || file.displayName || name),
+        size: Number(file.size) || 0,
+        objectType: normalizeObjectType(file.objectType),
+        format: datasetFormatFromFileName(name || endpoint),
+        endpoint,
+        updatedAt: Number(file.updatedAt) || Date.now()
+      });
+    }
   }
 }
 
 async function loadRecentFile(fileId) {
-  showLoadingModal("Loading Recent Dataset", "Reading saved file contents.");
+  const loadRequestId = beginFileLoad("Recent file", state.objectType);
+  showLoadingModal("Loading Recent Dataset", "Reading saved file contents.", 0, true);
   try {
+    activeLoadAbortController = new AbortController();
     const record = await getRecentFile(fileId);
     if (!record) {
       renderRecentFiles("Recent file could not be found");
       await refreshRecentFiles();
+      endFileLoad();
+      clearActiveLoadRequest(loadRequestId);
       return;
     }
 
     const objectType = recentRecordObjectType(record, state.objectType);
-    beginFileLoad(record.name, objectType);
-    showLoadingModal("Loading Recent Dataset", `Parsing and matching ${record.name}.`);
+    const endpoint = canonicalRecentEndpoint(record) || String(record.endpoint || "");
+    const normalizedRecord = {
+      ...record,
+      endpoint
+    };
+    const fileName = canonicalRecentFileName(normalizedRecord);
+    const displayName = canonicalRecentDisplayName(normalizedRecord);
+    state.loadingFileName = fileName;
+    if (!isCurrentLoadRequest(loadRequestId)) return;
+    showLoadingModal("Loading Recent Dataset", `Parsing ${fileName}.`, 0, true);
     await nextPaint();
-    const datasetText = await recentFileDatasetText(record);
+    const datasetText = await recentFileDatasetText(normalizedRecord);
+    if (!isCurrentLoadRequest(loadRequestId)) return;
     await loadDatasetText(datasetText, {
-      fileName: record.name,
+      fileName,
       objectType,
-      format: record.format || datasetFormatFromFileName(record.name || record.endpoint),
+      format: record.format || datasetFormatFromFileName(fileName || endpoint),
       size: record.size || datasetText.length,
       saveRecent: false,
-      displayName: record.displayName || record.name,
-      endpoint: record.endpoint || ""
+      displayName,
+      endpoint,
+      loadRequestId
     });
     saveRecentFileInBackground({
-      name: record.name,
-      displayName: record.displayName || record.name,
+      id: record.id,
+      name: fileName,
+      displayName,
       size: record.size || datasetText.length,
       objectType: normalizeObjectType(state.objectType),
-      format: record.format || datasetFormatFromFileName(record.name || record.endpoint),
+      format: record.format || datasetFormatFromFileName(fileName || endpoint),
       contractVersion: record.contractVersion || "",
       content: record.content || "",
-      endpoint: record.endpoint || ""
+      endpoint
     });
   } catch (error) {
-    if (isAbortError(error)) return;
+    if (isAbortError(error) || !isCurrentLoadRequest(loadRequestId)) return;
     renderRecentFiles("Recent file could not be loaded");
+    endFileLoad();
+    clearActiveLoadRequest(loadRequestId);
   } finally {
+    if (isCurrentLoadRequest(loadRequestId)) {
+      clearActiveLoadRequest(loadRequestId);
+    }
     hideLoadingModal();
   }
 }
 
-async function recentFileDatasetText(record) {
-  if (record.endpoint) {
-    const response = await fetch(record.endpoint, { cache: "no-store" });
+async function recentFileDatasetText(record, endpoint = record.endpoint) {
+  if (endpoint) {
+    const response = await fetch(endpoint, {
+      cache: "no-store",
+      signal: activeLoadAbortController?.signal
+    });
     if (!response.ok) throw new Error(`Recent dataset fetch failed: ${response.status}`);
     return response.text();
   }
@@ -1585,14 +2047,124 @@ async function recentFileDatasetText(record) {
   return record.content || "";
 }
 
-function setLoadedDatasetSource({ endpoint = "", fileName = "", displayName = "", objectType = state.objectType, format = "", contractVersion = "", metadata = {} } = {}) {
+function canonicalRecentEndpoint(record) {
+  const endpoint = String(record?.endpoint || "").toLowerCase();
+  if (endpoint === "/api/prod-contacts/latest.json" || endpoint === "/api/prod-contacts/latest.csv") {
+    return endpoint;
+  }
+  if (endpoint === "/api/prod-accounts/latest.json" || endpoint === "/api/prod-accounts/latest.csv") {
+    return endpoint;
+  }
+  if (
+    endpoint === "/api/staging-contacts/latest.json" ||
+    endpoint === "/api/staging-contacts/latest.csv" ||
+    endpoint === "/api/staging-accounts/latest.json" ||
+    endpoint === "/api/staging-accounts/latest.csv"
+  ) {
+    return endpoint;
+  }
+  if (isProdContactsRecentRecord(record)) {
+    return "/api/prod-contacts/latest.json";
+  }
+  if (isProdAccountsRecentRecord(record)) {
+    return "/api/prod-accounts/latest.json";
+  }
+  return recentEndpointForRecord(record);
+}
+
+function canonicalRecentFileName(record) {
+  const endpoint = String(canonicalRecentEndpoint(record) || "").toLowerCase();
+  if (
+    endpoint === "/api/staging-contacts/latest.csv" ||
+    endpoint === "/api/staging-accounts/latest.csv" ||
+    endpoint === "/api/prod-contacts/latest.csv" ||
+    endpoint === "/api/prod-accounts/latest.csv"
+  ) {
+    return "salesforce-report-latest.csv";
+  }
+  if (
+    endpoint === "/api/staging-contacts/latest.json" ||
+    endpoint === "/api/staging-accounts/latest.json" ||
+    endpoint === "/api/prod-contacts/latest.json" ||
+    endpoint === "/api/prod-accounts/latest.json"
+  ) {
+    return "salesforce-report-latest.json";
+  }
+  return String(record?.name || datasetFileNameForFormat(record?.format || datasetFormatFromFileName(record?.endpoint || record?.name || "salesforce-report-latest.json")));
+}
+
+function canonicalRecentDisplayName(record) {
+  if (isProdContactsRecentRecord(record)) {
+    return "Latest Prod Contacts";
+  }
+  if (isProdAccountsRecentRecord(record)) {
+    return "Latest Prod Accounts";
+  }
+  const endpoint = String(canonicalRecentEndpoint(record) || "").toLowerCase();
+  if (endpoint === "/api/prod-contacts/latest.json" || endpoint === "/api/prod-contacts/latest.csv") {
+    return "Latest Prod Contacts";
+  }
+  if (endpoint === "/api/prod-accounts/latest.json" || endpoint === "/api/prod-accounts/latest.csv") {
+    return "Latest Prod Accounts";
+  }
+  if (
+    endpoint === "/api/staging-contacts/latest.json" ||
+    endpoint === "/api/staging-contacts/latest.csv" ||
+    endpoint === "/api/staging-accounts/latest.json" ||
+    endpoint === "/api/staging-accounts/latest.csv"
+  ) {
+    return String(record?.displayName || "Latest Contacts");
+  }
+  return String(record?.displayName || record?.name || "");
+}
+
+function isProdContactsRecentRecord(record) {
+  const endpoint = String(record?.endpoint || "").toLowerCase();
+  if (endpoint === "/api/prod-contacts/latest.json" || endpoint === "/api/prod-contacts/latest.csv") {
+    return true;
+  }
+
+  const id = String(record?.id || "").toLowerCase();
+  const name = String(record?.name || "").toLowerCase();
+  const displayName = String(record?.displayName || "").toLowerCase();
+  return (
+    id.includes("prod-contacts") ||
+    name.includes("prod-contacts") ||
+    name.includes("prod contacts") ||
+    displayName.includes("prod contacts") ||
+    displayName.includes("latest prod contacts")
+  );
+}
+
+function isProdAccountsRecentRecord(record) {
+  const endpoint = String(record?.endpoint || "").toLowerCase();
+  if (endpoint === "/api/prod-accounts/latest.json" || endpoint === "/api/prod-accounts/latest.csv") {
+    return true;
+  }
+
+  const id = String(record?.id || "").toLowerCase();
+  const name = String(record?.name || "").toLowerCase();
+  const displayName = String(record?.displayName || "").toLowerCase();
+  return (
+    id.includes("prod-accounts") ||
+    name.includes("prod-accounts") ||
+    name.includes("prod accounts") ||
+    displayName.includes("prod accounts") ||
+    displayName.includes("latest prod accounts")
+  );
+}
+
+function setLoadedDatasetSource({ endpoint = "", fileName = "", displayName = "", objectType = state.objectType, format = "", contractVersion = "", metadata = {}, orgAlias = "", instanceUrl = "" } = {}) {
+  const normalizedInstanceUrl = normalizeSalesforceInstanceUrl(instanceUrl || metadata.instanceUrl || metadata.source?.instanceUrl || "");
   state.datasetSource = {
     endpoint: String(endpoint || ""),
     fileName: String(fileName || state.fileName || ""),
     displayName: String(displayName || fileName || state.fileName || ""),
     objectType: normalizeObjectType(objectType, state.objectType),
     format: String(format || datasetFormatFromFileName(fileName || endpoint || state.fileName)),
-    contractVersion: String(contractVersion || metadata.contractVersion || state.datasetMetadata?.contractVersion || "")
+    contractVersion: String(contractVersion || metadata.contractVersion || state.datasetMetadata?.contractVersion || ""),
+    orgAlias: normalizeSalesforceOrgAlias(orgAlias || metadata.orgAlias || metadata.source?.orgAlias || "", normalizedInstanceUrl),
+    instanceUrl: normalizedInstanceUrl
   };
   state.datasetMetadata = sanitizeDatasetMetadata({
     ...(state.datasetMetadata || {}),
@@ -1612,7 +2184,7 @@ async function saveRecentFile(fileRecord) {
   if (!endpoint && !canStoreContent) return;
 
   const record = {
-    id: recentFileId(objectType, fileRecord.name),
+    id: String(fileRecord.id || recentFileId(objectType, fileRecord.name, fileRecord.endpoint)),
     name: fileRecord.name,
     displayName: String(fileRecord.displayName || fileRecord.name),
     size: fileRecord.size || content.length,
@@ -1645,11 +2217,22 @@ async function refreshRecentFiles(existingDb) {
   state.recentFiles = records
     .sort((left, right) => right.updatedAt - left.updatedAt)
     .slice(0, RECENT_FILE_LIMIT)
-    .map(({ content, ...metadata }) => ({
-      ...metadata,
-      objectType: recentRecordObjectType(metadata)
-    }));
+    .map(({ content, ...metadata }) => normalizeRecentFileRecord(metadata));
   renderRecentFiles();
+}
+
+function normalizeRecentFileRecord(record) {
+  const endpoint = canonicalRecentEndpoint(record) || String(record?.endpoint || "");
+  const normalized = {
+    ...record,
+    endpoint
+  };
+  return {
+    ...normalized,
+    name: canonicalRecentFileName(normalized),
+    displayName: canonicalRecentDisplayName(normalized),
+    objectType: recentRecordObjectType(normalized)
+  };
 }
 
 async function compactOversizedRecentFiles(db, records) {
@@ -1662,7 +2245,7 @@ async function compactOversizedRecentFiles(db, records) {
   const store = transaction.objectStore(FILE_HISTORY_STORE);
 
   oversizedRecords.forEach((record) => {
-    const endpoint = record.endpoint || recentEndpointForName(record.name, record.objectType);
+    const endpoint = record.endpoint || recentEndpointForRecord(record);
     if (endpoint) {
       store.put({
         ...record,
@@ -1679,15 +2262,23 @@ async function compactOversizedRecentFiles(db, records) {
   return true;
 }
 
-function recentEndpointForName(name, objectType = "") {
-  const normalizedName = String(name || "");
+function recentEndpointForRecord(record) {
+  const normalizedName = String(record?.name || "");
+  const objectType = String(record?.objectType || "");
+  const isProdContacts = isProdContactsRecentRecord(record);
+  const isProdAccounts = isProdAccountsRecentRecord(record);
+
   if (normalizedName === "salesforce-report-latest.json") {
-    return String(objectType || "").toLowerCase() === "account"
+    if (isProdContacts) return "/api/prod-contacts/latest.json";
+    if (isProdAccounts) return "/api/prod-accounts/latest.json";
+    return objectType.toLowerCase() === "account"
       ? "/api/staging-accounts/latest.json"
       : "/api/staging-contacts/latest.json";
   }
   if (normalizedName === "salesforce-report-latest.csv") {
-    return String(objectType || "").toLowerCase() === "account"
+    if (isProdContacts) return "/api/prod-contacts/latest.csv";
+    if (isProdAccounts) return "/api/prod-accounts/latest.csv";
+    return objectType.toLowerCase() === "account"
       ? "/api/staging-accounts/latest.csv"
       : "/api/staging-contacts/latest.csv";
   }
@@ -1696,7 +2287,11 @@ function recentEndpointForName(name, objectType = "") {
     "salesforce-staging-contacts-latest.csv": "/api/staging-contacts/latest.csv",
     "salesforce-staging-accounts-latest.csv": "/api/staging-accounts/latest.csv",
     "salesforce-staging-contacts-latest.json": "/api/staging-contacts/latest.json",
-    "salesforce-staging-accounts-latest.json": "/api/staging-accounts/latest.json"
+    "salesforce-staging-accounts-latest.json": "/api/staging-accounts/latest.json",
+    "salesforce-prod-contacts-latest.csv": "/api/prod-contacts/latest.csv",
+    "salesforce-prod-contacts-latest.json": "/api/prod-contacts/latest.json",
+    "salesforce-prod-accounts-latest.csv": "/api/prod-accounts/latest.csv",
+    "salesforce-prod-accounts-latest.json": "/api/prod-accounts/latest.json"
   }[normalizedName] || "";
 }
 
@@ -1821,8 +2416,8 @@ function transactionDone(transaction) {
   });
 }
 
-function recentFileId(objectType, name) {
-  return `${normalizeObjectType(objectType)}:${name}`;
+function recentFileId(objectType, name, endpoint = "") {
+  return `${normalizeObjectType(objectType)}:${String(endpoint || name)}`;
 }
 
 function recentRecordObjectType(record, fallback = "contact") {
@@ -1847,10 +2442,15 @@ function normalizeObjectType(objectType, fallback = "contact") {
 
 function buildDatasetKey() {
   if (!state.rows.length) return "";
+  const sourceOrg = getLoadedDatasetSalesforceOrgProfile();
+  const selectedOrg = getSelectedSalesforceOrgProfile();
+  const orgProfile = isCompleteSalesforceOrgProfile(sourceOrg) ? sourceOrg : selectedOrg;
   let hash = 2166136261;
   hash = updateHash(hash, state.objectType);
   hash = updateHash(hash, normalizeText(state.fileName));
   hash = updateHash(hash, normalizeText(state.datasetSource?.contractVersion || state.datasetMetadata?.contractVersion || ""));
+  hash = updateHash(hash, normalizeText(orgProfile.orgAlias));
+  hash = updateHash(hash, normalizeText(orgProfile.instanceUrl));
   hash = updateHash(hash, state.rows.length);
   state.headers.forEach((header) => {
     hash = updateHash(hash, normalizeHeader(header));
@@ -1956,6 +2556,11 @@ async function saveReviewStateRecord(record) {
 }
 
 function serializeCurrentReviewState() {
+  const sourceDataset = {
+    ...state.datasetSource,
+    orgAlias: state.datasetSource?.orgAlias || state.selectedOrgAlias || "",
+    instanceUrl: state.datasetSource?.instanceUrl || state.selectedInstanceUrl || ""
+  };
   return {
     id: state.datasetKey,
     version: 1,
@@ -1965,7 +2570,7 @@ function serializeCurrentReviewState() {
     fileName: state.fileName,
     rowCount: state.rows.length,
     headers: [...state.headers],
-    sourceDataset: { ...state.datasetSource },
+    sourceDataset,
     trainingLabels: [...state.trainingLabels.entries()],
     decisions: [...state.decisions.entries()],
     mergeResults: [...state.mergeResults.entries()],
@@ -2037,6 +2642,14 @@ function isCompatibleReviewState(record) {
   if (!record || record.objectType !== state.objectType) return false;
   if (Number(record.rowCount) !== state.rows.length) return false;
   if (normalizeText(record.fileName) !== normalizeText(state.fileName)) return false;
+  const recordOrg = normalizeSalesforceOrgProfile({
+    orgAlias: record.sourceDataset?.orgAlias || record.orgAlias || "",
+    instanceUrl: record.sourceDataset?.instanceUrl || record.instanceUrl || ""
+  });
+  const currentOrg = getLoadedDatasetSalesforceOrgProfile();
+  if (isCompleteSalesforceOrgProfile(recordOrg) && isCompleteSalesforceOrgProfile(currentOrg)) {
+    if (salesforceOrgProfileKey(recordOrg) !== salesforceOrgProfileKey(currentOrg)) return false;
+  }
   return headerSignature(record.headers || []) === headerSignature(state.headers);
 }
 
@@ -2159,6 +2772,10 @@ function sanitizeMergeResult(result) {
     updatedRelatedIds: Array.isArray(result.updatedRelatedIds) ? result.updatedRelatedIds.map(String) : [],
     orgAlias: String(result.orgAlias || ""),
     instanceUrl: String(result.instanceUrl || ""),
+    selectedOrgAlias: String(result.selectedOrgAlias || result.requestedOrgAlias || result.orgAlias || ""),
+    selectedInstanceUrl: String(result.selectedInstanceUrl || result.requestedInstanceUrl || result.instanceUrl || ""),
+    requestedOrgAlias: String(result.requestedOrgAlias || ""),
+    requestedInstanceUrl: String(result.requestedInstanceUrl || ""),
     apiVersion: String(result.apiVersion || ""),
     mergedAt: String(result.mergedAt || result.at || ""),
     preMergeCheck: sanitizePreMergeCheck(result.preMergeCheck),
@@ -2174,6 +2791,12 @@ function sanitizePreMergeCheck(check) {
     checkedAt: String(check.checkedAt || ""),
     missingIds: Array.isArray(check.missingIds) ? check.missingIds.map(String) : [],
     deletedIds: Array.isArray(check.deletedIds) ? check.deletedIds.map(String) : [],
+    orgAlias: String(check.orgAlias || ""),
+    instanceUrl: String(check.instanceUrl || ""),
+    selectedOrgAlias: String(check.selectedOrgAlias || check.requestedOrgAlias || check.orgAlias || ""),
+    selectedInstanceUrl: String(check.selectedInstanceUrl || check.requestedInstanceUrl || check.instanceUrl || ""),
+    requestedOrgAlias: String(check.requestedOrgAlias || ""),
+    requestedInstanceUrl: String(check.requestedInstanceUrl || ""),
     changedFields: Array.isArray(check.changedFields)
       ? check.changedFields.map((change) => ({
           id: String(change.id || ""),
@@ -2283,32 +2906,93 @@ async function ingestRows(rows, fileName, fromObjects, knownHeaders) {
   return fromObjects ? Promise.resolve() : restoreReviewStateForCurrentDataset();
 }
 
-async function applyProcessedDataset(result, { fromObjects = false } = {}) {
+async function applyProcessedDataset(result, { fromObjects = false, objectType = state.objectType, loadRequestId = 0 } = {}) {
+  if (!isCurrentLoadRequest(loadRequestId)) return;
   state.lastProcessingMode = result.processingMode || "";
   state.lastMatchingStats = result.matchingStats || null;
+  const metadata = extractDatasetMetadata(result);
+  const extractedOrg = extractSalesforceOrgProfileFromDataset(result);
+  const sourceOrg = isCompleteSalesforceOrgProfile(extractedOrg) ? extractedOrg : getSelectedSalesforceOrgProfile();
+  setLoadedDatasetSource({
+    endpoint: result.endpoint || "",
+    fileName: result.fileName || datasetFileNameForFormat(result.format),
+    displayName: result.displayName || "",
+    objectType: result.objectType,
+    format: result.format,
+    contractVersion: result.contractVersion || metadata.contractVersion || "",
+    metadata,
+    orgAlias: sourceOrg.orgAlias,
+    instanceUrl: sourceOrg.instanceUrl
+  });
   stageRowsForReview({
     rows: result.rows || [],
     fileName: result.fileName || datasetFileNameForFormat(result.format),
     fromObjects,
     headers: result.headers,
     mapping: result.mapping,
-    objectType: result.objectType,
-    metadata: extractDatasetMetadata(result)
+    objectType: result.objectType || objectType,
+    metadata,
+    sourceOrg
   });
   await updateLoadingProgress("Rendering duplicate groups.", 98);
   applyComputedGroups(result.groups || [], result.matchingStats || null);
   scheduleMatchingArtifactsWarmCache();
   if (result.matchingArtifacts) cacheMatchingArtifacts(result.matchingArtifacts);
   await updateLoadingProgress("Ready.", 100);
+  setSelectedSalesforceOrgProfile(sourceOrg, { persist: true });
   return fromObjects ? Promise.resolve() : restoreReviewStateForCurrentDataset();
 }
 
-function stageRowsForReview({ rows, fileName, fromObjects, headers, mapping, objectType, metadata = {} }) {
+async function applyParsedDataset(result, { fromObjects = false, objectType = state.objectType, loadRequestId = 0 } = {}) {
+  if (!isCurrentLoadRequest(loadRequestId)) return;
+  state.lastProcessingMode = result.processingMode || "";
+  state.lastMatchingStats = result.matchingStats || null;
+  const metadata = extractDatasetMetadata(result);
+  const extractedOrg = extractSalesforceOrgProfileFromDataset(result);
+  const sourceOrg = isCompleteSalesforceOrgProfile(extractedOrg) ? extractedOrg : getSelectedSalesforceOrgProfile();
+  setLoadedDatasetSource({
+    endpoint: result.endpoint || "",
+    fileName: result.fileName || datasetFileNameForFormat(result.format),
+    displayName: result.displayName || "",
+    objectType: result.objectType || objectType,
+    format: result.format,
+    contractVersion: result.contractVersion || metadata.contractVersion || "",
+    metadata,
+    orgAlias: sourceOrg.orgAlias,
+    instanceUrl: sourceOrg.instanceUrl
+  });
+  stageRowsForReview({
+    rows: result.rows || [],
+    fileName: result.fileName || datasetFileNameForFormat(result.format),
+    fromObjects,
+    headers: result.headers,
+    mapping: result.mapping,
+    objectType: result.objectType || objectType,
+    metadata,
+    sourceOrg
+  });
+  state.matchingDeferred = true;
+  state.loadPhase = "parsed-ready";
+  state.reviewStateStatus = state.datasetKey && isFileHistoryAvailable()
+    ? "Matching deferred until you click Match now."
+    : "Matching deferred";
+  applyComputedGroups([], null, { preserveDeferredState: true });
+  await updateLoadingProgress("Parsed dataset ready. Matching is deferred.", 100);
+  setSelectedSalesforceOrgProfile(sourceOrg, { persist: true });
+  return fromObjects ? Promise.resolve() : Promise.resolve();
+}
+
+function stageRowsForReview({ rows, fileName, fromObjects, headers, mapping, objectType, metadata = {}, sourceOrg = {} }) {
   flushPendingReviewStateSave();
   endFileLoad();
   state.objectType = normalizeObjectType(objectType, state.objectType);
   state.fileName = fileName;
   state.datasetMetadata = sanitizeDatasetMetadata(metadata);
+  state.datasetSource = {
+    ...state.datasetSource,
+    orgAlias: normalizeSalesforceOrgAlias(sourceOrg.orgAlias, sourceOrg.instanceUrl),
+    instanceUrl: normalizeSalesforceInstanceUrl(sourceOrg.instanceUrl)
+  };
   state.rows = Array.isArray(rows) ? rows : [];
   state.rows.forEach((row, index) => {
     row.__rowIndex = index;
@@ -2339,11 +3023,13 @@ function stageRowsForReview({ rows, fileName, fromObjects, headers, mapping, obj
 async function recompute({ title = "Matching Records", message = "Preparing records for matching." } = {}) {
   const shouldOwnModal = !state.loadingModal.active;
   if (shouldOwnModal) {
-    showLoadingModal(title, message, 0);
+    showLoadingModal(title, message, 0, true);
     await nextPaint();
   }
 
   try {
+    state.loadPhase = "matching";
+    renderSource();
     const result = await processMatchingJob({
       mode: "recompute",
       rows: state.rows,
@@ -2360,6 +3046,9 @@ async function recompute({ title = "Matching Records", message = "Preparing reco
     scheduleMatchingArtifactsWarmCache();
     if (result.matchingArtifacts) cacheMatchingArtifacts(result.matchingArtifacts);
     await updateLoadingProgress("Ready.", 100);
+    if (state.datasetKey && !state.isLoadingFile) {
+      await restoreReviewStateForCurrentDataset();
+    }
   } catch (error) {
     if (!isAbortError(error)) throw error;
   } finally {
@@ -2367,9 +3056,13 @@ async function recompute({ title = "Matching Records", message = "Preparing reco
   }
 }
 
-function applyComputedGroups(groups, matchingStats = null) {
+function applyComputedGroups(groups, matchingStats = null, { preserveDeferredState = false } = {}) {
   state.groups = Array.isArray(groups) ? groups : [];
   state.lastMatchingStats = matchingStats || state.lastMatchingStats;
+  if (!preserveDeferredState) {
+    state.matchingDeferred = false;
+    state.loadPhase = "idle";
+  }
   groupLookupCache = null;
   groupListRenderCache = null;
   detailRenderCache = "";
@@ -2458,7 +3151,7 @@ async function rebuildMatchesFromCachedArtifacts({ title = "Matching Records", m
 
   const shouldOwnModal = !state.loadingModal.active;
   if (shouldOwnModal) {
-    showLoadingModal(title, message, 0);
+    showLoadingModal(title, message, 0, true);
     await nextPaint();
   }
 
@@ -2511,7 +3204,15 @@ function processMatchingJobInWorker(payload, progress = async () => {}) {
 async function processMatchingJobOnMain(payload, progress = async () => {}) {
   if (payload.mode === "process-text") {
     const format = payload.format || datasetFormatFromFileName(payload.fileName);
-    await progress(format === "json" ? "Parsing JSON dataset." : "Parsing CSV.", 4);
+    const deferMatching = Boolean(payload.deferMatching);
+    await progress(
+      format === "json"
+        ? deferMatching
+          ? "Parsing large JSON dataset."
+          : "Parsing JSON dataset."
+        : "Parsing CSV.",
+      deferMatching ? 3 : 4
+    );
     const dataset = parseDatasetText(payload.text || "", {
       format,
       fileName: payload.fileName,
@@ -2523,6 +3224,21 @@ async function processMatchingJobOnMain(payload, progress = async () => {}) {
     });
     const headers = dataset.headers?.length ? dataset.headers : inferHeaders(rows);
     const mapping = dataset.mapping || autoMapHeaders(headers, OBJECT_CONFIG[dataset.objectType].fields);
+    if (deferMatching) {
+      await progress("Parsed dataset ready. Matching is deferred.", 100);
+      return {
+        ...dataset,
+        rows,
+        headers,
+        mapping,
+        groups: [],
+        matchingStats: null,
+        matchingArtifacts: null,
+        processingMode: "main-ingest",
+        ingestState: "parsed-ready",
+        matchingDeferred: true
+      };
+    }
     stageMatchingContext(rows, dataset.objectType, headers, mapping);
     await progress("Matching records.", 7);
     const { groups, matchingStats, matchingArtifacts } = await buildGroupsAsync(
@@ -2600,6 +3316,7 @@ async function applyMatchControls() {
   const nextHighRecallMode = !els.highRecallMode.checked;
   const thresholdChanged = nextThreshold !== state.threshold;
   const highRecallChanged = nextHighRecallMode !== state.highRecallMode;
+  const shouldStartDeferredMatch = state.matchingDeferred && state.rows.length && !state.groups.length;
   const canReuseMatchingArtifacts =
     Boolean(matchingArtifactsCache) &&
     matchingArtifactsCache.rows === state.rows &&
@@ -2611,7 +3328,7 @@ async function applyMatchControls() {
   state.threshold = nextThreshold;
   state.maxThreshold = nextMaxThreshold;
   state.highRecallMode = nextHighRecallMode;
-  if (thresholdChanged || highRecallChanged) {
+  if (thresholdChanged || highRecallChanged || shouldStartDeferredMatch) {
     if (thresholdChanged && !highRecallChanged && canReuseMatchingArtifacts) {
       await rebuildMatchesFromCachedArtifacts({ title: "Updating Matches", message: "Reusing prepared records and cached pair scores." });
       return;
@@ -2727,6 +3444,10 @@ function parseDatasetText(text, { format = "csv", fileName = "", objectType = st
   };
 }
 
+function shouldDeferJsonIngest({ format = "csv", size = 0 } = {}) {
+  return format === "json" && Number(size) >= LARGE_JSON_INGEST_THRESHOLD_BYTES;
+}
+
 function normalizeReviewDatasetPayload(payload, { fileName = "", objectType = state.objectType } = {}) {
   if (!payload || typeof payload !== "object") {
     throw new Error("JSON dataset must be an object.");
@@ -2737,6 +3458,10 @@ function normalizeReviewDatasetPayload(payload, { fileName = "", objectType = st
     normalizeObjectType(objectType, state.objectType)
   );
   const normalizedFileName = String(payload.fileName || payload.source?.name || fileName || "JSON import");
+  const orgProfile = normalizeSalesforceOrgProfile({
+    orgAlias: payload.orgAlias || payload.source?.orgAlias || payload.source?.org?.orgAlias || "",
+    instanceUrl: payload.instanceUrl || payload.source?.instanceUrl || payload.source?.org?.instanceUrl || ""
+  });
 
   if (Array.isArray(payload.records)) {
     const rows = payload.records.map(normalizeJsonRecord);
@@ -2745,7 +3470,9 @@ function normalizeReviewDatasetPayload(payload, { fileName = "", objectType = st
       schemaVersion: Number(payload.schemaVersion) || 0,
       contractVersion: String(payload.contractVersion || payload.source?.contractVersion || ""),
       rollbackInventory: Array.isArray(payload.rollbackInventory) ? payload.rollbackInventory : [],
-      source: payload.source && typeof payload.source === "object" && !Array.isArray(payload.source) ? { ...payload.source } : {},
+      source: payload.source && typeof payload.source === "object" && !Array.isArray(payload.source)
+        ? { ...payload.source, orgAlias: orgProfile.orgAlias || payload.source.orgAlias || "", instanceUrl: orgProfile.instanceUrl || payload.source.instanceUrl || "" }
+        : { orgAlias: orgProfile.orgAlias, instanceUrl: orgProfile.instanceUrl },
       fields: Array.isArray(payload.fields) ? payload.fields.map((field) => ({ ...field })) : []
     });
     return {
@@ -2754,6 +3481,8 @@ function normalizeReviewDatasetPayload(payload, { fileName = "", objectType = st
       objectType: normalizedObjectType,
       headers: datasetHeadersFromJsonPayload(payload, rows),
       rows,
+      orgAlias: orgProfile.orgAlias,
+      instanceUrl: orgProfile.instanceUrl,
       ...metadata
     };
   }
@@ -2766,12 +3495,16 @@ function normalizeReviewDatasetPayload(payload, { fileName = "", objectType = st
       objectType: normalizedObjectType,
       headers,
       rows: payload.rows.map((row) => rowArrayToObject(headers, row)),
+      orgAlias: orgProfile.orgAlias,
+      instanceUrl: orgProfile.instanceUrl,
       ...sanitizeDatasetMetadata({
         schema: String(payload.schema || ""),
         schemaVersion: Number(payload.schemaVersion) || 0,
         contractVersion: String(payload.contractVersion || payload.source?.contractVersion || ""),
         rollbackInventory: Array.isArray(payload.rollbackInventory) ? payload.rollbackInventory : [],
-        source: payload.source && typeof payload.source === "object" && !Array.isArray(payload.source) ? { ...payload.source } : {},
+        source: payload.source && typeof payload.source === "object" && !Array.isArray(payload.source)
+          ? { ...payload.source, orgAlias: orgProfile.orgAlias || payload.source.orgAlias || "", instanceUrl: orgProfile.instanceUrl || payload.source.instanceUrl || "" }
+          : { orgAlias: orgProfile.orgAlias, instanceUrl: orgProfile.instanceUrl },
         fields: Array.isArray(payload.fields) ? payload.fields.map((field) => ({ ...field })) : []
       })
     };
@@ -2788,12 +3521,16 @@ function normalizeReviewDatasetPayload(payload, { fileName = "", objectType = st
       objectType: normalizedObjectType,
       headers: datasetHeadersFromJsonPayload(payload, rows),
       rows,
+      orgAlias: orgProfile.orgAlias,
+      instanceUrl: orgProfile.instanceUrl,
       ...sanitizeDatasetMetadata({
         schema: String(payload.schema || ""),
         schemaVersion: Number(payload.schemaVersion) || 0,
         contractVersion: String(payload.contractVersion || payload.source?.contractVersion || ""),
         rollbackInventory: Array.isArray(payload.rollbackInventory) ? payload.rollbackInventory : [],
-        source: payload.source && typeof payload.source === "object" && !Array.isArray(payload.source) ? { ...payload.source } : {},
+        source: payload.source && typeof payload.source === "object" && !Array.isArray(payload.source)
+          ? { ...payload.source, orgAlias: orgProfile.orgAlias || payload.source.orgAlias || "", instanceUrl: orgProfile.instanceUrl || payload.source.instanceUrl || "" }
+          : { orgAlias: orgProfile.orgAlias, instanceUrl: orgProfile.instanceUrl },
         fields: Array.isArray(payload.fields) ? payload.fields.map((field) => ({ ...field })) : []
       })
     };
@@ -2839,7 +3576,16 @@ function extractDatasetMetadata(result = {}) {
     schemaVersion: Number(result.schemaVersion) || 0,
     contractVersion: String(result.contractVersion || result.source?.contractVersion || ""),
     rollbackInventory: Array.isArray(result.rollbackInventory) ? result.rollbackInventory : [],
-    source: result.source && typeof result.source === "object" && !Array.isArray(result.source) ? { ...result.source } : {},
+    source: result.source && typeof result.source === "object" && !Array.isArray(result.source)
+      ? {
+          ...result.source,
+          orgAlias: String(result.orgAlias || result.source.orgAlias || result.source?.org?.orgAlias || ""),
+          instanceUrl: String(result.instanceUrl || result.source.instanceUrl || result.source?.org?.instanceUrl || "")
+        }
+      : {
+          orgAlias: String(result.orgAlias || ""),
+          instanceUrl: String(result.instanceUrl || "")
+        },
     fields: Array.isArray(result.fields) ? result.fields.map((field) => ({ ...field })) : []
   });
 }
@@ -2853,7 +3599,9 @@ function sanitizeDatasetMetadata(metadata = {}) {
         query: String(metadata.source.query || ""),
         operation: String(metadata.source.operation || ""),
         totalSize: Number(metadata.source.totalSize) || 0,
-        contractVersion: String(metadata.source.contractVersion || "")
+        contractVersion: String(metadata.source.contractVersion || ""),
+        orgAlias: String(metadata.source.orgAlias || metadata.orgAlias || ""),
+        instanceUrl: String(metadata.source.instanceUrl || metadata.instanceUrl || "")
       }
     : {};
 
@@ -2861,6 +3609,8 @@ function sanitizeDatasetMetadata(metadata = {}) {
     schema: String(metadata.schema || ""),
     schemaVersion: Number(metadata.schemaVersion) || 0,
     contractVersion: String(metadata.contractVersion || ""),
+    orgAlias: String(metadata.orgAlias || metadata.source?.orgAlias || ""),
+    instanceUrl: String(metadata.instanceUrl || metadata.source?.instanceUrl || ""),
     rollbackInventory: Array.isArray(metadata.rollbackInventory) ? metadata.rollbackInventory : [],
     source,
     fields: Array.isArray(metadata.fields) ? metadata.fields.map((field) => ({ ...field })) : []
@@ -3028,7 +3778,8 @@ async function buildGroupsAsync(
     : await getAccountCandidatePairsAsync(preparedRows, highRecallMode, candidatePairLimit(highRecallMode), artifactThreshold, progress);
 
   await progress(`Scoring ${formatNumber(pairKeys.size)} candidate pairs.`, 44);
-  const pairs = await scoreCandidatePairsAsync(pairKeys, preparedRows, scorer, artifactThreshold, progress);
+  const comparisonThreshold = objectType === "contact" ? CONTACT_MODEL_COMPARISON_THRESHOLD : artifactThreshold;
+  const pairs = await scoreCandidatePairsAsync(pairKeys, preparedRows, scorer, comparisonThreshold, progress);
   const currentPairs = pairs.filter((pair) => pair.value >= threshold);
 
   await progress("Building match groups.", 82);
@@ -3113,7 +3864,6 @@ function getScoringContext(rows, objectType, mapping) {
 
   const preparedRows = prepareRows(rows, objectType, mapping);
   const fieldStats = buildFieldStats(preparedRows, objectType);
-  const mirrorConflicts = objectType === "contact" ? buildContactMirrorConflictMap(preparedRows) : null;
   const scorer = createPairScorer(objectType, fieldStats);
   scoringContextCache = {
     rows,
@@ -3121,7 +3871,6 @@ function getScoringContext(rows, objectType, mapping) {
     mapping,
     preparedRows,
     fieldStats,
-    mirrorConflicts,
     scorer
   };
   return scoringContextCache;
@@ -3139,7 +3888,6 @@ async function getScoringContextAsync(rows, objectType, mapping, progress = asyn
 
   const preparedRows = await prepareRowsAsync(rows, objectType, mapping, progress);
   const fieldStats = await buildFieldStatsAsync(preparedRows, objectType, progress);
-  const mirrorConflicts = objectType === "contact" ? buildContactMirrorConflictMap(preparedRows) : null;
   const scorer = createPairScorer(objectType, fieldStats);
   scoringContextCache = {
     rows,
@@ -3147,7 +3895,6 @@ async function getScoringContextAsync(rows, objectType, mapping, progress = asyn
     mapping,
     preparedRows,
     fieldStats,
-    mirrorConflicts,
     scorer
   };
   return scoringContextCache;
@@ -3161,10 +3908,19 @@ function createPairScorer(objectType, fieldStats = null) {
   return (left, right) => scoreAccountPair(left, right, fieldStats);
 }
 
+function createLegacyPairScorer(objectType, fieldStats = null) {
+  if (objectType === "contact") {
+    const cache = createContactScoreCache();
+    return (left, right) => scoreContactPairLegacy(left, right, cache);
+  }
+  return (left, right) => scoreAccountPair(left, right, fieldStats);
+}
+
 function createContactScoreCache() {
   return {
     nameSequences: new Map(),
     companies: new Map(),
+    organizations: new Map(),
     companyGeographyConflicts: new Map(),
     emailOrgCorroborations: new Map()
   };
@@ -3385,6 +4141,40 @@ function collectPairGroups(pairs, rowCount, conflictMap = null) {
   return groupsByRoot;
 }
 
+function buildContactComparisonSummary(
+  legacyPairs,
+  newPairs,
+  preparedRows,
+  mirrorConflicts,
+  comparisonThreshold = CONTACT_MODEL_COMPARISON_THRESHOLD,
+  currentThreshold = CONTACT_MODEL_COMPARISON_THRESHOLD
+) {
+  const legacyComparisonPairs = legacyPairs.filter((pair) => pair.value >= comparisonThreshold);
+  const newComparisonPairs = newPairs.filter((pair) => pair.value >= comparisonThreshold);
+  const legacyComparisonGroups = [...collectPairGroups(legacyComparisonPairs, preparedRows.length, mirrorConflicts).values()]
+    .map((group) => summarizeGroup(group, preparedRows, createLegacyPairScorer("contact")))
+    .filter((group) => group.score >= comparisonThreshold);
+  const newComparisonGroups = [...collectPairGroups(newComparisonPairs, preparedRows.length, mirrorConflicts).values()]
+    .map((group) => summarizeGroup(group, preparedRows, createPairScorer("contact")))
+    .filter((group) => group.score >= comparisonThreshold);
+  const legacyGroupKeys = new Set(legacyComparisonGroups.map((group) => group.key));
+  const newGroupKeys = new Set(newComparisonGroups.map((group) => group.key));
+
+  return {
+    threshold: comparisonThreshold,
+    currentThreshold,
+    legacyPairCount: legacyComparisonPairs.length,
+    newPairCount: newComparisonPairs.length,
+    deltaPairCount: newComparisonPairs.length - legacyComparisonPairs.length,
+    legacyGroupCount: legacyComparisonGroups.length,
+    newGroupCount: newComparisonGroups.length,
+    deltaGroupCount: newComparisonGroups.length - legacyComparisonGroups.length,
+    lostGroupCount: [...legacyGroupKeys].filter((key) => !newGroupKeys.has(key)).length,
+    gainedGroupCount: [...newGroupKeys].filter((key) => !legacyGroupKeys.has(key)).length,
+    redFlagged: newComparisonGroups.length < legacyComparisonGroups.length
+  };
+}
+
 function buildContactMirrorConflictMap(preparedRows) {
   const rowsByReferenceKey = new Map();
   const conflictsByIndex = new Map();
@@ -3530,6 +4320,7 @@ function createPrepareCache() {
   return {
     contactNames: new Map(),
     companies: new Map(),
+    organizations: new Map(),
     websites: new Map(),
     text: new Map(),
     addresses: new Map(),
@@ -3621,6 +4412,7 @@ function prepareContactRow(row, mapping, index, cache) {
     recordNameKey,
     mirrorOfKey,
     company: cachedTransform(cache.companies, getValue(row, mapping.company), normalizeCompany),
+    organization: cachedTransform(cache.organizations, getValue(row, mapping.company), resolveCanonicalCompanyKey),
     email,
     domain: emailDomain(email),
     linkedIn: cachedTransform(cache.linkedIn, getValue(row, mapping.ziPersonLinkedInUrl), normalizeLinkedInUrl),
@@ -3647,6 +4439,7 @@ function normalizeContactReferenceKey(value) {
 function prepareAccountRow(row, mapping, index, cache) {
   const rawName = getValue(row, mapping.name);
   const name = cachedTransform(cache.companies, rawName, normalizeCompany);
+  const organization = cachedTransform(cache.organizations, rawName, resolveCanonicalCompanyKey);
   const phone = cachedTransform(cache.phones, getValue(row, mapping.phone), normalizePhone);
   const billingStreet = cachedTransform(cache.addresses, getValue(row, mapping.billingStreet), normalizeAddress);
   const billingCity = cachedTransform(cache.text, getValue(row, mapping.billingCity), normalizeText);
@@ -3655,17 +4448,18 @@ function prepareAccountRow(row, mapping, index, cache) {
   const billingPostalPrefix = billingPostalCode.slice(0, 5);
   const billingCountry = cachedTransform(cache.countries, getValue(row, mapping.billingCountry), normalizeCountry);
   const ultimateParentAccount = cachedTransform(
-    cache.companies,
+    cache.organizations,
     getValue(row, mapping.ultimateParentAccount),
-    normalizeCompany
+    resolveCanonicalCompanyKey
   );
 
   return {
     row,
     index,
     name,
+    organization,
     hasStatusMarker: hasCompanyStatusMarker(rawName),
-    nameTokens: significantBucketTokens(name),
+    nameTokens: significantBucketTokens(organization || name),
     website: cachedTransform(cache.websites, getValue(row, mapping.website), normalizeWebsite),
     phone,
     billingStreet,
@@ -3675,7 +4469,7 @@ function prepareAccountRow(row, mapping, index, cache) {
     billingPostalPrefix,
     billingCountry,
     address: [billingStreet, billingCity, billingState, billingPostalPrefix, billingCountry].filter(Boolean).join(" "),
-    firstToken: name.split(" ")[0] || "",
+    firstToken: (organization || name).split(" ")[0] || "",
     accountCurrency: normalizeText(getValue(row, mapping.accountCurrency)),
     ultimateParentAccount,
     ultimateParentTokens: significantBucketTokens(ultimateParentAccount)
@@ -3862,7 +4656,7 @@ function accountCandidateCanReachThreshold(left, right, threshold) {
  */
 function accountCandidateUpperBoundScore(left, right) {
   const fieldScores = {
-    name: candidateEntityNameUpperBoundScore(left.name, right.name),
+    name: candidateEntityNameUpperBoundScore(accountCompanyValue(left), accountCompanyValue(right)),
     website: candidateComparableScore(left.website, right.website, websiteScore),
     phone: candidateComparableScore(left.phone, right.phone, phoneScore),
     billingStreet: candidateOptimisticScore(left.billingStreet, right.billingStreet),
@@ -4122,7 +4916,11 @@ function pairKey(left, right) {
   return left < right ? `${left}|${right}` : `${right}|${left}`;
 }
 
-function scoreContactPair(left, right, cache = null) {
+function scoreContactPairLegacy(left, right, cache = null) {
+  return scoreContactPair(left, right, cache, "legacy");
+}
+
+function scoreContactPair(left, right, cache = null, model = "new") {
   if (hasMirrorContactRelationship(left, right)) {
     return {
       left: left.row,
@@ -4152,7 +4950,9 @@ function scoreContactPair(left, right, cache = null) {
   const firstSimilarity = comparableScore(left.explicitFirstName, right.explicitFirstName, nameSimilarity);
   const lastSimilarity = comparableScore(left.explicitLastName, right.explicitLastName, nameSimilarity);
   const fullNameSimilarity = cachedContactFullNameScore(left, right, cache?.nameSequences);
-  const companySimilarity = comparableCachedScore(left.company, right.company, contactCompanySimilarity, cache?.companies);
+  const leftCompany = model === "legacy" ? left.company : left.organization || left.company;
+  const rightCompany = model === "legacy" ? right.company : right.organization || right.company;
+  const companySimilarity = comparableCachedScore(leftCompany, rightCompany, contactCompanySimilarity, cache?.companies);
   const emailSimilarity = comparableScore(left.email, right.email, emailScore);
   const exactEmail = Boolean(left.email && right.email && left.email === right.email);
   const emailOrgCorroboration = cachedPairBoolean(
@@ -4175,7 +4975,7 @@ function scoreContactPair(left, right, cache = null) {
   const exactAnyPhone = bestPhoneSimilarity === 1;
   const exactFullName = fullNameSimilarity === 1;
   const companyConflict = hasContactCompanyConflict(left, right, companySimilarity);
-  if (companyConflict) {
+  if (model === "legacy" && companyConflict) {
     return {
       left: left.row,
       right: right.row,
@@ -4226,9 +5026,8 @@ function scoreContactPair(left, right, cache = null) {
     (companySimilarity || 0) < CONTACT_COMPANY_DIVERGENCE_THRESHOLD &&
     !strongIdentityCorroboration;
   const strongCompanyCorroboration =
-    exactEmail ||
     sameEmailDomain ||
-    emailOrgCorroboration ||
+    (!exactEmail && emailOrgCorroboration) ||
     (companySimilarity || 0) >= CONTACT_COMPANY_ALIGNMENT_THRESHOLD;
   const exactIdentityCompanyConflict =
     exactFullName &&
@@ -4272,7 +5071,7 @@ function scoreContactPair(left, right, cache = null) {
   if (companyGeographyConflict) {
     value = Math.min(value, CONTACT_COMPANY_GEOGRAPHY_CONFLICT_CAP);
   } else {
-    if (companyDivergenceWithoutCorroboration) {
+    if (companyDivergenceWithoutCorroboration || (model !== "legacy" && companyConflict && !strongCompanyCorroboration)) {
       value = Math.min(value, CONTACT_COMPANY_DIVERGENCE_CAP);
     }
     if (exactIdentityCompanyConflict) {
@@ -4304,6 +5103,9 @@ function scoreContactPair(left, right, cache = null) {
     if (hasContactFirstNameCompanyDomainCorroboration(left, right, companySimilarity, sameEmailDomain, exactLinkedIn)) {
       value = Math.max(value, CONTACT_FIRST_NAME_COMPANY_DOMAIN_FLOOR);
     }
+  }
+  if (model !== "legacy" && companyConflict && !strongCompanyCorroboration) {
+    value = Math.min(value, CONTACT_EXACT_NAME_NEAR_COMPANY_CAP);
   }
   if (exactFullName && exactAnyPhone && companyConflict && !strongIdentityCorroboration) {
     value = Math.min(value, CONTACT_COMPANY_DIVERGENCE_CAP);
@@ -4510,7 +5312,7 @@ function contactCompanySimilarity(left, right) {
 
 function scoreAccountPair(left, right, fieldStats = null) {
   const fieldScores = {
-    name: comparableScore(left.name, right.name, entityNameSimilarity),
+    name: comparableScore(accountCompanyValue(left), accountCompanyValue(right), entityNameSimilarity),
     website: comparableScore(left.website, right.website, websiteScore),
     phone: comparableScore(left.phone, right.phone, phoneScore),
     billingStreet: comparableScore(left.billingStreet, right.billingStreet, stringSimilarity),
@@ -4689,7 +5491,7 @@ function applyAccountNameDivergenceCap(value, fieldScores, left, right) {
   let scopeDivergenceApplied = false;
   let exactNameWeakWebsiteApplied = false;
 
-  if (nameScore != null && nameScore < 1 && hasEntityNameDivergence(left.name, right.name)) {
+  if (nameScore != null && nameScore < 1 && hasEntityNameDivergence(accountCompanyValue(left), accountCompanyValue(right))) {
     caps.push(accountNameDivergenceCap(nameScore));
     nameDivergenceApplied = true;
   }
@@ -4745,8 +5547,7 @@ function shouldApplyAccountParentBranchDivergenceCap(fieldScores, left, right) {
 function hasAccountScopeDivergence(fieldScores, left, right) {
   const nameScore = fieldScores.name;
   if (nameScore == null || nameScore < 0.9 || nameScore >= 1) return false;
-  if (left.hasStatusMarker || right.hasStatusMarker) return false;
-  if (!hasEntityTokenContainment(left.name, right.name)) return false;
+  if (!hasEntityTokenContainment(accountCompanyValue(left), accountCompanyValue(right))) return false;
   if (hasStrongAccountIdentityCorroboration(fieldScores, left, right)) return false;
 
   return hasAccountScopeDivergenceSignal(left, right);
@@ -4760,8 +5561,8 @@ function hasStrongAccountIdentityCorroboration(fieldScores, left, right) {
 
 function hasAccountScopeDivergenceSignal(left, right) {
   return (
-    accountScopeSpecificTokens(left.name, right.name).some(isAccountScopeDivergenceToken) ||
-    accountScopeSpecificTokens(right.name, left.name).some(isAccountScopeDivergenceToken)
+    accountScopeSpecificTokens(accountCompanyValue(left), accountCompanyValue(right)).some(isAccountScopeDivergenceToken) ||
+    accountScopeSpecificTokens(accountCompanyValue(right), accountCompanyValue(left)).some(isAccountScopeDivergenceToken)
   );
 }
 
@@ -4777,7 +5578,6 @@ function hasStrongExactNameCorroboration(fieldScores, left, right) {
 }
 
 function hasStrongAccountCorroboration(fieldScores, left, right) {
-  if (left.hasStatusMarker || right.hasStatusMarker) return true;
   if ((fieldScores.website || 0) >= MATCHED_FIELD_THRESHOLD) return true;
   if (fieldScores.phone === 1) return true;
   if (fieldScores.billingPostalCode === 1 && fieldScores.billingCountry === 1) return true;
@@ -4805,7 +5605,7 @@ function applyAccountNearExactNameCorroborationCap(value, fieldScores, left, rig
     };
   }
 
-  if (hasSharedDistinctiveEntityAnchor(left.name, right.name)) {
+  if (hasSharedDistinctiveEntityAnchor(accountCompanyValue(left), accountCompanyValue(right))) {
     return {
       value,
       applied: false
@@ -4837,8 +5637,7 @@ function hasStrongExactAccountDuplicateCorroboration(fieldScores, left, right) {
   if (fieldScores.name !== 1) return false;
   if (fieldScores.website === 1) return true;
   if (fieldScores.ultimateParentAccount === 1) return true;
-  if (hasStrongExactBillingAddress(fieldScores)) return true;
-  return left.hasStatusMarker || right.hasStatusMarker;
+  return hasStrongExactBillingAddress(fieldScores);
 }
 
 function hasStrongExactBillingAddress(fieldScores) {
@@ -4859,7 +5658,7 @@ function accountNearExactNameUncorroboratedCap(nameScore) {
 }
 
 function accountNameTokenCount(left, right) {
-  return Math.max(entityNameTokens(left.name).length, entityNameTokens(right.name).length);
+  return Math.max(entityNameTokens(accountCompanyValue(left)).length, entityNameTokens(accountCompanyValue(right)).length);
 }
 
 function accountScopeSpecificTokens(value, otherValue) {
@@ -4897,17 +5696,21 @@ function hasUltimateParentBranchContext(left, right) {
   }
 
   return parents.some((parent) => {
-    return entityNameSimilarity(parent, left.name) >= 0.88 || entityNameSimilarity(parent, right.name) >= 0.88;
+    return entityNameSimilarity(parent, accountCompanyValue(left)) >= 0.88 || entityNameSimilarity(parent, accountCompanyValue(right)) >= 0.88;
   });
 }
 
 function hasDifferentUltimateParent(row) {
-  return Boolean(row.ultimateParentAccount && row.name && entityNameSimilarity(row.name, row.ultimateParentAccount) < 0.98);
+  return Boolean(
+    row.ultimateParentAccount &&
+      accountCompanyValue(row) &&
+      entityNameSimilarity(accountCompanyValue(row), row.ultimateParentAccount) < 0.98
+  );
 }
 
 function accountBranchSpecificTokens(row, otherRow) {
-  const ownTokens = accountBranchCandidateTokens(row.name);
-  const otherTokens = accountBranchCandidateTokens(otherRow.name);
+  const ownTokens = accountBranchCandidateTokens(accountCompanyValue(row));
+  const otherTokens = accountBranchCandidateTokens(accountCompanyValue(otherRow));
   const contextTokens = new Set([
     ...entityNameTokens(row.ultimateParentAccount),
     ...entityNameTokens(otherRow.ultimateParentAccount),
@@ -5171,7 +5974,7 @@ function normalizeName(value) {
 }
 
 function normalizeCompany(value) {
-  return stripCompanyStatusMarkers(normalizeText(value))
+  return stripCompanyStatusMarkers(normalizeText(stripCompanyCommentary(value)))
     .replace(
       /\b(incorporated|inc|llc|ltd|limited|corp|corporation|co|company|plc|llp|lp|the)\b/g,
       ""
@@ -5180,17 +5983,79 @@ function normalizeCompany(value) {
     .replace(/\s+/g, " ");
 }
 
+function resolveCanonicalCompanyKey(value) {
+  const normalized = normalizeCompany(value);
+  if (!normalized) return "";
+  return CONTACT_ORGANIZATION_ALIASES.get(normalized) || normalized;
+}
+
+function resolveContactOrganizationKey(value) {
+  return resolveCanonicalCompanyKey(value);
+}
+
+function accountCompanyValue(row) {
+  return row.organization || row.name;
+}
+
+const COMPANY_COMMENTARY_TERMS = [
+  "f\\s*\\.?\\s*k\\s*\\.?\\s*a",
+  "f\\s*\\/\\s*k\\s*\\/\\s*a",
+  "formerly known as",
+  "d\\s*\\.?\\s*b\\s*\\.?\\s*a",
+  "d\\s*\\/\\s*b\\s*\\/\\s*a",
+  "doing business as",
+  "a\\s*\\/\\s*k\\s*\\/\\s*a",
+  "aka",
+  "c\\s*\\/\\s*o",
+  "care of",
+  "t\\s*\\/\\s*a",
+  "trading as"
+];
+
+const COMPANY_COMMENTARY_PATTERN = `(?:${COMPANY_COMMENTARY_TERMS.join("|")})`;
+
+const COMPANY_COMMENTARY_PATTERNS = [
+  new RegExp(`\\(\\s*${COMPANY_COMMENTARY_PATTERN}\\b[^)]*\\)`, "gi"),
+  new RegExp(`\\[\\s*${COMPANY_COMMENTARY_PATTERN}\\b[^\\]]*\\]`, "gi"),
+  new RegExp(`\\s[-/:|]\\s*${COMPANY_COMMENTARY_PATTERN}\\b.*$`, "gi"),
+  new RegExp(`\\s${COMPANY_COMMENTARY_PATTERN}\\b.*$`, "gi")
+];
+
+const COMPANY_STATUS_MARKER_PATTERNS = [
+  "do not use",
+  "donotuse",
+  "inactive",
+  "obsolete",
+  "deprecated",
+  "duplicate",
+  "dupe"
+];
+
+function stripCompanyCommentary(value) {
+  let normalized = String(value || "");
+  COMPANY_COMMENTARY_PATTERNS.forEach((pattern) => {
+    normalized = normalized.replace(pattern, " ");
+  });
+  return normalized
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
 function stripCompanyStatusMarkers(value) {
-  return String(value || "")
-    .replace(/\b(do not use|donotuse|inactive|obsolete|deprecated|duplicate|dupe)\b/g, " ")
+  let normalized = String(value || "");
+  COMPANY_STATUS_MARKER_PATTERNS.forEach((pattern) => {
+    normalized = normalized.replace(new RegExp(`\\b${pattern.replace(/\s+/g, "\\s+")}\\b`, "g"), " ");
+  });
+  return normalized
     .trim()
     .replace(/\s+/g, " ");
 }
 
 function hasCompanyStatusMarker(value) {
-  return /(^|[^a-z0-9])(do[^a-z0-9]*not[^a-z0-9]*use|donotuse|inactive|obsolete|deprecated|duplicate|dupe)(?=$|[^a-z0-9])/i.test(
-    String(value || "")
-  );
+  const raw = String(value || "").trim().replace(/\s+/g, " ");
+  const commentaryStripped = stripCompanyCommentary(value);
+  const normalized = normalizeText(stripCompanyCommentary(value));
+  return commentaryStripped !== raw || stripCompanyStatusMarkers(normalized) !== normalized;
 }
 
 function normalizeEmail(value) {
@@ -5664,12 +6529,13 @@ function render() {
   renderLoadingModal();
 }
 
-function showLoadingModal(title, message, progress = 0) {
+function showLoadingModal(title, message, progress = 0, cancelable = false) {
   state.loadingModal = {
     active: true,
     title,
     message,
-    progress
+    progress,
+    cancelable
   };
   renderLoadingModal();
 }
@@ -5679,7 +6545,8 @@ function hideLoadingModal() {
     active: false,
     title: "",
     message: "",
-    progress: 0
+    progress: 0,
+    cancelable: false
   };
   renderLoadingModal();
 }
@@ -5698,6 +6565,7 @@ async function updateLoadingProgress(message, progress) {
 function renderLoadingModal() {
   if (!els.loadingModal) return;
   const { active, title, message, progress } = state.loadingModal;
+  const { cancelable } = state.loadingModal;
   els.loadingModal.hidden = !active;
   els.loadingModal.setAttribute("aria-busy", active ? "true" : "false");
   els.loadingModalTitle.textContent = title || "Loading";
@@ -5705,6 +6573,11 @@ function renderLoadingModal() {
   const progressValue = clampProgress(progress);
   els.loadingProgress?.setAttribute("aria-valuenow", String(Math.round(progressValue)));
   els.loadingProgressBar?.style.setProperty("--loading-progress", `${progressValue}%`);
+  if (els.loadingCancelButton) {
+    els.loadingCancelButton.hidden = !active || !cancelable;
+    els.loadingCancelButton.disabled = !cancelable;
+    els.loadingCancelButton.textContent = "Cancel";
+  }
   if (els.loadingSplineStatus) {
     els.loadingSplineStatus.textContent = loadingProgressStatusText(message, progressValue);
   }
@@ -5748,6 +6621,7 @@ function loadingProgressStatusSteps() {
   loadingProgressStatusSteps.steps = [
     { label: "Reading dataset", pattern: /\b(reading|fetching|parsing|csv|json|dataset)\b/i },
     { label: "Preparing records", pattern: /\b(preparing records|matching records|sample records)\b/i },
+    { label: "Parsed ready", pattern: /\b(parsed dataset ready|matching is deferred|match now)\b/i },
     { label: "Checking field statistics", pattern: /\b(field statistics|field mapping)\b/i },
     { label: "Building candidate buckets", pattern: /\b(building candidate buckets|scanning)\b/i },
     { label: "Reticulating splines", type: "spline" },
@@ -5763,7 +6637,7 @@ function loadingProgressStatusSteps() {
 
 function shouldShowSplineInterlude(message, progressValue) {
   if (progressValue < 48 || progressValue > 62) return false;
-  return !/\b(reading|fetching|parsing|rendering|ready|restoring)\b/i.test(message);
+  return !/\b(reading|fetching|parsing|rendering|ready|parsed|restoring)\b/i.test(message);
 }
 
 function loadingSplineStatusText(progressValue) {
@@ -5794,12 +6668,15 @@ function renderSource() {
   ].forEach((control) => {
     control.disabled = !datasetLoaded;
   });
+  if (els.applyControlsButton) {
+    els.applyControlsButton.textContent = state.matchingDeferred && datasetLoaded && !state.groups.length ? "Match now" : "Apply";
+  }
   renderGroupStatusFilterHost();
   renderLabelStatusFilterHost();
   renderFilterBuilder();
   els.fileName.textContent = state.loadingFileName || state.fileName || "Dataset import";
   els.fileMeta.textContent = sourceMetaText(config);
-  els.sourcePill.textContent = state.isLoadingFile ? "Loading" : state.rows.length ? "Loaded" : "No file";
+  els.sourcePill.textContent = sourcePillText();
   els.sourcePill.dataset.lastProcessingMode = state.lastProcessingMode || "";
   els.sourcePill.dataset.groupCount = String(state.groups.length || 0);
   els.sourcePill.dataset.resultGroups = String(state.lastMatchingStats?.resultGroups || 0);
@@ -5808,15 +6685,38 @@ function renderSource() {
   els.sourcePill.classList.toggle("is-loading", state.isLoadingFile);
   els.sourcePill.classList.toggle("is-error", Boolean(state.loadError) && !state.isLoadingFile);
   els.dropZone.classList.toggle("is-loading", state.isLoadingFile);
+  renderOrgSelector();
 }
 
 function sourceMetaText(config) {
-  if (state.isLoadingFile) return `Loading ${config.label.toLowerCase()}...`;
+  if (state.isLoadingFile) {
+    if (state.loadPhase === "parsing") return `Parsing ${config.label.toLowerCase()}...`;
+    if (state.loadPhase === "matching") return `Matching ${config.label.toLowerCase()}...`;
+    return `Reading ${config.label.toLowerCase()}...`;
+  }
   if (state.loadError) return state.loadError;
+  if (state.loadPhase === "matching" && state.rows.length) {
+    return `Matching ${config.label.toLowerCase()}...`;
+  }
+  if (state.matchingDeferred && state.rows.length && !state.groups.length) {
+    return `${formatNumber(state.rows.length)} ${config.label.toLowerCase()} parsed · matching deferred`;
+  }
   const baseText = state.rows.length
     ? `${formatNumber(state.rows.length)} ${config.label.toLowerCase()} loaded`
     : "No records loaded";
   return state.reviewStateStatus ? `${baseText} · ${state.reviewStateStatus}` : baseText;
+}
+
+function sourcePillText() {
+  if (state.isLoadingFile) {
+    if (state.loadPhase === "parsing") return "Parsing";
+    if (state.loadPhase === "matching") return "Matching";
+    return "Loading";
+  }
+  if (state.loadError) return "Error";
+  if (state.loadPhase === "matching" && state.rows.length) return "Matching";
+  if (state.matchingDeferred && state.rows.length && !state.groups.length) return "Parsed";
+  return state.rows.length ? "Loaded" : "No file";
 }
 
 function renderMapping() {
@@ -7255,12 +8155,17 @@ function renderDetail() {
   detailRenderCache = detailSignature;
 
   if (state.isLoadingFile) {
+    const loadingCopy = state.loadPhase === "parsing"
+      ? "Parsing records."
+      : state.loadPhase === "matching"
+        ? "Matching records."
+        : "Reading records.";
     els.detailTitle.textContent = "Loading Dataset";
     els.detailSurface.innerHTML = `
       <div class="empty-state loading-state">
         <div class="loading-spinner" aria-hidden="true"></div>
         <strong>Loading ${escapeHtml(state.loadingFileName || "dataset")}</strong>
-        <span>Parsing records and calculating match groups.</span>
+        <span>${escapeHtml(loadingCopy)}</span>
       </div>
     `;
     return;
@@ -7278,10 +8183,20 @@ function renderDetail() {
           </svg>
         </div>
         <strong>${state.loadError ? "Dataset could not be loaded" : state.rows.length ? "No duplicate groups" : "No duplicate groups yet"}</strong>
-        <span>${state.loadError ? escapeHtml(state.loadError) : state.rows.length ? "Adjust the thresholds or mapping." : "Choose a CSV or JSON file, or load demo data."}</span>
+        <span>${
+          state.loadError
+            ? escapeHtml(state.loadError)
+            : state.matchingDeferred && state.rows.length
+              ? "The dataset is parsed. Use Match now or Apply to build duplicate groups."
+              : state.rows.length
+                ? "Adjust the thresholds or mapping."
+              : "Use the header Import menu to choose Contacts, Accounts, or Labels, or load demo data."
+        }</span>
         <div class="empty-actions">
-          <button class="button button-primary" type="button" data-empty-action="choose-csv">Import</button>
           <button class="button button-secondary" type="button" data-empty-action="demo-data">Load Demo</button>
+          ${state.matchingDeferred && state.rows.length
+            ? '<button class="button button-primary" type="button" data-empty-action="run-match">Match now</button>'
+            : ""}
         </div>
       </div>
     `;
@@ -7340,6 +8255,9 @@ function detailRenderSignature({ group, activeRecords, separatedRecords, current
     mergeReviewActive: mergeReviewSession.active,
     mergeReviewSubmitting: mergeReviewSession.submitting,
     mergeReviewQueueGroupKeys: mergeReviewSession.queueGroupKeys,
+    serverHealthSignature: state.serverHealth
+      ? `${String(state.serverHealth.salesforceAuthFresh)}|${String(state.serverHealth.runtimeAligned)}`
+      : "",
     mergePreviewMasterId: mergePreviewStates.get(groupKey)?.masterId || "",
     mergePreviewMergeIds: mergePreviewStates.get(groupKey)?.mergeIds || [],
     mergePreviewWritebacks: mergePreviewStates.get(groupKey)?.salesforceWritebackCount || 0,
@@ -7530,6 +8448,8 @@ function renderSalesforceMergePanel(group, activeRecords, currentDecision) {
   const queueGroups = getMergeReviewQueueCandidates();
   const queueReadyCount = queueGroups.length;
   const queueCurrentIndex = queueGroups.findIndex((candidate) => candidate.key === group.key);
+  const authBlocked = state.serverHealth?.salesforceAuthFresh === false;
+  const authSupport = salesforceHealthSupportSummary(state.serverHealth);
   const queueSummary = queueReadyCount
     ? queueReadyCount === 1
       ? "1 merge group is ready for read-only review."
@@ -7595,6 +8515,7 @@ function renderSalesforceMergePanel(group, activeRecords, currentDecision) {
       <p class="merge-warning">
         Salesforce merge keeps the selected master Contact and reparents related records from duplicate Contacts. Lead Source changes still apply as Salesforce write-backs; other field choices remain review-only and will be shown in the read-only confirmation preview.
       </p>
+      ${renderMergeAuthBlockedNotice(authSupport)}
       ${mergeState.invalidRecords.length ? renderMissingContactIdNotice(group, mergeState) : ""}
       ${result ? renderMergeResult(result) : ""}
       <div class="merge-actions">
@@ -7603,7 +8524,7 @@ function renderSalesforceMergePanel(group, activeRecords, currentDecision) {
           type="button"
           data-merge-action="merge"
           data-group-key="${escapeHtml(group.key)}"
-          ${mergeState.canSubmit && queueReadyCount ? "" : "disabled"}
+          ${mergeState.canSubmit && queueReadyCount && !authBlocked ? "" : "disabled"}
         >${escapeHtml(reviewButtonLabel)}</button>
       </div>
     </section>
@@ -7615,6 +8536,8 @@ function renderMergeReviewPanel(group) {
   const queueGroups = getMergeReviewQueueGroups();
   const currentIndex = queueGroups.findIndex((candidate) => candidate.key === group.key);
   const currentNumber = currentIndex >= 0 ? currentIndex + 1 : 0;
+  const authBlocked = state.serverHealth?.salesforceAuthFresh === false;
+  const authSupport = salesforceHealthSupportSummary(state.serverHealth);
   const activePreviewState = previewState || mergePreviewStates.get(queueGroups[0]?.key) || null;
   const currentGroupLabel = currentNumber
     ? `Contact group ${group.id}`
@@ -7686,6 +8609,7 @@ function renderMergeReviewPanel(group) {
           <strong>${escapeHtml(currentGroupLabel)}</strong>
         </div>
       </div>
+      ${renderMergeAuthBlockedNotice(authSupport, "before confirming merge review")}
       ${renderMergeConfirmationPreview(activePreviewState)}
       <div class="merge-review-footer">
         <p class="merge-warning">
@@ -7702,7 +8626,7 @@ function renderMergeReviewPanel(group) {
             class="button button-primary merge-confirm-preview-button"
             type="button"
             data-merge-action="confirm-merge"
-            ${mergeReviewSession.submitting ? "disabled" : ""}
+            ${mergeReviewSession.submitting || authBlocked ? "disabled" : ""}
           >${mergeReviewSession.submitting ? "Confirming..." : `Confirm ${reviewCount === 1 ? "merge" : "all merges"}`}</button>
         </div>
       </div>
@@ -7882,6 +8806,15 @@ function renderExcludedMergeNotice(mergeState) {
         <em>Review decisions and calibration labels still work for this excluded Contact pair, but the queued Salesforce merge flow is intentionally disabled.</em>
       </div>
     </div>
+  `;
+}
+
+function renderMergeAuthBlockedNotice(authSupport = "", context = "before starting merge review") {
+  if (state.serverHealth?.salesforceAuthFresh !== false) return "";
+  return `
+    <p class="merge-warning merge-auth-warning">
+      Salesforce auth is blocked. Refresh the Salesforce session ${context}${authSupport ? ` (${escapeHtml(authSupport)}).` : "."}
+    </p>
   `;
 }
 
@@ -8229,6 +9162,10 @@ async function startMergeReviewSession(preferredGroupKey = "") {
     window.alert("No duplicate Contact groups are ready for merge review.");
     return;
   }
+  if (state.serverHealth?.salesforceAuthFresh === false) {
+    window.alert("Salesforce auth is blocked. Refresh the Salesforce session before starting merge review.");
+    return;
+  }
 
   let refreshAfterStaleCheck = false;
   let reviewAborted = false;
@@ -8336,10 +9273,15 @@ async function startMergeReviewSession(preferredGroupKey = "") {
 async function handleConfirmedMerge(button) {
   const queueGroupKeys = [...mergeReviewSession.queueGroupKeys];
   if (!queueGroupKeys.length || mergeReviewSession.submitting) return;
+  if (state.serverHealth?.salesforceAuthFresh === false) {
+    window.alert("Salesforce auth is blocked. Refresh the Salesforce session before confirming merge review.");
+    return;
+  }
   let refreshAfterStaleCheck = false;
   mergeReviewSession.submitting = true;
   queueGroupKeys.forEach((groupKey) => mergeInFlightGroupKeys.add(groupKey));
   renderDetail();
+  const orgProfile = getSelectedSalesforceOrgProfile();
 
   try {
     for (const groupKey of queueGroupKeys) {
@@ -8359,6 +9301,8 @@ async function handleConfirmedMerge(button) {
           masterId: previewState.masterId,
           mergeIds: previewState.mergeIds,
           records: previewState.records,
+          orgAlias: orgProfile.orgAlias,
+          instanceUrl: orgProfile.instanceUrl,
           ...previewState.masterFieldPayload
         })
       });
@@ -8817,6 +9761,10 @@ async function handleMergeAction(button) {
   const groupKey = button.dataset.groupKey;
   const group = findGroupByKey(groupKey);
   if (!group || mergeInFlightGroupKeys.has(groupKey) || mergeReviewSession.submitting) return;
+  if (state.serverHealth?.salesforceAuthFresh === false) {
+    window.alert("Salesforce auth is blocked. Refresh the Salesforce session before starting merge review.");
+    return;
+  }
 
   const activeRecords = getActiveGroupRecords(group);
   const mergeState = getMergeState(group, activeRecords, state.decisions.get(group.key) || "");
@@ -8862,6 +9810,7 @@ async function handleStalePreMergeRefresh(button) {
 }
 
 async function checkSalesforcePreMergeFreshness({ groupKey, mergeState, mergeIds, records }) {
+  const orgProfile = getSelectedSalesforceOrgProfile();
   const response = await fetch("/api/salesforce/premerge-check", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -8870,7 +9819,9 @@ async function checkSalesforcePreMergeFreshness({ groupKey, mergeState, mergeIds
       groupKey,
       masterId: mergeState.selectedId,
       mergeIds,
-      records
+      records,
+      orgAlias: orgProfile.orgAlias,
+      instanceUrl: orgProfile.instanceUrl
     })
   });
   const payload = await readApiJson(response);
@@ -8990,8 +9941,13 @@ function latestContactsSourceFromRecentFiles() {
   const recent = (state.recentFiles || [])
     .filter((record) => {
       if (!record?.endpoint || normalizeObjectType(record.objectType) !== "contact") return false;
-      const text = `${record.endpoint} ${record.displayName || ""} ${record.name || ""}`.toLowerCase();
-      return text.includes("staging-contacts") || text.includes("latest contacts");
+      const endpoint = String(record.endpoint || "").toLowerCase();
+      return (
+        endpoint === "/api/staging-contacts/latest.json" ||
+        endpoint === "/api/staging-contacts/latest.csv" ||
+        endpoint === "/api/prod-contacts/latest.json" ||
+        endpoint === "/api/prod-contacts/latest.csv"
+      );
     })
     .sort((left, right) => {
       const leftJson = String(left.format || left.name || left.endpoint || "").toLowerCase().endsWith(".json") || String(left.format || "").toLowerCase() === "json";
@@ -9001,10 +9957,11 @@ function latestContactsSourceFromRecentFiles() {
     })[0];
   if (!recent) return null;
 
+  const endpoint = String(recent.endpoint || "");
   return {
-    endpoint: String(recent.endpoint || ""),
-    fileName: String(recent.name || "salesforce-report-latest.json"),
-    displayName: String(recent.displayName || recent.name || "Latest Contacts"),
+    endpoint,
+    fileName: endpoint.toLowerCase().endsWith(".csv") ? "salesforce-report-latest.csv" : "salesforce-report-latest.json",
+    displayName: String(recent.displayName || (endpoint.includes("/api/prod-contacts/") ? "Latest Prod Contacts" : "Latest Contacts")),
     objectType: "contact",
     format: String(recent.format || datasetFormatFromFileName(recent.name || recent.endpoint || "salesforce-report-latest.json")),
     contractVersion: String(recent.contractVersion || "")
