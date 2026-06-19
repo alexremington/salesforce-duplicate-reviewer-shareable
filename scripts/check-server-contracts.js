@@ -799,21 +799,45 @@ async function assertAccountExactWebsiteCorroborationRegression() {
 async function assertAccountCommentaryNormalizationRegression() {
   const api = loadAppApi();
   const positiveCases = [
-    "Northstar Analytics (FKA Legacy Northstar)",
-    "Northstar Analytics - FKA Legacy Northstar",
-    "Northstar Analytics / DBA Legacy Northstar",
-    "Northstar Analytics doing business as Legacy Northstar"
+    {
+      variant: "Northstar Analytics (FKA Legacy Northstar)",
+      canonical: "Northstar Analytics"
+    },
+    {
+      variant: "Northstar Analytics - FKA Legacy Northstar",
+      canonical: "Northstar Analytics"
+    },
+    {
+      variant: "Northstar Analytics / DBA Legacy Northstar",
+      canonical: "Northstar Analytics"
+    },
+    {
+      variant: "Northstar Analytics doing business as Legacy Northstar",
+      canonical: "Northstar Analytics"
+    },
+    {
+      variant: "Mid-Atlantic Solutions Inc. aka MASLabor",
+      canonical: "Mid-Atlantic Solutions Inc."
+    },
+    {
+      variant: "Student Borrower Protection c/o Shared Ascent Fund",
+      canonical: "Student Borrower Protection"
+    },
+    {
+      variant: "GPlus Europe Ltd (t/a Portland)",
+      canonical: "GPlus Europe Ltd"
+    }
   ];
   const negativeCases = [
     ["FKA Research", "Research"],
     ["DBA Systems", "Systems"]
   ];
 
-  positiveCases.forEach((variant, index) => {
+  positiveCases.forEach(({ variant, canonical }, index) => {
     const csv = [
       "Id,Name,Phone,BillingCountry",
       `001CP${index},${variant},(555) 010-2200,United States`,
-      `001CQ${index},Northstar Analytics,(555) 010-2200,United States`
+      `001CQ${index},${canonical},(555) 010-2200,United States`
     ].join("\n");
     const parsed = api.parseCsv(csv);
     const rows = parsed.rows.map((row, rowIndex) => ({ ...row, __rowIndex: rowIndex }));
@@ -822,16 +846,20 @@ async function assertAccountCommentaryNormalizationRegression() {
     const preparedRows = api.prepareRows(rows, "account", mapping);
     const fieldStats = api.buildFieldStats(preparedRows, "account");
     const score = api.scoreAccountPair(preparedRows[0], preparedRows[1], fieldStats);
+    const canonicalOrganization = preparedRows[1].organization;
 
     if (
       preparedRows[0].organization !== preparedRows[1].organization ||
-      preparedRows[0].organization !== "northstar analytics" ||
+      preparedRows[0].organization !== canonicalOrganization ||
+      !preparedRows[0].hasStatusMarker ||
+      preparedRows[1].hasStatusMarker ||
       score.fieldScores.name !== 1 ||
       !score.reasons.includes("Exact account name")
     ) {
       throw new Error(
         `Account commentary normalization regression failed for ${variant}: ${JSON.stringify({
           organizations: preparedRows.map((row) => row.organization),
+          hasStatusMarkers: preparedRows.map((row) => row.hasStatusMarker),
           score: Math.round(score.value),
           fieldScores: score.fieldScores,
           reasons: score.reasons

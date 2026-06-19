@@ -7,7 +7,7 @@ Account-name and Contact-company canonicalization MUST strip internal commentary
 #### Scenario: Commentary phrases do not block an exact canonical company match
 
 - **GIVEN** two Account or Contact rows refer to the same company
-- **AND** one value includes internal commentary such as `FKA`, `formerly known as`, `DBA`, `doing business as`, or `do not use`
+- **AND** one value includes internal commentary such as `FKA`, `A/K/A`, `AKA`, `formerly known as`, `DBA`, `doing business as`, `C/O`, `care of`, `T/A`, `trading as`, or `do not use`
 - **WHEN** the rows are normalized for scoring
 - **THEN** the commentary phrase is removed before canonical comparison
 - **AND** the remaining company identity can still resolve to an exact match when the non-commentary tokens are otherwise equivalent.

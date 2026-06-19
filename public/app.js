@@ -5997,11 +5997,28 @@ function accountCompanyValue(row) {
   return row.organization || row.name;
 }
 
+const COMPANY_COMMENTARY_TERMS = [
+  "f\\s*\\.?\\s*k\\s*\\.?\\s*a",
+  "f\\s*\\/\\s*k\\s*\\/\\s*a",
+  "formerly known as",
+  "d\\s*\\.?\\s*b\\s*\\.?\\s*a",
+  "d\\s*\\/\\s*b\\s*\\/\\s*a",
+  "doing business as",
+  "a\\s*\\/\\s*k\\s*\\/\\s*a",
+  "aka",
+  "c\\s*\\/\\s*o",
+  "care of",
+  "t\\s*\\/\\s*a",
+  "trading as"
+];
+
+const COMPANY_COMMENTARY_PATTERN = `(?:${COMPANY_COMMENTARY_TERMS.join("|")})`;
+
 const COMPANY_COMMENTARY_PATTERNS = [
-  /\(\s*(?:f\s*\.?\s*k\s*\.?\s*a|formerly known as|d\s*\.?\s*b\s*\.?\s*a|doing business as)\b[^)]*\)/gi,
-  /\[\s*(?:f\s*\.?\s*k\s*\.?\s*a|formerly known as|d\s*\.?\s*b\s*\.?\s*a|doing business as)\b[^\]]*\]/gi,
-  /\s[-/:|]\s*(?:f\s*\.?\s*k\s*\.?\s*a|d\s*\.?\s*b\s*\.?\s*a)\b.*$/gi,
-  /\s(?:formerly known as|doing business as)\b.*$/gi
+  new RegExp(`\\(\\s*${COMPANY_COMMENTARY_PATTERN}\\b[^)]*\\)`, "gi"),
+  new RegExp(`\\[\\s*${COMPANY_COMMENTARY_PATTERN}\\b[^\\]]*\\]`, "gi"),
+  new RegExp(`\\s[-/:|]\\s*${COMPANY_COMMENTARY_PATTERN}\\b.*$`, "gi"),
+  new RegExp(`\\s${COMPANY_COMMENTARY_PATTERN}\\b.*$`, "gi")
 ];
 
 const COMPANY_STATUS_MARKER_PATTERNS = [
