@@ -146,6 +146,7 @@ async function run() {
     const pairRegressionState = await assertPairRegressionGroups(browser, pairRegressionJsonPath);
     const accountCompanyNormalizationState = await assertAccountCompanyNormalizationSeparated(browser, accountCompanyNormalizationCsvPath);
     const accountCommentaryNormalizationState = await assertAccountCompanyNormalizationSeparated(browser, accountCommentaryNormalizationCsvPath);
+    const staleRuntimeDatasetExportState = await assertStaleRuntimeBlocksDatasetExport(browser, accountCommentaryNormalizationCsvPath);
     await assertMirrorRelationshipSeparated(browser, mirrorRelationshipCsvPath);
     const largeContactPerformance = await assertLargeContactCsvPerformance(browser, largeContactCsvPath);
     const largeContactJsonDeferredState = await assertLargeContactJsonDeferredIngest(browser, largeContactJsonPath);
@@ -620,6 +621,15 @@ async function run() {
     ) {
       throw new Error(
         `Expected the account commentary normalization fixture to strip internal commentary and keep exact-name plus exact-phone evidence: ${JSON.stringify(accountCommentaryNormalizationState)}`
+      );
+    }
+    if (
+      !staleRuntimeDatasetExportState.buttonDisabled ||
+      !staleRuntimeDatasetExportState.dialogMessage.includes("Refresh the reviewer runtime before exporting scores") ||
+      staleRuntimeDatasetExportState.downloaded
+    ) {
+      throw new Error(
+        `Expected stale runtime to block Dataset + Scores export: ${JSON.stringify(staleRuntimeDatasetExportState)}`
       );
     }
     assertPerformanceBudget("large Contact CSV worker import", largeContactPerformance.elapsedMs, PERFORMANCE_BUDGETS.largeContactCsvWorkerMs);
@@ -2940,6 +2950,66 @@ async function captureDatasetExport(page, exportPath) {
   state.csvRowCount = rows.length;
   state.headerRow = rows[0]?.split(",") || [];
   return state;
+}
+
+async function assertStaleRuntimeBlocksDatasetExport(browser, filePath) {
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const diagnostics = [];
+  const state = {
+    buttonDisabled: false,
+    dialogMessage: "",
+    downloaded: false
+  };
+
+  page.on("console", (message) => {
+    if (["error", "warning"].includes(message.type())) {
+      diagnostics.push(`${message.type()}: ${message.text()}`);
+    }
+  });
+  page.on("pageerror", (error) => diagnostics.push(`pageerror: ${error.message}`));
+  page.on("download", () => {
+    state.downloaded = true;
+  });
+
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator("#chooseCsvButton").click();
+    await page.getByRole("menuitem", { name: "Accounts" }).waitFor({ state: "visible", timeout: 5000 });
+    const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
+    await page.getByRole("menuitem", { name: "Accounts" }).click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles(filePath);
+    await waitForLoadingModalHidden(page, "Stale runtime dataset export load", diagnostics);
+    await waitForFirstGroup(page, "Stale runtime dataset export load");
+    await page.evaluate(() => {
+      state.serverHealth = {
+        ...(state.serverHealth || {}),
+        runtimeAligned: false,
+        salesforceAuthFresh: true
+      };
+      if (typeof renderDatasetExportButton === "function") renderDatasetExportButton();
+    });
+
+    const button = page.locator("#datasetExportButton");
+    await page.locator("#exportMenuButton").click();
+    await button.waitFor({ state: "visible", timeout: 5000 });
+    state.buttonDisabled = await button.isDisabled();
+    const dialogPromise = new Promise((resolve) => {
+      page.once("dialog", async (dialog) => {
+        state.dialogMessage = dialog.message();
+        await dialog.accept();
+        resolve(dialog);
+      });
+    });
+    await page.evaluate(() => {
+      if (typeof exportScoredDataset === "function") exportScoredDataset();
+    });
+    await dialogPromise;
+    await page.waitForTimeout(250);
+    return state;
+  } finally {
+    await page.close();
+  }
 }
 
 async function setSalesforceOrgSelection(page, org = {}) {

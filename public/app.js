@@ -1554,6 +1554,7 @@ async function refreshServerHealth() {
     state.serverHealth = null;
   } finally {
     renderOrgSelector();
+    renderDatasetExportButton();
   }
 }
 
@@ -6818,13 +6819,19 @@ function renderTrainingExportButton() {
 
 function renderDatasetExportButton() {
   const loadedCount = state.rows.length;
-  els.datasetExportButton.disabled = !loadedCount;
+  const runtimeBlocked = isDatasetExportBlockedByStaleRuntime();
+  els.datasetExportButton.disabled = !loadedCount || runtimeBlocked;
   els.datasetExportButton.textContent = "Dataset + Scores";
   els.datasetExportButton.setAttribute(
     "aria-label",
-    loadedCount ? `Export dataset with scores (${formatNumber(loadedCount)} records)` : "Export dataset with scores"
+    runtimeBlocked
+      ? "Refresh the reviewer runtime before exporting scores"
+      : loadedCount
+        ? `Export dataset with scores (${formatNumber(loadedCount)} records)`
+        : "Export dataset with scores"
   );
-  els.datasetExportButton.classList.toggle("is-active", loadedCount > 0);
+  els.datasetExportButton.title = runtimeBlocked ? "Refresh the reviewer runtime before exporting scores." : "";
+  els.datasetExportButton.classList.toggle("is-active", loadedCount > 0 && !runtimeBlocked);
   updateExportMenuButtonState();
 }
 
@@ -10428,6 +10435,10 @@ function exportDecisions() {
 
 function exportScoredDataset() {
   if (!state.rows.length) return;
+  if (isDatasetExportBlockedByStaleRuntime()) {
+    window.alert("Refresh the reviewer runtime before exporting scores.");
+    return;
+  }
   downloadCsv(`${state.objectType}-dataset-with-scores.csv`, buildScoredDatasetRows());
 }
 
@@ -10464,6 +10475,10 @@ function buildScoredDatasetRows() {
   });
 
   return rows;
+}
+
+function isDatasetExportBlockedByStaleRuntime() {
+  return state.serverHealth?.runtimeAligned === false;
 }
 
 function exportWorkspace() {
