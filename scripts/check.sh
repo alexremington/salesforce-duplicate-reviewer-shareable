@@ -62,7 +62,7 @@ case "${contactsDryRun}" in
     ;;
 esac
 case "${contactsDryRun}" in
-  *"Latest JSON: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.json"*) ;;
+  *"Latest JSON: ${HOME}/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.json"*) ;;
   *)
     echo "${contactsDryRun}"
     echo "Staging Contacts did not preserve the canonical latest JSON output flow."
@@ -70,7 +70,7 @@ case "${contactsDryRun}" in
     ;;
 esac
 case "${contactsDryRun}" in
-  *"Compatibility CSV: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.csv"*) ;;
+  *"Compatibility CSV: ${HOME}/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts/salesforce-report-latest.csv"*) ;;
   *)
     echo "${contactsDryRun}"
     echo "Staging Contacts did not preserve the canonical compatibility CSV output flow."
@@ -87,7 +87,7 @@ case "${prodContactsDryRun}" in
     ;;
 esac
 case "${prodContactsDryRun}" in
-  *"Org alias: politico"*) ;;
+  *"Org alias: qa"*) ;;
   *)
     echo "${prodContactsDryRun}"
     echo "Prod Contacts did not use the canonical prod Salesforce org alias."
@@ -95,7 +95,7 @@ case "${prodContactsDryRun}" in
     ;;
 esac
 case "${prodContactsDryRun}" in
-  *"Instance: https://politico.my.salesforce.com"*) ;;
+  *"Instance: https://qa.my.salesforce.com"*) ;;
   *)
     echo "${prodContactsDryRun}"
     echo "Prod Contacts did not use the canonical prod Salesforce instance URL."
@@ -103,7 +103,7 @@ case "${prodContactsDryRun}" in
     ;;
 esac
 case "${prodContactsDryRun}" in
-  *"SOQL file: ${PROJECT_DIR}/queries/report-00OVq00000CxYd3MAF.soql"*) ;;
+  *"SOQL file: ${PROJECT_DIR}/queries/contact-duplicate-record-items.soql"*) ;;
   *)
     echo "${prodContactsDryRun}"
     echo "Prod Contacts did not use the canonical prod Contacts query file."
@@ -111,7 +111,7 @@ case "${prodContactsDryRun}" in
     ;;
 esac
 case "${prodContactsDryRun}" in
-  *"Latest JSON: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/salesforce-report-latest.json"*) ;;
+  *"Latest JSON: ${HOME}/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/salesforce-report-latest.json"*) ;;
   *)
     echo "${prodContactsDryRun}"
     echo "Prod Contacts did not preserve the canonical prod latest JSON output flow."
@@ -119,7 +119,7 @@ case "${prodContactsDryRun}" in
     ;;
 esac
 case "${prodContactsDryRun}" in
-  *"Compatibility CSV: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/salesforce-report-latest.csv"*) ;;
+  *"Compatibility CSV: ${HOME}/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts/salesforce-report-latest.csv"*) ;;
   *)
     echo "${prodContactsDryRun}"
     echo "Prod Contacts did not preserve the canonical prod compatibility CSV output flow."
@@ -164,7 +164,7 @@ case "${prodAccountsDryRun}" in
     ;;
 esac
 case "${prodAccountsDryRun}" in
-  *"Org alias: politico"*) ;;
+  *"Org alias: qa"*) ;;
   *)
     echo "${prodAccountsDryRun}"
     echo "Prod Accounts did not use the canonical prod Salesforce org alias."
@@ -172,7 +172,7 @@ case "${prodAccountsDryRun}" in
     ;;
 esac
 case "${prodAccountsDryRun}" in
-  *"Instance: https://politico.my.salesforce.com"*) ;;
+  *"Instance: https://qa.my.salesforce.com"*) ;;
   *)
     echo "${prodAccountsDryRun}"
     echo "Prod Accounts did not use the canonical prod Salesforce instance URL."
@@ -180,7 +180,7 @@ case "${prodAccountsDryRun}" in
     ;;
 esac
 case "${prodAccountsDryRun}" in
-  *"SOQL file: ${PROJECT_DIR}/queries/report-00OVZ000003Dm572AC.soql"*) ;;
+  *"SOQL file: ${PROJECT_DIR}/queries/account-duplicate-record-items.soql"*) ;;
   *)
     echo "${prodAccountsDryRun}"
     echo "Prod Accounts did not use the canonical prod Accounts query file."
@@ -188,7 +188,7 @@ case "${prodAccountsDryRun}" in
     ;;
 esac
 case "${prodAccountsDryRun}" in
-  *"Latest JSON: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-accounts/salesforce-report-latest.json"*) ;;
+  *"Latest JSON: ${HOME}/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-accounts/salesforce-report-latest.json"*) ;;
   *)
     echo "${prodAccountsDryRun}"
     echo "Prod Accounts did not preserve the canonical prod latest JSON output flow."
@@ -196,7 +196,7 @@ case "${prodAccountsDryRun}" in
     ;;
 esac
 case "${prodAccountsDryRun}" in
-  *"Compatibility CSV: ${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-accounts/salesforce-report-latest.csv"*) ;;
+  *"Compatibility CSV: ${HOME}/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-accounts/salesforce-report-latest.csv"*) ;;
   *)
     echo "${prodAccountsDryRun}"
     echo "Prod Accounts did not preserve the canonical prod compatibility CSV output flow."

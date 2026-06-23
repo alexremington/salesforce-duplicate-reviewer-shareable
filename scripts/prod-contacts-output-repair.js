@@ -82,15 +82,11 @@ async function pathExists(fsApi, filePath) {
 
 function defaultProdRoot() {
   if (process.platform === "win32") {
-    return path.join(os.homedir(), "OneDrive - POLITICO", "Salesforce Pulls", "Duplicate Reviewer", "prod");
+    return path.join(os.homedir(), "Salesforce Pulls", "Duplicate Reviewer", "prod");
   }
 
   return path.join(
     os.homedir(),
-    "Library",
-    "CloudStorage",
-    "OneDrive-POLITICO",
-    "Automation Projects",
     "Salesforce Pulls",
     "Duplicate Reviewer",
     "prod"

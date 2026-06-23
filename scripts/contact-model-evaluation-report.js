@@ -17,10 +17,6 @@ const PROJECT_DIR = path.resolve(__dirname, "..");
 const PUBLIC_APP_PATH = path.join(PROJECT_DIR, "public", "app.js");
 const DEFAULT_PROD_JSON_PATH = path.join(
   os.homedir(),
-  "Library",
-  "CloudStorage",
-  "OneDrive-POLITICO",
-  "Automation Projects",
   "Salesforce Pulls",
   "Duplicate Reviewer",
   "prod",

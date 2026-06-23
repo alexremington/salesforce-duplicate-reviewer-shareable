@@ -43,7 +43,7 @@ if [[ $# -gt 0 ]]; then
 fi
 
 export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-export DUPLICATE_REVIEWER_PROD_ROOT="${DUPLICATE_REVIEWER_PROD_ROOT:-${HOME}/Library/CloudStorage/OneDrive-POLITICO/Automation Projects/Salesforce Pulls/Duplicate Reviewer/prod}"
+export DUPLICATE_REVIEWER_PROD_ROOT="${DUPLICATE_REVIEWER_PROD_ROOT:-${HOME}/Salesforce Pulls/Duplicate Reviewer/prod}"
 export PROD_CONTACTS_CSV="${PROD_CONTACTS_CSV:-${DUPLICATE_REVIEWER_PROD_ROOT}/Output/prod-contacts/salesforce-report-latest.csv}"
 export PROD_ACCOUNTS_CSV="${PROD_ACCOUNTS_CSV:-${DUPLICATE_REVIEWER_PROD_ROOT}/Output/prod-accounts/salesforce-report-latest.csv}"
 
