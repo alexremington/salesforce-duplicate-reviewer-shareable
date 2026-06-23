@@ -1336,7 +1336,7 @@ function normalizeSalesforceOrgAlias(value = "", instanceUrl = "") {
   const alias = String(value || "").trim();
   if (!alias) return "";
   if (alias.toLowerCase() !== "staging") return alias;
-  return isCanonicalStagingSandboxInstanceUrl(instanceUrl) ? "politico-staging" : alias;
+  return isCanonicalStagingSandboxInstanceUrl(instanceUrl) ? "qa-staging" : alias;
 }
 
 function normalizeSalesforceInstanceUrl(value = "") {
@@ -1358,7 +1358,7 @@ function normalizeSalesforceInstanceUrl(value = "") {
 }
 
 function isCanonicalStagingSandboxInstanceUrl(value = "") {
-  return normalizeSalesforceInstanceUrl(value) === normalizeSalesforceInstanceUrl("https://politico--staging.sandbox.my.salesforce.com");
+  return normalizeSalesforceInstanceUrl(value) === normalizeSalesforceInstanceUrl("https://qa-staging.example.invalid");
 }
 
 function salesforceOrgProfileKey(profile = {}) {

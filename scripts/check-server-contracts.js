@@ -597,15 +597,15 @@ async function assertTrimmedContactExportSchemaRegression() {
       ].join("\n")
     ],
     [
-      path.join(PROJECT_DIR, "queries", "report-00OVZ000003DjaH2AS.soql"),
+      path.join(PROJECT_DIR, "queries", "contact-duplicate-record-items.soql"),
       approvedContactQuery
     ],
     [
-      path.join(PROJECT_DIR, "queries", "report-00OVq00000CxYd3MAF.soql"),
+      path.join(PROJECT_DIR, "queries", "contact-duplicate-record-items.soql.example"),
       approvedContactQuery
     ]
   ]);
-  const accountQueryPath = path.join(PROJECT_DIR, "queries", "report-00OVZ000003Dm572AC.soql");
+  const accountQueryPath = path.join(PROJECT_DIR, "queries", "account-duplicate-record-items.soql");
   const accountQuery = await fs.readFile(accountQueryPath, "utf8");
 
   for (const [contactQueryPath, expectedContactQuery] of contactQueryExpectations.entries()) {
@@ -1788,7 +1788,7 @@ async function writeFakeSalesforceCli(directory, instanceUrl) {
           connectedStatus: "Connected"
         },
         {
-          alias: "politico-staging",
+          alias: "qa-staging",
           username: "echo@example.com",
           orgId: "00DEEEEEEEEEEEE",
           instanceUrl,
@@ -1856,7 +1856,7 @@ async function assertSalesforceOrgCatalogRoute(baseUrl) {
   if (aliases.join(",") !== [...aliases].sort((a, b) => a.localeCompare(b)).join(",")) {
     throw new Error(`Expected shared org catalog entries to be sorted by alias: ${JSON.stringify(response.orgs)}`);
   }
-  if (!aliases.includes("smoke-org") || !aliases.includes("politico-staging")) {
+  if (!aliases.includes("smoke-org") || !aliases.includes("qa-staging")) {
     throw new Error(`Expected the configured smoke and canonical staging orgs to be included in the shared org catalog: ${JSON.stringify(response.orgs)}`);
   }
   if (aliases.includes("staging")) {
@@ -2025,7 +2025,7 @@ async function writeStaleAuthSalesforceCli(directory) {
 function canonicalSalesforceOrgAlias(alias, instanceUrl = "") {
   const text = String(alias || "").trim();
   if (text.toLowerCase() !== "staging") return text;
-  return String(instanceUrl || "").includes("politico--staging.sandbox.my.salesforce.com") ? "politico-staging" : text;
+  return String(instanceUrl || "").includes("qa-staging.example.invalid") ? "qa-staging" : text;
 }
 
 function fakeSalesforceContactRecords() {

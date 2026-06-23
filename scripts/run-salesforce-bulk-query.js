@@ -8,8 +8,8 @@ const path = require("node:path");
 const managedPlatform = require("../vendor/managed-app/scripts/platform");
 
 const PROJECT_DIR = path.resolve(__dirname, "..");
-const DEFAULT_ORG_ALIAS = "politico-staging";
-const DEFAULT_INSTANCE_URL = "https://politico--staging.sandbox.my.salesforce.com";
+const DEFAULT_ORG_ALIAS = "qa-staging";
+const DEFAULT_INSTANCE_URL = "https://qa-staging.example.invalid";
 const DEFAULT_API_VERSION = "v67.0";
 const DEFAULT_CSV_NAME = "salesforce-report-latest.csv";
 const DEFAULT_JSON_NAME = "salesforce-report-latest.json";
@@ -349,7 +349,7 @@ function canonicalSalesforceOrgAlias(value, instanceUrl = "") {
   const alias = String(value || "").trim();
   if (!alias) return "";
   if (alias.toLowerCase() !== "staging") return alias;
-  return isCanonicalStagingSandboxInstanceUrl(instanceUrl) ? "politico-staging" : alias;
+  return isCanonicalStagingSandboxInstanceUrl(instanceUrl) ? "qa-staging" : alias;
 }
 
 function isCanonicalStagingSandboxInstanceUrl(value) {
@@ -417,7 +417,11 @@ function defaultOutputDir(objectType) {
 
 function defaultQueryFile(objectType) {
   const normalized = normalizeObjectType(objectType) || "contact";
-  return path.join(PROJECT_DIR, "queries", normalized === "contact" ? "report-00OVZ000003DjaH2AS.soql" : "report-00OVZ000003Dm572AC.soql");
+  return path.join(
+    PROJECT_DIR,
+    "queries",
+    normalized === "contact" ? "contact-duplicate-record-items.soql" : "account-duplicate-record-items.soql"
+  );
 }
 
 function normalizeConfiguredPath(value) {

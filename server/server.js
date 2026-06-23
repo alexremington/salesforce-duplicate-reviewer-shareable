@@ -32,8 +32,8 @@ const PROD_CONTACTS_CSV =
 const PROD_ACCOUNTS_CSV =
   process.env.PROD_ACCOUNTS_CSV ||
   defaultProdAccountsCsvPath();
-const STAGING_SF_ORG_ALIAS = process.env.SF_ORG_ALIAS || "politico-staging";
-const STAGING_SF_INSTANCE_URL = process.env.SF_INSTANCE_URL || "https://politico--staging.sandbox.my.salesforce.com";
+const STAGING_SF_ORG_ALIAS = process.env.SF_ORG_ALIAS || "qa-staging";
+const STAGING_SF_INSTANCE_URL = process.env.SF_INSTANCE_URL || "https://qa-staging.example.invalid";
 const PROD_SF_ORG_ALIAS = process.env.PROD_SF_ORG_ALIAS || "politico";
 const PROD_SF_INSTANCE_URL = process.env.PROD_SF_INSTANCE_URL || "https://login.salesforce.com";
 const SF_ORG_ALIAS = STAGING_SF_ORG_ALIAS;
@@ -201,7 +201,6 @@ function defaultProdContactsCsvPath() {
   if (process.platform === "win32") {
     return path.join(
       os.homedir(),
-      "OneDrive - POLITICO",
       "Salesforce Pulls",
       "Duplicate Reviewer",
       "prod",
@@ -213,10 +212,6 @@ function defaultProdContactsCsvPath() {
 
   return path.join(
     os.homedir(),
-    "Library",
-    "CloudStorage",
-    "OneDrive-POLITICO",
-    "Automation Projects",
     "Salesforce Pulls",
     "Duplicate Reviewer",
     "prod",
@@ -230,7 +225,6 @@ function defaultProdAccountsCsvPath() {
   if (process.platform === "win32") {
     return path.join(
       os.homedir(),
-      "OneDrive - POLITICO",
       "Salesforce Pulls",
       "Duplicate Reviewer",
       "prod",
@@ -242,10 +236,6 @@ function defaultProdAccountsCsvPath() {
 
   return path.join(
     os.homedir(),
-    "Library",
-    "CloudStorage",
-    "OneDrive-POLITICO",
-    "Automation Projects",
     "Salesforce Pulls",
     "Duplicate Reviewer",
     "prod",
@@ -1829,7 +1819,7 @@ function canonicalSalesforceOrgAlias(value, instanceUrl = "") {
   const alias = String(value || "").trim();
   if (!alias) return "";
   if (alias.toLowerCase() !== "staging") return alias;
-  return isCanonicalStagingSandboxInstanceUrl(instanceUrl) ? "politico-staging" : alias;
+  return isCanonicalStagingSandboxInstanceUrl(instanceUrl) ? "qa-staging" : alias;
 }
 
 async function isRuntimeAligned() {

@@ -108,10 +108,11 @@ if ($labelsDryRun -notmatch [regex]::Escape($expectedLabelsSource)) {
 }
 
 Write-Host 'Checking staging routing defaults...'
-$contactsOutDir = 'C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts'
-$accountsOutDir = 'C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-accounts'
-$prodContactsOutDir = 'C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-contacts'
-$prodAccountsOutDir = 'C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-accounts'
+$canonicalRoot = if ($IsWindows -and $env:APPDATA) { $env:APPDATA } else { $HOME }
+$contactsOutDir = Join-Path $canonicalRoot 'Salesforce Pulls\Duplicate Reviewer\staging\Output\staging-contacts'
+$accountsOutDir = Join-Path $canonicalRoot 'Salesforce Pulls\Duplicate Reviewer\staging\Output\staging-accounts'
+$prodContactsOutDir = Join-Path $canonicalRoot 'Salesforce Pulls\Duplicate Reviewer\prod\Output\prod-contacts'
+$prodAccountsOutDir = Join-Path $canonicalRoot 'Salesforce Pulls\Duplicate Reviewer\prod\Output\prod-accounts'
 $env:OUT_DIR = $contactsOutDir
 $contactsDryRun = (& scripts/run-staging-contacts-bulk-query.sh --dry-run) -join "`n"
 if ($contactsDryRun -notmatch '/Salesforce Pulls/Duplicate Reviewer/staging/Output/staging-contacts') {
@@ -136,15 +137,15 @@ if ($prodContactsDryRun -notmatch '/Salesforce Pulls/Duplicate Reviewer/prod/Out
   Write-Host $prodContactsDryRun
   throw 'Prod Contacts did not resolve to the canonical Salesforce Pulls prod folder.'
 }
-if ($prodContactsDryRun -notmatch 'Org alias: politico') {
+if ($prodContactsDryRun -notmatch 'Org alias: qa') {
   Write-Host $prodContactsDryRun
   throw 'Prod Contacts did not use the canonical prod Salesforce org alias.'
 }
-if ($prodContactsDryRun -notmatch 'Instance: https://politico.my.salesforce.com') {
+if ($prodContactsDryRun -notmatch 'Instance: https://qa.my.salesforce.com') {
   Write-Host $prodContactsDryRun
   throw 'Prod Contacts did not use the canonical prod Salesforce instance URL.'
 }
-if ($prodContactsDryRun -notmatch 'SOQL file: .*/queries/report-00OVq00000CxYd3MAF.soql') {
+if ($prodContactsDryRun -notmatch 'SOQL file: .*/queries/contact-duplicate-record-items.soql') {
   Write-Host $prodContactsDryRun
   throw 'Prod Contacts did not use the canonical prod Contacts query file.'
 }
@@ -162,23 +163,23 @@ if ($prodAccountsDryRun -notmatch '/Salesforce Pulls/Duplicate Reviewer/prod/Out
   Write-Host $prodAccountsDryRun
   throw 'Prod Accounts did not resolve to the canonical Salesforce Pulls prod folder.'
 }
-if ($prodAccountsDryRun -notmatch 'Org alias: politico') {
+if ($prodAccountsDryRun -notmatch 'Org alias: qa') {
   Write-Host $prodAccountsDryRun
   throw 'Prod Accounts did not use the canonical prod Salesforce org alias.'
 }
-if ($prodAccountsDryRun -notmatch 'Instance: https://politico.my.salesforce.com') {
+if ($prodAccountsDryRun -notmatch 'Instance: https://qa.my.salesforce.com') {
   Write-Host $prodAccountsDryRun
   throw 'Prod Accounts did not use the canonical prod Salesforce instance URL.'
 }
-if ($prodAccountsDryRun -notmatch 'SOQL file: .*/queries/report-00OVZ000003Dm572AC.soql') {
+if ($prodAccountsDryRun -notmatch 'SOQL file: .*/queries/account-duplicate-record-items.soql') {
   Write-Host $prodAccountsDryRun
   throw 'Prod Accounts did not use the canonical prod Accounts query file.'
 }
-if ($prodAccountsDryRun -notmatch 'Latest JSON: C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-accounts/salesforce-report-latest.json') {
+if ($prodAccountsDryRun -notmatch 'Latest JSON: .*[\\/]Salesforce Pulls[\\/]Duplicate Reviewer[\\/]prod[\\/]Output[\\/]prod-accounts[\\/]salesforce-report-latest.json') {
   Write-Host $prodAccountsDryRun
   throw 'Prod Accounts did not preserve the canonical prod latest JSON output flow.'
 }
-if ($prodAccountsDryRun -notmatch 'Compatibility CSV: C:/Users/runneradmin/OneDrive - POLITICO/Salesforce Pulls/Duplicate Reviewer/prod/Output/prod-accounts/salesforce-report-latest.csv') {
+if ($prodAccountsDryRun -notmatch 'Compatibility CSV: .*[\\/]Salesforce Pulls[\\/]Duplicate Reviewer[\\/]prod[\\/]Output[\\/]prod-accounts[\\/]salesforce-report-latest.csv') {
   Write-Host $prodAccountsDryRun
   throw 'Prod Accounts did not preserve the canonical prod compatibility CSV output flow.'
 }

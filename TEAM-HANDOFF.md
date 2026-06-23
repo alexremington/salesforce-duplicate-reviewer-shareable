@@ -19,4 +19,4 @@ For prod Contacts review, use `scripts/run-prod-contacts-bulk-query.sh` after th
 
 For prod Accounts review, use `scripts/run-prod-accounts-bulk-query.sh` after the prod pull completes. It opens Duplicate Reviewer on the `prod-accounts` autoload route with `object=account`, `notify=1`, `sticky=1`, and `name=salesforce-report-latest.json`.
 
-For plan-to-implementation session changes, use `/Users/aremington/codex-workspace/apps/automation-shared-resources/docs/SESSION-HANDOFF.md`.
+For plan-to-implementation session changes, use the workspace automation shared resources session handoff guide.

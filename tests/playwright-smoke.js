@@ -120,12 +120,12 @@ async function run() {
       instanceUrl: "https://qa-fifth-org.example.invalid"
     },
     {
-      orgAlias: "politico-staging",
-      instanceUrl: "https://politico--staging.sandbox.my.salesforce.com"
+      orgAlias: "qa-staging",
+      instanceUrl: "https://qa-staging.example.invalid"
     },
     {
       orgAlias: "staging",
-      instanceUrl: "https://politico--staging.sandbox.my.salesforce.com"
+      instanceUrl: "https://qa-staging.example.invalid"
     }
   ];
   let context = null;
@@ -238,8 +238,8 @@ async function run() {
     if (embeddedOrgState.aliasOptions.some((option) => option.alias === "staging")) {
       throw new Error(`Expected the legacy staging alias to be hidden from the dropdown: ${JSON.stringify(embeddedOrgState.aliasOptions)}`);
     }
-    if (!embeddedOrgState.aliasOptions.some((option) => option.alias === "politico-staging")) {
-      throw new Error(`Expected the canonical politico-staging alias to appear in the dropdown: ${JSON.stringify(embeddedOrgState.aliasOptions)}`);
+    if (!embeddedOrgState.aliasOptions.some((option) => option.alias === "qa-staging")) {
+      throw new Error(`Expected the canonical qa-staging alias to appear in the dropdown: ${JSON.stringify(embeddedOrgState.aliasOptions)}`);
     }
     if (embeddedOrgState.aliasInputPresent || embeddedOrgState.instanceUrlInputPresent) {
       throw new Error(`Expected the inline alias and URL inputs to be removed: ${JSON.stringify(embeddedOrgState)}`);
@@ -1040,7 +1040,7 @@ async function run() {
 function canonicalSalesforceOrgAlias(alias, instanceUrl = "") {
   const text = String(alias || "").trim();
   if (text.toLowerCase() !== "staging") return text;
-  return String(instanceUrl || "").includes("politico--staging.sandbox.my.salesforce.com") ? "politico-staging" : text;
+  return String(instanceUrl || "").includes("qa-staging.example.invalid") ? "qa-staging" : text;
 }
 
 function isExpectedBrowserConsoleMessage(message) {
