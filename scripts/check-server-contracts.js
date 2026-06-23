@@ -10,6 +10,7 @@ const path = require("node:path");
 const { performance } = require("node:perf_hooks");
 const vm = require("node:vm");
 const { buildCodexTrainingCommand } = require("../server/codex-training");
+const { accountRecallAuditSmokeCsv } = require("../tests/fixtures/duplicate-reviewer-workflows");
 const {
   DEFAULT_BENCHMARKS,
   generateContactModelEvaluationReport
@@ -134,6 +135,7 @@ async function main() {
     await assertAccountScopeDivergenceRegression();
     await assertAccountExactWebsiteCorroborationRegression();
     await assertAccountCommentaryNormalizationRegression();
+    await assertAccountRecallAuditRegression();
     await assertContactSparseExactNameFloorRegression();
     await assertContactCompanyDifferenceVetoRegression();
     await assertContactLegacyComparisonRegression();
@@ -889,6 +891,113 @@ async function assertAccountCommentaryNormalizationRegression() {
       );
     }
   });
+}
+
+async function assertAccountRecallAuditRegression() {
+  const api = loadAppApi();
+  const csv = accountRecallAuditSmokeCsv();
+  const parsed = api.parseCsv(csv);
+  const rows = parsed.rows.map((row, index) => ({ ...row, __rowIndex: index }));
+  const headers = parsed.headers.length ? parsed.headers : api.inferHeaders(rows);
+  const mapping = api.autoMapHeaders(headers, api.OBJECT_CONFIG.account.fields);
+  const preparedRows = api.prepareRows(rows, "account", mapping);
+  api.state.objectType = "account";
+  api.state.rows = rows;
+  api.state.headers = headers;
+  api.state.mapping = mapping;
+
+  const fieldStats = api.buildFieldStats(preparedRows, "account");
+  const result = await api.buildGroupsAsync(rows, "account", mapping, 86, true, async () => {}, 86, true);
+  const audit = buildAccountRecallAudit({
+    api,
+    preparedRows,
+    fieldStats,
+    result,
+    threshold: 86,
+    recordIdHeader: mapping.recordId
+  });
+
+  console.log(
+    `Account recall audit: rowsWithCandidates=${audit.rowsWithCandidatePairs}, candidatePairs=${audit.candidatePairs}, scoredPairs=${audit.scoredPairs}, retainedPairs=${audit.retainedPairs}, groups=${audit.resultGroups}, stages=${JSON.stringify(audit.stageCounts)}`
+  );
+
+  if (
+    audit.rowsWithCandidatePairs !== 8 ||
+    audit.candidatePairs < 4 ||
+    audit.scoredPairs < 4 ||
+    audit.resultGroups !== 4 ||
+    !audit.pairs.some((pair) => pair.grouped && pair.label.includes("The Walt Disney Company")) ||
+    !audit.pairs.some((pair) => pair.grouped && pair.label.includes("The Walt Disney Company EMEA"))
+  ) {
+    throw new Error(`Account recall audit regression failed: ${JSON.stringify(audit, null, 2)}`);
+  }
+}
+
+function buildAccountRecallAudit({ api, preparedRows, fieldStats, result, threshold, recordIdHeader }) {
+  const candidatePairsByKey = new Map((result.matchingArtifacts?.pairScores || []).map((pair) => [pair.key, pair]));
+  const groupRecordIdSets = (result.groups || []).map((group) => new Set(group.records.map((record) => api.getValue(record, recordIdHeader) || `row-${record.__rowIndex + 1}`)));
+  const allPairs = [];
+  const groupedPairKeys = new Set();
+  const retainedPairs = (result.matchingArtifacts?.pairScores || []).filter((pair) => pair.value >= threshold).length;
+
+  for (let leftIndex = 0; leftIndex < preparedRows.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < preparedRows.length; rightIndex += 1) {
+      const left = preparedRows[leftIndex];
+      const right = preparedRows[rightIndex];
+      const pairKey = `${leftIndex}|${rightIndex}`;
+      const score = api.scoreAccountPair(left, right, fieldStats);
+      const candidate = candidatePairsByKey.has(pairKey);
+      const leftRecordId = api.getValue(left.row, recordIdHeader) || `row-${left.row.__rowIndex + 1}`;
+      const rightRecordId = api.getValue(right.row, recordIdHeader) || `row-${right.row.__rowIndex + 1}`;
+      const grouped = groupRecordIdSets.some((recordIds) => recordIds.has(leftRecordId) && recordIds.has(rightRecordId));
+      const stage = !candidate
+        ? "candidate-pruned"
+        : score.value < threshold
+          ? "scoring-pruned"
+          : grouped
+            ? "grouped"
+            : "group-pruned";
+      const pruningReason = !candidate
+        ? "candidate bucket pruning"
+        : score.value < threshold
+          ? (score.reasons || []).join("; ") || "score below threshold"
+          : grouped
+            ? "surfaced"
+            : "group score below threshold";
+      if (grouped) groupedPairKeys.add(pairKey);
+      allPairs.push({
+        key: pairKey,
+        label: `${left.row.Name || leftRecordId} <> ${right.row.Name || rightRecordId}`,
+        score: Math.round(score.value),
+        stage,
+        pruningReason,
+        grouped
+      });
+    }
+  }
+
+  const rowsWithCandidatePairs = new Set();
+  candidatePairsByKey.forEach((pair) => {
+    rowsWithCandidatePairs.add(pair.leftIndex);
+    rowsWithCandidatePairs.add(pair.rightIndex);
+  });
+
+  const stageCounts = allPairs.reduce((counts, pair) => {
+    counts[pair.stage] = (counts[pair.stage] || 0) + 1;
+    return counts;
+  }, {});
+
+  return {
+    rowCount: preparedRows.length,
+    rowsWithCandidatePairs: rowsWithCandidatePairs.size,
+    candidatePairs: candidatePairsByKey.size,
+    scoredPairs: candidatePairsByKey.size,
+    retainedPairs,
+    resultGroups: result.groups.length,
+    groupedPairCount: groupedPairKeys.size,
+    stageCounts,
+    pairs: allPairs
+  };
 }
 
 async function assertContactSparseExactNameFloorRegression() {

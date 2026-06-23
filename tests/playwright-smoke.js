@@ -14,6 +14,7 @@ const {
   accountCommentaryNormalizationSmokeCsv,
   accountSmokeCsv,
   accountCompanyNormalizationSmokeCsv,
+  accountRecallAuditSmokeCsv,
   contactDifferentCompanyConflictSmokeCsv,
   contactLastNameChangeSmokeCsv,
   contactMirrorRelationshipSmokeCsv,
@@ -64,6 +65,7 @@ async function run() {
   const accountCsvPath = path.join(outDir, "accounts-smoke.csv");
   const accountCompanyNormalizationCsvPath = path.join(outDir, "accounts-company-normalization.csv");
   const accountCommentaryNormalizationCsvPath = path.join(outDir, "accounts-commentary-normalization.csv");
+  const accountRecallAuditCsvPath = path.join(outDir, "accounts-recall-audit.csv");
   const largeContactCsvPath = path.join(outDir, "contacts-large-smoke.csv");
   const largeContactJsonPath = path.join(outDir, "contacts-large-smoke.json");
   const datasetExportPath = path.join(outDir, "dataset-export.csv");
@@ -83,6 +85,7 @@ async function run() {
   await fs.writeFile(accountCsvPath, accountSmokeCsv());
   await fs.writeFile(accountCompanyNormalizationCsvPath, accountCompanyNormalizationSmokeCsv());
   await fs.writeFile(accountCommentaryNormalizationCsvPath, accountCommentaryNormalizationSmokeCsv());
+  await fs.writeFile(accountRecallAuditCsvPath, accountRecallAuditSmokeCsv());
   await fs.writeFile(largeContactCsvPath, largeContactCsv);
   await fs.writeFile(largeContactJsonPath, largeContactJson);
 
@@ -146,6 +149,7 @@ async function run() {
     const pairRegressionState = await assertPairRegressionGroups(browser, pairRegressionJsonPath);
     const accountCompanyNormalizationState = await assertAccountCompanyNormalizationSeparated(browser, accountCompanyNormalizationCsvPath);
     const accountCommentaryNormalizationState = await assertAccountCompanyNormalizationSeparated(browser, accountCommentaryNormalizationCsvPath);
+    const accountRecallAuditState = await assertAccountRecallAuditSeparated(browser, accountRecallAuditCsvPath);
     const staleRuntimeDatasetExportState = await assertStaleRuntimeBlocksDatasetExport(browser, accountCommentaryNormalizationCsvPath);
     await assertMirrorRelationshipSeparated(browser, mirrorRelationshipCsvPath);
     const largeContactPerformance = await assertLargeContactCsvPerformance(browser, largeContactCsvPath);
@@ -621,6 +625,17 @@ async function run() {
     ) {
       throw new Error(
         `Expected the account commentary normalization fixture to strip internal commentary and keep exact-name plus exact-phone evidence: ${JSON.stringify(accountCommentaryNormalizationState)}`
+      );
+    }
+    if (
+      accountRecallAuditState.rowCount !== 8 ||
+      accountRecallAuditState.groupCount !== 4 ||
+      accountRecallAuditState.matchingStats?.resultGroups !== 4 ||
+      !accountRecallAuditState.groupNames.some((name) => name.includes("The Walt Disney Company")) ||
+      !accountRecallAuditState.groupNames.some((name) => name.includes("The Walt Disney Company EMEA"))
+    ) {
+      throw new Error(
+        `Expected the broader account recall audit fixture to keep the Disney exemplars and the other alias/commentary groups surfaced: ${JSON.stringify(accountRecallAuditState)}`
       );
     }
     if (
@@ -1127,6 +1142,34 @@ async function assertAccountCompanyNormalizationSeparated(browser, filePath) {
   }
 }
 
+async function assertAccountRecallAuditSeparated(browser, filePath) {
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const diagnostics = [];
+  page.on("console", (message) => {
+    if (["error", "warning"].includes(message.type())) {
+      diagnostics.push(`${message.type()}: ${message.text()}`);
+    }
+  });
+  page.on("pageerror", (error) => diagnostics.push(`pageerror: ${error.message}`));
+  try {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await importAccountsThroughMenu(page, filePath);
+    await waitForLoadingModalHidden(page, "Account recall audit load", diagnostics);
+    await waitForFirstGroup(page, "Account recall audit load");
+    const loadState = await datasetLoadState(page);
+    const groupNames = await page.evaluate(() => state.groups.map((group) => group.records.map((record) => record.Name).join(" | ")));
+    const matchingStats = await page.evaluate(() => state.lastMatchingStats || null);
+
+    return {
+      ...loadState,
+      groupNames,
+      matchingStats
+    };
+  } finally {
+    await page.close();
+  }
+}
+
 async function assertDifferentCompanyConflictSeparated(browser, filePath) {
   const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
   const diagnostics = [];
@@ -1410,6 +1453,22 @@ async function importContactsThroughMenu(page, filePath) {
   const fileChooser = await fileChooserPromise;
   await fileChooser.setFiles(filePath);
   await waitForLoadingModalHidden(page, "Topbar Import Contacts load");
+  return {
+    fileChooserOpened: true,
+    elapsedMs: Date.now() - startedAt,
+    ...(await datasetLoadState(page))
+  };
+}
+
+async function importAccountsThroughMenu(page, filePath) {
+  await page.locator("#chooseCsvButton").click();
+  await page.getByRole("menuitem", { name: "Accounts" }).waitFor({ state: "visible", timeout: 5000 });
+  const startedAt = Date.now();
+  const fileChooserPromise = page.waitForEvent("filechooser", { timeout: 5000 });
+  await page.getByRole("menuitem", { name: "Accounts" }).click();
+  const fileChooser = await fileChooserPromise;
+  await fileChooser.setFiles(filePath);
+  await waitForLoadingModalHidden(page, "Topbar Import Accounts load");
   return {
     fileChooserOpened: true,
     elapsedMs: Date.now() - startedAt,

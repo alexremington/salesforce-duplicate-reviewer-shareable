@@ -359,6 +359,128 @@ function accountCommentaryNormalizationSmokeCsv() {
   ]);
 }
 
+function accountRecallAuditSmokeCsv() {
+  return csvRows([
+    [
+      "Id",
+      "Name",
+      "Website",
+      "Phone",
+      "Billing Street",
+      "Billing City",
+      "Billing State",
+      "Billing Postal Code",
+      "Billing Country",
+      "CurrencyIsoCode",
+      "Ultimate_Parent_Account__c"
+    ],
+    [
+      "001R00000000001",
+      "The Ohio State University",
+      "osu.edu",
+      "(614) 292-0000",
+      "",
+      "",
+      "",
+      "",
+      "United States",
+      "USD",
+      "The Ohio State University"
+    ],
+    [
+      "001R00000000002",
+      "OSU",
+      "osu.edu",
+      "(614) 292-0000",
+      "",
+      "",
+      "",
+      "",
+      "United States",
+      "USD",
+      "The Ohio State University"
+    ],
+    [
+      "001R00000000003",
+      "GPlus Europe Ltd (t/a Portland)",
+      "",
+      "(415) 555-2200",
+      "",
+      "",
+      "",
+      "",
+      "United States",
+      "USD",
+      ""
+    ],
+    [
+      "001R00000000004",
+      "GPlus Europe Ltd",
+      "",
+      "(415) 555-2200",
+      "",
+      "",
+      "",
+      "",
+      "United States",
+      "USD",
+      ""
+    ],
+    [
+      "001R00000000005",
+      "The Walt Disney Company",
+      "thewaltdisneycompany.com",
+      "(818) 560-1000",
+      "500 S Buena Vista St",
+      "Burbank",
+      "California",
+      "91505",
+      "United States",
+      "USD",
+      "The Walt Disney Company"
+    ],
+    [
+      "001R00000000006",
+      "DO-NOT-USE-The Walt Disney Company",
+      "thewaltdisneycompany.com",
+      "(818) 560-1000",
+      "500 S Buena Vista St",
+      "Burbank",
+      "California",
+      "91505",
+      "United States",
+      "USD",
+      "DO-NOT-USE-The Walt Disney Company"
+    ],
+    [
+      "001R00000000007",
+      "The Walt Disney Company EMEA",
+      "thewaltdisneycompany.eu",
+      "+44 20 7612 9612",
+      "500 South Buena Vista Street",
+      "Burbank",
+      "California",
+      "91521",
+      "United States",
+      "EUR",
+      "The Walt Disney Company EMEA"
+    ],
+    [
+      "001R00000000008",
+      "DO-NOT-USE-The Walt Disney Company EMEA",
+      "thewaltdisneycompany.eu",
+      "+44 20 7612 9612",
+      "500 South Buena Vista Street",
+      "Burbank",
+      "California",
+      "91521",
+      "United States",
+      "EUR",
+      "DO-NOT-USE-The Walt Disney Company EMEA"
+    ]
+  ]);
+}
+
 function largeContactSmokeCsv(groupCount = 300) {
   const rows = [["Id", "First Name", "Last Name", "Company", "Email", "Lead Source", "Created Date", "Phone", "Mobile"]];
   for (let index = 1; index <= groupCount; index += 1) {
@@ -423,6 +545,7 @@ function csvCell(value) {
 module.exports = {
   accountSmokeCsv,
   accountCommentaryNormalizationSmokeCsv,
+  accountRecallAuditSmokeCsv,
   accountCompanyNormalizationSmokeCsv,
   contactLastNameChangeSmokeCsv,
   contactDifferentCompanyConflictSmokeCsv,
