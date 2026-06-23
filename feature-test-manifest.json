@@ -487,63 +487,6 @@
       "updatedAt": "2026-06-12T00:00:00Z"
     },
     {
-      "id": "salesforce-staging-alias-canonicalization",
-      "title": "Salesforce Staging Alias Canonicalization",
-      "app": "salesforce-duplicate-reviewer",
-      "status": "complete",
-      "visibleUi": true,
-      "brief": "docs/features/salesforce-staging-alias-canonicalization.md",
-      "requirements": [
-        "Treat politico-staging as the canonical alias for the staging sandbox.",
-        "Collapse any legacy staging org references onto politico-staging before the selector renders.",
-        "Keep the existing instance URL, org ID, and username attached to the canonical profile.",
-        "Normalize persisted preferences, imported job metadata, and source-derived metadata to the canonical alias.",
-        "Keep the dropdown alias-only and preserve the read-only instance URL display."
-      ],
-      "acceptanceCriteria": [
-        "The org catalog returns one staging entry labeled politico-staging instead of a separate legacy staging option.",
-        "The org selector never renders staging as a distinct dropdown choice.",
-        "Existing saved or imported staging references are rewritten to politico-staging when loaded by the app.",
-        "The active staging sandbox still resolves to the same instance URL and auth target.",
-        "The mismatch warning and apply flow continue to work after canonicalization."
-      ],
-      "fixtures": [
-        "A loaded dataset or saved preference that still contains a legacy staging alias.",
-        "A shared org catalog entry for the same sandbox using the canonical politico-staging alias."
-      ],
-      "tests": [
-        {
-          "name": "Fast checks",
-          "command": "npm run check",
-          "status": "passed",
-          "evidence": "npm run check passed on 2026-06-12."
-        },
-        {
-          "name": "Cross-platform check",
-          "command": "npm run check:windows",
-          "status": "passed",
-          "evidence": "npm run check:windows passed on 2026-06-12."
-        },
-        {
-          "name": "Targeted Playwright smoke",
-          "command": "npm run smoke:ui:local",
-          "status": "passed",
-          "evidence": "npm run smoke:ui:local passed on 2026-06-12."
-        }
-      ],
-      "crossPlatform": {
-        "mac": "passed",
-        "windows": "passed"
-      },
-      "risks": [],
-      "humeDesign": {
-        "reviewed": true,
-        "notes": "This change reuses the existing selector design; no new UI direction was introduced."
-      },
-      "createdAt": "2026-06-12T19:15:35Z",
-      "updatedAt": "2026-06-12T19:15:35Z"
-    },
-    {
       "id": "workspace-export-restore",
       "title": "Workspace Export and Restore",
       "app": "salesforce-duplicate-reviewer",
