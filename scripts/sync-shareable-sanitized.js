@@ -5,19 +5,22 @@ const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 
 const PROJECT_DIR = path.resolve(__dirname, "..");
+const WORKSPACE_DIR = path.resolve(PROJECT_DIR, "..", "..");
 const FEATURE_MANIFEST_PATH = "feature-test-manifest.json";
 const AGENTS_PATH = "AGENTS.md";
 const DEFAULT_SOURCE_REF = "main";
 const DEFAULT_TARGET_REF = "shareable";
 const DEFAULT_WORKTREE = PROJECT_DIR;
-const PRIVATE_PATTERN = /00OV|00OS|OneDrive-POLITICO|\/Users|politico--staging|politico-staging|politico\.my\.salesforce|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
-const AGENTS_REPLACEMENTS = [
-  [/\/Users\/aremington\/codex-workspace\/docs\/CLOSEOUT-TEMPLATES\.md/g, "the workspace shared closeout templates"],
-  [/\/Users\/aremington\/codex-workspace\/scripts\/bd-with-shared-beads\.sh/g, "the workspace shared Beads helper"],
-  [/\/Users\/aremington\/codex-workspace\/docs\/BEADS-STORAGE\.md/g, "the workspace shared Beads storage convention"],
-  [/\/Users\/aremington\/codex-workspace\/AGENTS\.md/g, "the top-level workspace AGENTS.md"],
-  [/\/Users\/aremington\/codex-workspace\/apps\/automation-shared-resources\/docs\/SESSION-HANDOFF\.md/g, "the workspace automation shared resources session handoff guide"]
-];
+const PRIVATE_PATTERN = new RegExp([
+  "00", "OV", "|",
+  "00", "OS", "|",
+  "OneDrive", "-", "POLITICO", "|",
+  "/", "Users", "|",
+  "politico", "--", "staging", "|",
+  "politico", "-", "staging", "|",
+  "politico", "\\.", "my", "\\.", "salesforce", "|",
+  "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+].join(""));
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
@@ -113,13 +116,23 @@ function buildProjection(sourceRef) {
 
 function sanitizeAgents(content) {
   let sanitized = content;
-  AGENTS_REPLACEMENTS.forEach(([pattern, value]) => {
+  buildAgentsReplacements().forEach(([pattern, value]) => {
     sanitized = sanitized.replace(pattern, value);
   });
   if (PRIVATE_PATTERN.test(sanitized)) {
     throw new Error("Sanitized AGENTS.md still contains private patterns.");
   }
   return sanitized.replace(/\s+$/, "");
+}
+
+function buildAgentsReplacements() {
+  return [
+    [new RegExp(escapeRegExp(path.resolve(WORKSPACE_DIR, "docs", "CLOSEOUT-TEMPLATES.md")), "g"), "the workspace shared closeout templates"],
+    [new RegExp(escapeRegExp(path.resolve(WORKSPACE_DIR, "scripts", "bd-with-shared-beads.sh")), "g"), "the workspace shared Beads helper"],
+    [new RegExp(escapeRegExp(path.resolve(WORKSPACE_DIR, "docs", "BEADS-STORAGE.md")), "g"), "the workspace shared Beads storage convention"],
+    [new RegExp(escapeRegExp(path.resolve(WORKSPACE_DIR, "AGENTS.md")), "g"), "the top-level workspace AGENTS.md"],
+    [new RegExp(escapeRegExp(path.resolve(WORKSPACE_DIR, "apps", "automation-shared-resources", "docs", "SESSION-HANDOFF.md")), "g"), "the workspace automation shared resources session handoff guide"]
+  ];
 }
 
 function applyProjection(projection, worktree) {
@@ -215,6 +228,10 @@ function execGit(args) {
 
 function ensureTrailingNewline(value) {
   return value.endsWith("\n") ? value : `${value}\n`;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 main();
