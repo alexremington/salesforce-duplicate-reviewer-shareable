@@ -231,8 +231,8 @@ if ($startServer -notmatch 'PROD_CONTACTS_CSV') {
   throw 'Reviewer launcher did not pass the canonical prod Contacts CSV path to the server.'
 }
 $bulkQueryWrapper = Get-Content scripts/run-salesforce-bulk-query.sh -Raw
-if ($bulkQueryWrapper -notmatch 'sf org display') {
-  throw 'Bulk query wrapper did not use sf org display.'
+if ($bulkQueryWrapper -notmatch 'sf org auth show-access-token') {
+  throw 'Bulk query wrapper did not use sf org auth show-access-token.'
 }
 $env:OUT_DIR = $accountsOutDir
 $accountsDryRun = (& scripts/run-staging-accounts-bulk-query.sh --dry-run) -join "`n"
