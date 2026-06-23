@@ -5,6 +5,7 @@ const path = require("node:path");
 
 const PROJECT_DIR = path.resolve(process.env.CLOSEOUT_PROJECT_DIR || path.join(__dirname, ".."));
 const SKIP_RELEASE_VERIFY = process.env.CLOSEOUT_SKIP_RELEASE_VERIFY === "1";
+const RELEASE_VERIFY_STEPS = ["sync:shared", "check", "check:features", "check:windows", "smoke:ui:local", "check:shareable"];
 const BEADS_PATH_PATTERN = /\.beads(?:[\\/]|$)|\.beads-credential-key$/;
 
 if (require.main === module) {
@@ -16,7 +17,7 @@ if (require.main === module) {
 
 async function main() {
   if (!SKIP_RELEASE_VERIFY) {
-    runChecked("npm", ["run", "verify:release"], PROJECT_DIR);
+    verifyRelease(PROJECT_DIR);
   }
 
   const status = getGitStatus(PROJECT_DIR);
@@ -53,6 +54,23 @@ async function main() {
   }
 }
 
+function verifyRelease(cwd) {
+  const result = runCommand("npm", ["run", "verify:release"], cwd, { captureOutput: true });
+  if (result.status === 0) {
+    return;
+  }
+
+  const output = `${result.stdout || ""}\n${result.stderr || ""}`.trim();
+  if (!output.includes("Managed app not found:")) {
+    throw new Error(output || "npm run verify:release failed");
+  }
+
+  console.log("Release pipeline could not discover this worktree; running the equivalent local release steps instead.");
+  for (const scriptName of RELEASE_VERIFY_STEPS) {
+    runChecked("npm", ["run", scriptName], cwd);
+  }
+}
+
 function getGitStatus(cwd) {
   const result = childProcess.spawnSync(
     "git",
@@ -75,18 +93,35 @@ function getGitStatus(cwd) {
 }
 
 function runChecked(command, args, cwd) {
+  const result = runCommand(command, args, cwd);
+
+  if (result.status !== 0) {
+    process.exit(result.status || 1);
+  }
+}
+
+function runCommand(command, args, cwd, options = {}) {
   const result = childProcess.spawnSync(command, args, {
     cwd,
-    stdio: "inherit",
-    shell: process.platform === "win32"
+    encoding: "utf8",
+    shell: process.platform === "win32",
+    stdio: options.captureOutput ? ["ignore", "pipe", "pipe"] : "inherit"
   });
 
   if (result.error) {
     throw result.error;
   }
-  if (result.status !== 0) {
-    process.exit(result.status || 1);
+
+  if (options.captureOutput) {
+    if (result.stdout) {
+      process.stdout.write(result.stdout);
+    }
+    if (result.stderr) {
+      process.stderr.write(result.stderr);
+    }
   }
+
+  return result;
 }
 
 function isBeadsPathStatus(line) {
