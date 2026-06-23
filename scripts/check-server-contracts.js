@@ -569,6 +569,10 @@ async function assertTrimmedContactExportSchemaRegression() {
     "  ZI_Person_LinkedIn_URL__c",
     "FROM Contact"
   ].join("\n");
+  const approvedDuplicateItemQuery = [
+    "SELECT DuplicateRecordSetId, RecordId",
+    "FROM DuplicateRecordItem"
+  ].join("\n");
   const contactQueryExpectations = new Map([
     [
       path.join(PROJECT_DIR, "queries", "contacts.soql.example"),
@@ -602,7 +606,7 @@ async function assertTrimmedContactExportSchemaRegression() {
     ],
     [
       path.join(PROJECT_DIR, "queries", "contact-duplicate-record-items.soql.example"),
-      approvedContactQuery
+      approvedDuplicateItemQuery
     ]
   ]);
   const accountQueryPath = path.join(PROJECT_DIR, "queries", "account-duplicate-record-items.soql");
